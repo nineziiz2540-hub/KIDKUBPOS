@@ -5,25 +5,58 @@ import {
   Package,
   BarChart3,
   Settings,
+  type LucideIcon,
 } from "lucide-react";
+import { LogoutButton } from "./logout-button";
+import { getProfile, type Role } from "@/lib/dal";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/orders", label: "Orders", icon: ShoppingCart },
-  { href: "/products", label: "Products", icon: Package },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
-] as const;
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  minRole: Role;
+};
 
-export function Sidebar() {
+const allNavItems: NavItem[] = [
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, minRole: "staff" },
+  { href: "/orders", label: "Orders", icon: ShoppingCart, minRole: "staff" },
+  { href: "/products", label: "Products", icon: Package, minRole: "staff" },
+  { href: "/reports", label: "Reports", icon: BarChart3, minRole: "manager" },
+  { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
+];
+
+function getRoleLevel(role: Role): number {
+  switch (role) {
+    case "owner":
+      return 3;
+    case "manager":
+      return 2;
+    case "staff":
+      return 1;
+  }
+}
+
+function canAccess(userRole: Role, minRole: Role): boolean {
+  return getRoleLevel(userRole) >= getRoleLevel(minRole);
+}
+
+export async function Sidebar() {
+  const profile = await getProfile();
+  const role = (profile?.role ?? "staff") as Role;
+  const visibleItems = allNavItems.filter((item) =>
+    canAccess(role, item.minRole)
+  );
+
   return (
     <aside className="hidden md:flex flex-col w-16 lg:w-56 h-full shrink-0 bg-sidebar border-r border-white/10">
       <div className="flex items-center justify-center lg:justify-start h-14 px-4 border-b border-white/10 shrink-0">
-        <span className="text-accent font-bold text-xl hidden lg:inline">KIDKUBPOS</span>
+        <span className="text-accent font-bold text-xl hidden lg:inline">
+          KIDKUBPOS
+        </span>
         <span className="text-accent font-bold text-lg lg:hidden">K</span>
       </div>
       <nav className="flex-1 py-4 flex flex-col gap-1 px-2 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => (
+        {visibleItems.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -34,6 +67,15 @@ export function Sidebar() {
           </Link>
         ))}
       </nav>
+      <div className="border-t border-white/10 px-2 py-3">
+        <div className="hidden lg:block px-2 pb-2">
+          <p className="text-xs text-white/50 truncate">
+            {profile?.full_name ?? "—"}
+          </p>
+          <p className="text-xs text-accent font-medium capitalize">{role}</p>
+        </div>
+        <LogoutButton />
+      </div>
     </aside>
   );
 }

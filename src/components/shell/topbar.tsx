@@ -1,4 +1,5 @@
 import { Menu } from "lucide-react";
+import { LogoutButton } from "./logout-button";
 
 export function Topbar() {
   return (
@@ -10,7 +11,8 @@ export function Topbar() {
       >
         <Menu size={22} />
       </button>
-      <span className="text-accent font-bold text-lg">KIDKUBPOS</span>
+      <span className="text-accent font-bold text-lg flex-1">KIDKUBPOS</span>
+      <LogoutButton />
     </header>
   );
 }
