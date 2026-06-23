@@ -1,0 +1,24 @@
+{
+  "name": "KIDKUBPOS",
+  "short_name": "KIDKUBPOS",
+  "description": "Multi-tenant POS Ecosystem for modern retail businesses",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#eef3fc",
+  "theme_color": "#0c1a3d",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
