@@ -101,7 +101,7 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
       </div>
 
       {state?.error !== undefined && (
-        <p className="text-sm font-medium text-danger">{state.error}</p>
+        <p className="text-sm font-medium text-destructive">{state.error}</p>
       )}
 
       <div className="flex gap-2">
