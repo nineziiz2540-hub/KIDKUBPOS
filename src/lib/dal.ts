@@ -137,3 +137,20 @@ export async function getTopProducts(
     .sort((a, b) => b.total_qty - a.total_qty)
     .slice(0, limit);
 }
+
+export type TeamMember = {
+  id: string;
+  full_name: string | null;
+  role: Role;
+  created_at: string;
+};
+
+export async function getTeamMembers(tenantId: string): Promise<TeamMember[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+  return (data ?? []) as TeamMember[];
+}
