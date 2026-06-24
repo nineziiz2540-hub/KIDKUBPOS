@@ -26,11 +26,11 @@ export async function proxy(request: NextRequest) {
   );
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isAuthed = session !== null;
+  const isAuthed = user !== null;
   const isLoginPage = pathname === "/login";
 
   if (!isAuthed && !isLoginPage) {

@@ -95,7 +95,8 @@ export async function updateProduct(
           : null,
       is_active: isActive,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id);
 
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
@@ -110,6 +111,10 @@ export async function deleteProduct(formData: FormData): Promise<void> {
   if (typeof id !== "string") return;
 
   const supabase = await createClient();
-  await supabase.from("products").delete().eq("id", id);
+  await supabase
+    .from("products")
+    .delete()
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id);
   redirect("/products");
 }

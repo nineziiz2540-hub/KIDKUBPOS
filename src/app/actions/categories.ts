@@ -56,7 +56,8 @@ export async function updateCategory(
   const { error } = await supabase
     .from("categories")
     .update({ name: name.trim() })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id);
 
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
@@ -71,6 +72,10 @@ export async function deleteCategory(formData: FormData): Promise<void> {
   if (typeof id !== "string") return;
 
   const supabase = await createClient();
-  await supabase.from("categories").delete().eq("id", id);
+  await supabase
+    .from("categories")
+    .delete()
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id);
   redirect("/categories");
 }
