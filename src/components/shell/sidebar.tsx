@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Package,
+  Tag,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -21,6 +22,7 @@ const allNavItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, minRole: "staff" },
   { href: "/orders", label: "Orders", icon: ShoppingCart, minRole: "staff" },
   { href: "/products", label: "Products", icon: Package, minRole: "staff" },
+  { href: "/categories", label: "Categories", icon: Tag, minRole: "manager" },
   { href: "/reports", label: "Reports", icon: BarChart3, minRole: "manager" },
   { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
 ];
