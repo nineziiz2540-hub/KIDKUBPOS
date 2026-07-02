@@ -1,0 +1,57 @@
+# CLAUDE.md - KIDKUBPOS Project Architecture & Specification
+
+## 1. Project Overview & Business Vision
+**KIDKUBPOS** คือระบบจัดการร้านค้าอัจฉริยะ (Multi-tenant POS Ecosystem) ที่ยึดถือปรัชญา **Value-Driven และ Problem-Solver** อย่างเด็ดขาด ตัวระบบถูกออกแบบมาเพื่อรองรับธุรกิจที่มีความหลากหลายและต้องการความเร็วสูง (เช่น คาเฟ่ช่วงสุดสัปดาห์ หรือร้านสตรีทฟู้ดที่มีเวลาขายจำกัดและเร่งด่วนในช่วงเช้า 05:30 - 07:30 น.) โครงสร้างต้องสเกลได้ระดับ 100–200 ร้านค้า พร้อมมุ่งเน้นการลดความหน่วง ประหยัดเวลา และป้องกันข้อมูลผิดพลาดให้ได้ 100%
+
+---
+
+## 2. Technical Stack & Architecture
+- **Frontend Framework:** Next.js (React) + TypeScript (Strict Mode)
+- **Styling & UI Library:** Tailwind CSS + Shadcn UI
+- **Database & Backend:** Supabase (PostgreSQL) พร้อมบังคับใช้ Row Level Security (RLS)
+- **Offline Storage:** IndexedDB (Local Cache) + Service Workers (Next-PWA)
+- **Hosting & Deployment:** Vercel (CI/CD ผ่าน GitHub)
+
+---
+
+## 3. Brand Guidelines & UI Theme (Vibe Coding Reference)
+เมื่อต้องออกแบบหรือเขียนโค้ด UI (Frontend) ให้ยึดชุดสีหลักของแบรนด์ชุดนี้ในการตั้งค่า `tailwind.config.ts` และห้ามใช้สีอื่นที่หลุดจากกรอบนี้:
+- **Accent Color (สีเน้น/ปุ่มหลัก):** `#ff6b35` (ส้ม) - ใช้สำหรับ Call to Action, ปุ่มชำระเงิน, หรือจุดที่ต้องการดึงดูดสายตา
+- **Sidebar & Navigation:** `#0c1a3d` (กรมท่าเข้ม) - ใช้เป็นสีพื้นหลังของแถบเมนูด้านข้าง หรือ Header หลัก
+- **Page Background:** `#eef3fc` (ฟ้าอ่อนมาก) - ใช้เป็นสีพื้นหลังของแอปพลิเคชัน เพื่อให้สบายตาและตัดกับ Sidebar อย่างชัดเจน
+- **Status Colors (สีสถานะการทำงาน):**
+  - **Success / Completed:** `#00b87a` (เขียว) - ใช้กับสถานะสำเร็จ, จ่ายเงินแล้ว
+  - **Danger / Error / Cancelled:** `#f43f5e` (แดง) - ใช้กับสถานะยกเลิก, แจ้งเตือนข้อผิดพลาด, ลบข้อมูล
+  - **Info / Active:** `#2563eb` (ฟ้า) - ใช้แสดงสถานะข้อมูลทั่วไป, กำลังเลือก
+  - **Warning / Pending:** `#f59e0b` (เหลือง) - ใช้กับสถานะรอคิว, รอดำเนินการ, วัตถุดิบใกล้หมด
+
+---
+
+## 4. Core Development Skills (Superpowers Plugin)
+เอเจนต์ผู้พัฒนาต้องใช้งานคำสั่งเหล่านี้เป็นแกนหลัก:
+- `/brainstorming`: วิเคราะห์ Requirement จากรูปภาพ Reference หรือคำสั่งให้แตกฉานก่อนเขียนโค้ด
+- `/writing-plans`: ซอยงานออกเป็นชิ้นเล็ก ระบุไฟล์ที่จะแก้ให้ชัดเจน
+- `/test-driven-development`: เขียน Unit Test สำหรับตรรกะที่ซับซ้อนให้พังก่อน แล้วแก้ให้ผ่าน
+- `/systematic-debugging`: ดีบั๊กอย่างเป็นระบบ ไม่เดาโค้ดสุ่มสี่สุ่มห้า
+
+---
+
+## 5. Deep Domain Business Logic
+
+### 5.1. Omni-device Responsive Design
+- **กฎเหล็ก:** หน้าจอต้องเป็นแบบ Fluid Responsive Layout ตอบสนองสมบูรณ์แบบบน Notebook, iPad/Tablet, และ Mobile
+- **Touch-First:** ปุ่มในโหมด Mobile ต้องมีขนาดพื้นที่กด (Hit Target) ใหญ่พอ (44x44px ขึ้นไป) เพื่อให้จิ้มรับออเดอร์ด้วยมือถือเครื่องเดียวได้ไวและไม่พลาดเป้า
+
+### 5.2. Offline-First & Local Cache
+- **กฎเหล็ก:** ระบบต้องทนทานต่อสภาพแวดล้อมที่สัญญาณอินเทอร์เน็ตไม่เสถียร 
+- **Offline Queues:** แคชข้อมูลสินค้าด้วย IndexedDB เมื่อเน็ตหลุด ระบบต้องรับออเดอร์เข้าคิวแบบ Offline ได้ปกติ 
+- **Background Sync:** เมื่อออนไลน์กลับมา ต้องทยอยส่งข้อมูลในคิวไปอัปเดตที่ Supabase ตามลำดับเวลาอย่างราบรื่น
+
+### 5.3. Multi-tenant Isolation
+- **กฎเหล็ก:** ทุกตารางข้อมูลต้องมี `tenant_id` และป้องกันการเข้าถึงข้อมูลข้ามร้านด้วย Supabase RLS อย่างเคร่งครัด
+
+### 5.4. High-Concurrency Stock
+- **กฎเหล็ก:** การตัดสต็อกต้องคำนวณลึกถึงระดับ "สูตรวัตถุดิบ" แบบเรียลไทม์ ใช้ Database Transactions ป้องกันสต็อกรวน ออเดอร์เบิ้ล หรือการชนกันของข้อมูลช่วงเวลาเร่งด่วนที่มีการกดสั่งซื้อรัวๆ
+
+### 5.5. AI Readiness & Webhooks
+- **กฎเหล็ก:** โครงสร้างข้อมูลรายได้และรายจ่ายต้องเป็น JSON ที่เป็นระเบียบ พร้อมให้ AI Agent ดึงไปสรุปผล และมีระบบ Webhook ส่งแจ้งเตือนเมื่อวัตถุดิบถึงจุดที่ต้องสั่งเพิ่ม
