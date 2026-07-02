@@ -163,8 +163,16 @@ export async function updateProductRecipes(
     });
   }
 
-  if (recipes.length > 0) {
-    await supabase.from("product_recipes").insert(recipes);
+  // Deduplicate by raw_material_id — last occurrence wins
+  const deduped = Array.from(
+    new Map(recipes.map((r) => [r.raw_material_id, r])).values()
+  );
+
+  if (deduped.length > 0) {
+    const { error: insertError } = await supabase
+      .from("product_recipes")
+      .insert(deduped);
+    if (insertError) return;
   }
 
   revalidatePath(`/products/${productId}/edit`);
@@ -204,8 +212,16 @@ export async function updateProductModifiers(
     });
   }
 
-  if (links.length > 0) {
-    await supabase.from("product_modifiers").insert(links);
+  // Deduplicate by modifier_id — last occurrence wins
+  const deduped = Array.from(
+    new Map(links.map((l) => [l.modifier_id, l])).values()
+  );
+
+  if (deduped.length > 0) {
+    const { error: insertError } = await supabase
+      .from("product_modifiers")
+      .insert(deduped);
+    if (insertError) return;
   }
 
   revalidatePath(`/products/${productId}/edit`);

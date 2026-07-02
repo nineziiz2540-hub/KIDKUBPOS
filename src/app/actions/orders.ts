@@ -81,7 +81,15 @@ export async function createOrder(
   if (itemsError) return { error: "บันทึกรายการสินค้าไม่สำเร็จ" };
 
   // 6. Deduct stock (best-effort — don't block on failure)
-  await supabase.rpc("deduct_stock_for_order", { p_order_id: order.id });
+  const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {
+    p_order_id: order.id,
+  });
+  if (deductError) {
+    console.error(
+      "[createOrder] deduct_stock_for_order failed:",
+      deductError.message
+    );
+  }
 
   revalidatePath("/orders");
   return { orderId: order.id, orderNumber };
