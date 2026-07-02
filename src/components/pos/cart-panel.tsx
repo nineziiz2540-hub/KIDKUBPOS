@@ -1,5 +1,5 @@
 "use client";
-import type { CartItem } from "@/app/actions/orders";
+import type { CartItem } from "@/types/app";
 import { Button } from "@/components/ui/button";
 
 type PaymentMethod = "cash" | "transfer" | "card";
@@ -14,6 +14,7 @@ type Props = {
   onCheckout: () => void;
   pending: boolean;
   error: string | null;
+  lastOrderNumber: string | null;
 };
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
@@ -34,11 +35,9 @@ export function CartPanel({
   onCheckout,
   pending,
   error,
+  lastOrderNumber,
 }: Props) {
-  const total = cartItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
+  const total = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg border">
@@ -59,9 +58,16 @@ export function CartPanel({
       {/* Cart items — scrollable */}
       <div className="flex-1 overflow-y-auto divide-y divide-border">
         {cartItems.length === 0 ? (
-          <p className="text-center text-muted-foreground py-12 text-sm">
-            คลิกสินค้าเพื่อเพิ่ม
-          </p>
+          <div className="py-12 text-center">
+            {lastOrderNumber && (
+              <p className="text-sm font-semibold text-sidebar mb-1">
+                ออเดอร์ {lastOrderNumber} สำเร็จ
+              </p>
+            )}
+            <p className="text-center text-muted-foreground text-sm">
+              คลิกสินค้าเพื่อเพิ่ม
+            </p>
+          </div>
         ) : (
           cartItems.map((item) => (
             <div
@@ -73,7 +79,7 @@ export function CartPanel({
                   {item.name}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  ฿{item.price.toFixed(2)}
+                  ฿{(item.totalPrice / item.quantity).toFixed(2)}
                 </p>
               </div>
               {/* Qty controls */}
@@ -99,7 +105,7 @@ export function CartPanel({
                 </button>
               </div>
               <p className="text-sm font-medium w-16 text-right text-sidebar tabular-nums">
-                ฿{(item.price * item.quantity).toFixed(2)}
+                ฿{item.totalPrice.toFixed(2)}
               </p>
               <button
                 type="button"
