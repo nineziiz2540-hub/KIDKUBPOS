@@ -178,8 +178,8 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
-          is_multi_select: boolean | null
-          is_required: boolean | null
+          is_multi_select: boolean
+          is_required: boolean
           name: string
           sort_order: number | null
           tenant_id: string
@@ -187,8 +187,8 @@ export type Database = {
         Insert: {
           created_at?: string | null
           id?: string
-          is_multi_select?: boolean | null
-          is_required?: boolean | null
+          is_multi_select?: boolean
+          is_required?: boolean
           name: string
           sort_order?: number | null
           tenant_id: string
@@ -196,8 +196,8 @@ export type Database = {
         Update: {
           created_at?: string | null
           id?: string
-          is_multi_select?: boolean | null
-          is_required?: boolean | null
+          is_multi_select?: boolean
+          is_required?: boolean
           name?: string
           sort_order?: number | null
           tenant_id?: string
@@ -557,34 +557,34 @@ export type Database = {
       tenants: {
         Row: {
           created_at: string
-          delivery_gp_percent: number | null
-          fixed_cost_monthly: number | null
+          delivery_gp_percent: number
+          fixed_cost_monthly: number
           id: string
           name: string
-          order_prefix: string | null
-          order_sequence: number | null
+          order_prefix: string
+          order_sequence: number
           slug: string
           updated_at: string
         }
         Insert: {
           created_at?: string
-          delivery_gp_percent?: number | null
-          fixed_cost_monthly?: number | null
+          delivery_gp_percent?: number
+          fixed_cost_monthly?: number
           id?: string
           name: string
-          order_prefix?: string | null
-          order_sequence?: number | null
+          order_prefix?: string
+          order_sequence?: number
           slug: string
           updated_at?: string
         }
         Update: {
           created_at?: string
-          delivery_gp_percent?: number | null
-          fixed_cost_monthly?: number | null
+          delivery_gp_percent?: number
+          fixed_cost_monthly?: number
           id?: string
           name?: string
-          order_prefix?: string | null
-          order_sequence?: number | null
+          order_prefix?: string
+          order_sequence?: number
           slug?: string
           updated_at?: string
         }
