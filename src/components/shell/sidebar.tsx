@@ -5,6 +5,8 @@ import {
   ShoppingBag,
   Package,
   Tag,
+  FlaskConical,
+  Sliders,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -25,6 +27,8 @@ const allNavItems: NavItem[] = [
   { href: "/orders", label: "Orders", icon: ShoppingBag, minRole: "staff" },
   { href: "/products", label: "Products", icon: Package, minRole: "staff" },
   { href: "/categories", label: "Categories", icon: Tag, minRole: "manager" },
+  { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
+  { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
   { href: "/reports", label: "Reports", icon: BarChart3, minRole: "manager" },
   { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
 ];

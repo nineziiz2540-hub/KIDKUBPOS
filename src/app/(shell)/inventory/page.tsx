@@ -1,0 +1,167 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { FlaskConical } from "lucide-react";
+import { getProfile, getRawMaterials } from "@/lib/dal";
+import {
+  createRawMaterial,
+  updateRawMaterial,
+  deleteRawMaterial,
+  receiveStock,
+  adjustStock,
+} from "@/app/actions/inventory";
+import { RawMaterialForm } from "@/components/inventory/raw-material-form";
+import { StockActionForm } from "@/components/inventory/stock-action-form";
+import { DeleteButton } from "@/components/ui/delete-button";
+import { Badge } from "@/components/ui/badge";
+
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ action?: string; id?: string }>;
+}) {
+  const profile = await getProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "owner" && profile.role !== "manager") redirect("/");
+
+  const { action, id } = await searchParams;
+  const materials = await getRawMaterials(profile.tenant_id);
+
+  const editTarget =
+    action === "edit" && id
+      ? (materials.find((m) => m.id === id) ?? null)
+      : null;
+  const stockTarget =
+    (action === "receive" || action === "adjust") && id
+      ? (materials.find((m) => m.id === id) ?? null)
+      : null;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-sidebar flex items-center gap-2">
+            <FlaskConical size={24} />
+            วัตถุดิบ
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            จัดการวัตถุดิบและสต็อก
+          </p>
+        </div>
+        {action !== "new" && (
+          <Link
+            href="/inventory?action=new"
+            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+          >
+            + เพิ่มวัตถุดิบ
+          </Link>
+        )}
+      </div>
+
+      {/* Create form */}
+      {action === "new" && (
+        <div className="rounded-lg border bg-white p-5 space-y-4">
+          <h2 className="text-base font-semibold text-sidebar">เพิ่มวัตถุดิบใหม่</h2>
+          <RawMaterialForm action={createRawMaterial} />
+        </div>
+      )}
+
+      {/* Edit form */}
+      {editTarget && (
+        <div className="rounded-lg border bg-white p-5 space-y-4">
+          <h2 className="text-base font-semibold text-sidebar">
+            แก้ไข: {editTarget.name}
+          </h2>
+          <RawMaterialForm action={updateRawMaterial} defaults={editTarget} />
+        </div>
+      )}
+
+      {/* Stock action form */}
+      {stockTarget && (
+        <div className="rounded-lg border bg-white p-5 space-y-4">
+          <h2 className="text-base font-semibold text-sidebar">
+            {action === "receive" ? "รับสินค้าเข้าสต็อก" : "ปรับสต็อก"}: {stockTarget.name}
+          </h2>
+          <StockActionForm
+            action={action === "receive" ? receiveStock : adjustStock}
+            rawMaterialId={stockTarget.id}
+            type={action as "receive" | "adjust"}
+            materialName={stockTarget.name}
+            currentStock={Number(stockTarget.current_stock)}
+            unit={stockTarget.unit}
+          />
+        </div>
+      )}
+
+      {/* Materials table */}
+      <div className="rounded-lg border bg-white overflow-hidden">
+        {materials.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground">
+            ยังไม่มีวัตถุดิบ — กด "เพิ่มวัตถุดิบ" เพื่อเริ่มต้น
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/30 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-sidebar">ชื่อ</th>
+                <th className="text-left px-4 py-3 font-medium text-sidebar">หน่วย</th>
+                <th className="text-right px-4 py-3 font-medium text-sidebar">ต้นทุน/หน่วย</th>
+                <th className="text-right px-4 py-3 font-medium text-sidebar">สต็อก</th>
+                <th className="text-right px-4 py-3 font-medium text-sidebar">แจ้งเตือน ≤</th>
+                <th className="text-right px-4 py-3 font-medium text-sidebar">การดำเนินการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {materials.map((m) => {
+                const isLow =
+                  Number(m.min_stock_alert) > 0 &&
+                  Number(m.current_stock) <= Number(m.min_stock_alert);
+                return (
+                  <tr key={m.id} className="border-b last:border-0 hover:bg-muted/10">
+                    <td className="px-4 py-3 font-medium">
+                      {m.name}
+                      {isLow && (
+                        <Badge variant="destructive" className="ml-2 text-xs">
+                          สต็อกต่ำ
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{m.unit}</td>
+                    <td className="px-4 py-3 text-right">{Number(m.cost_per_unit).toFixed(4)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{Number(m.current_stock).toFixed(3)}</td>
+                    <td className="px-4 py-3 text-right text-muted-foreground">{Number(m.min_stock_alert).toFixed(3)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/inventory?action=receive&id=${m.id}`}
+                          className="rounded px-2 py-1 text-xs font-medium text-accent hover:bg-accent/10"
+                        >
+                          รับสินค้า
+                        </Link>
+                        <Link
+                          href={`/inventory?action=adjust&id=${m.id}`}
+                          className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/20"
+                        >
+                          ปรับ
+                        </Link>
+                        <Link
+                          href={`/inventory?action=edit&id=${m.id}`}
+                          className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/20"
+                        >
+                          แก้ไข
+                        </Link>
+                        <form action={deleteRawMaterial}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <DeleteButton message={`ลบ "${m.name}"?`} />
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

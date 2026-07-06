@@ -203,6 +203,50 @@ export async function getRawMaterials(tenantId: string): Promise<RawMaterial[]> 
   return (data ?? []) as RawMaterial[];
 }
 
+export async function getModifiers(tenantId: string): Promise<ModifierWithOptions[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("modifiers")
+    .select(
+      `id, name, is_required, is_multi_select, sort_order,
+       modifier_options(id, name, price_delta, sort_order)`
+    )
+    .eq("tenant_id", tenantId)
+    .order("sort_order");
+
+  if (!data) return [];
+
+  type ModRow = {
+    id: string;
+    name: string;
+    is_required: boolean;
+    is_multi_select: boolean;
+    sort_order: number | null;
+    modifier_options: Array<{
+      id: string;
+      name: string;
+      price_delta: number | null;
+      sort_order: number | null;
+    }>;
+  };
+
+  return (data as ModRow[]).map((m) => ({
+    id: m.id,
+    name: m.name,
+    isRequired: m.is_required,
+    isMultiSelect: m.is_multi_select,
+    sortOrder: m.sort_order ?? 0,
+    options: (m.modifier_options ?? [])
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        priceDelta: Number(o.price_delta ?? 0),
+        sortOrder: o.sort_order ?? 0,
+      }))
+      .sort((a, b) => a.sortOrder - b.sortOrder),
+  }));
+}
+
 export async function getLowStockAlerts(
   tenantId: string
 ): Promise<LowStockAlert[]> {
