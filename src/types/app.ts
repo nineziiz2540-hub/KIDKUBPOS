@@ -7,6 +7,7 @@ export type SelectedModifier = {
 };
 
 export type CartItem = {
+  cartItemKey: string;
   productId: string;
   name: string;
   basePrice: number;
@@ -56,4 +57,21 @@ export type ModifierWithOptions = {
     priceDelta: number;
     sortOrder: number;
   }[];
+};
+
+// --- POS display types ---
+
+export type PosProduct = {
+  id: string;
+  name: string;
+  price: number;
+  image_url: string | null;
+  drink_type: "hot" | "iced" | "blended" | "special" | null;
+  category_id: string | null;
+  categoryName: string | null;
+};
+
+export type PosCategory = {
+  id: string;
+  name: string;
 };

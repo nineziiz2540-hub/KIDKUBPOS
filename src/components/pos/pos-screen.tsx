@@ -49,6 +49,7 @@ export function PosScreen({ products }: Props) {
       return [
         ...prev,
         {
+          cartItemKey: product.id,
           productId: product.id,
           name: product.name,
           basePrice: Number(product.price),
