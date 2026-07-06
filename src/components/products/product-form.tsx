@@ -14,6 +14,7 @@ type Defaults = {
   price?: number;
   description?: string | null;
   category_id?: string | null;
+  drink_type?: string | null;
   is_active?: boolean;
 };
 
@@ -75,6 +76,22 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
               {c.name}
             </option>
           ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="drink_type">ประเภทเครื่องดื่ม</Label>
+        <select
+          id="drink_type"
+          name="drink_type"
+          defaultValue={defaults.drink_type ?? ""}
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="">— ไม่ใช่เครื่องดื่ม —</option>
+          <option value="hot">ร้อน</option>
+          <option value="iced">เย็น</option>
+          <option value="blended">ปั่น</option>
+          <option value="special">Special</option>
         </select>
       </div>
 

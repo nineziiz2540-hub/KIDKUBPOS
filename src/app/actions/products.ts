@@ -254,5 +254,16 @@ export async function uploadProductImage(
     .from("product-images")
     .getPublicUrl(path);
 
+  // Save image_url back to the product (product_id is optional FormData field)
+  const productId = formData.get("product_id");
+  if (typeof productId === "string" && productId !== "") {
+    await supabase
+      .from("products")
+      .update({ image_url: urlData.publicUrl })
+      .eq("id", productId)
+      .eq("tenant_id", profile.tenant_id);
+    revalidatePath(`/products/${productId}/edit`);
+  }
+
   return { url: urlData.publicUrl };
 }
