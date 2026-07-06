@@ -65,3 +65,48 @@ export async function updateMemberRole(
   revalidatePath("/settings/team");
   return { success: true };
 }
+
+export async function updateBusinessSettings(
+  prevState: SettingsState,
+  formData: FormData
+): Promise<SettingsState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const fixedCostRaw = formData.get("fixed_cost_monthly");
+  const gpPercentRaw = formData.get("delivery_gp_percent");
+  const orderPrefix = formData.get("order_prefix");
+
+  const fixedCost =
+    typeof fixedCostRaw === "string" ? parseFloat(fixedCostRaw) : NaN;
+  if (isNaN(fixedCost) || fixedCost < 0) {
+    return { error: "กรุณากรอกต้นทุนคงที่ที่ถูกต้อง (>= 0)" };
+  }
+
+  const gpPercent =
+    typeof gpPercentRaw === "string" ? parseFloat(gpPercentRaw) : NaN;
+  if (isNaN(gpPercent) || gpPercent < 0 || gpPercent > 100) {
+    return { error: "กรุณากรอก GP% ที่ถูกต้อง (0–100)" };
+  }
+
+  if (typeof orderPrefix !== "string" || orderPrefix.trim() === "") {
+    return { error: "กรุณากรอก Order Prefix" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("tenants")
+    .update({
+      fixed_cost_monthly: fixedCost,
+      delivery_gp_percent: gpPercent,
+      order_prefix: orderPrefix.trim().toUpperCase(),
+    })
+    .eq("id", profile.tenant_id);
+
+  if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+
+  revalidatePath("/settings");
+  return { success: true };
+}
