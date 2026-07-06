@@ -23,6 +23,7 @@ export async function createProduct(
   const priceRaw = formData.get("price");
   const description = formData.get("description");
   const categoryId = formData.get("category_id");
+  const drinkType = formData.get("drink_type");
   const isActive = formData.get("is_active") === "on";
 
   if (typeof name !== "string" || name.trim() === "") {
@@ -43,6 +44,8 @@ export async function createProduct(
         : null,
     category_id:
       typeof categoryId === "string" && categoryId !== "" ? categoryId : null,
+    drink_type:
+      typeof drinkType === "string" && drinkType !== "" ? drinkType : null,
     is_active: isActive,
     tenant_id: profile.tenant_id,
   });
@@ -66,6 +69,7 @@ export async function updateProduct(
   const priceRaw = formData.get("price");
   const description = formData.get("description");
   const categoryId = formData.get("category_id");
+  const drinkType = formData.get("drink_type");
   const isActive = formData.get("is_active") === "on";
 
   if (
@@ -94,6 +98,8 @@ export async function updateProduct(
         typeof categoryId === "string" && categoryId !== ""
           ? categoryId
           : null,
+      drink_type:
+        typeof drinkType === "string" && drinkType !== "" ? drinkType : null,
       is_active: isActive,
     })
     .eq("id", id)
