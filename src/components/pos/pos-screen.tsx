@@ -1,50 +1,77 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import { createOrder } from "@/app/actions/orders";
-import type { CartItem } from "@/types/app";
-import { ProductGrid } from "@/components/pos/product-grid";
-import { CartPanel } from "@/components/pos/cart-panel";
-
-type Product = {
-  id: string;
-  name: string;
-  price: number;
-  categories: { name: string } | null;
-};
-
-type PaymentMethod = "cash" | "transfer" | "card";
+import type {
+  CartItem,
+  ModifierWithOptions,
+  PosCategory,
+  PosProduct,
+} from "@/types/app";
+import { PosHeader } from "./pos-header";
+import { ProductGrid } from "./product-grid";
+import { ModifierModal } from "./modifier-modal";
+import { SmartCart } from "./smart-cart";
 
 type Props = {
-  products: Product[];
+  products: PosProduct[];
+  categories: PosCategory[];
+  productModifierRecord: Record<string, string[]>;
+  allModifiers: ModifierWithOptions[];
+  userName: string;
+  todayOrderCount: number;
 };
 
-export function PosScreen({ products }: Props) {
+export function PosScreen({
+  products,
+  categories,
+  productModifierRecord,
+  allModifiers,
+  userName,
+  todayOrderCount,
+}: Props) {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
+  const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
+  const [tableNumber, setTableNumber] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "card">("cash");
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [checkoutPending, startCheckout] = useTransition();
 
-  function addToCart(product: { id: string; name: string; price: number }) {
+  const productsWithModifiers = useMemo(
+    () => new Set(Object.keys(productModifierRecord)),
+    [productModifierRecord]
+  );
+
+  const productModifierMap = useMemo(
+    () => new Map(Object.entries(productModifierRecord)),
+    [productModifierRecord]
+  );
+
+  function handleProductClick(product: PosProduct) {
+    if (productsWithModifiers.has(product.id)) {
+      setPendingProduct(product);
+    } else {
+      addDirectToCart(product);
+    }
+  }
+
+  function addDirectToCart(product: PosProduct) {
     setCartItems((prev) => {
-      const existing = prev.find((i) => i.productId === product.id);
+      const existing = prev.find((i) => i.cartItemKey === product.id);
       if (existing) {
-        const newQty = existing.quantity + 1;
-        return prev.map((i) =>
-          i.productId === product.id
-            ? {
-                ...i,
-                quantity: newQty,
-                totalPrice:
-                  (existing.basePrice +
-                    existing.selectedModifiers.reduce(
-                      (s, m) => s + m.priceDelta,
-                      0
-                    )) *
-                  newQty,
-              }
-            : i
-        );
+        return prev.map((i) => {
+          if (i.cartItemKey !== product.id) return i;
+          const unitPrice =
+            i.basePrice +
+            i.selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
+          return {
+            ...i,
+            quantity: i.quantity + 1,
+            totalPrice: unitPrice * (i.quantity + 1),
+          };
+        });
       }
       return [
         ...prev,
@@ -52,22 +79,27 @@ export function PosScreen({ products }: Props) {
           cartItemKey: product.id,
           productId: product.id,
           name: product.name,
-          basePrice: Number(product.price),
+          basePrice: product.price,
           quantity: 1,
           selectedModifiers: [],
-          totalPrice: Number(product.price),
+          totalPrice: product.price,
         },
       ];
     });
   }
 
-  function updateQty(productId: string, qty: number) {
+  function handleAddFromModal(item: CartItem) {
+    setCartItems((prev) => [...prev, item]);
+    setPendingProduct(null);
+  }
+
+  function updateQty(key: string, qty: number) {
     if (qty <= 0) {
-      setCartItems((prev) => prev.filter((i) => i.productId !== productId));
+      setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
     } else {
       setCartItems((prev) =>
         prev.map((i) => {
-          if (i.productId !== productId) return i;
+          if (i.cartItemKey !== key) return i;
           const unitPrice =
             i.basePrice +
             i.selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
@@ -77,69 +109,87 @@ export function PosScreen({ products }: Props) {
     }
   }
 
-  function removeItem(productId: string) {
-    setCartItems((prev) => prev.filter((i) => i.productId !== productId));
+  function removeItem(key: string) {
+    setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
   }
 
   function clearCart() {
     setCartItems([]);
     setError(null);
     setLastOrderNumber(null);
+    setCustomerId(null);
+    setTableNumber("");
   }
 
   function handleCheckout() {
     setError(null);
     setLastOrderNumber(null);
-    startTransition(async () => {
+    startCheckout(async () => {
       const result = await createOrder({
         items: cartItems,
         paymentMethod,
-        orderType: "dine_in",
+        orderType,
+        tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
+        customerId: customerId ?? undefined,
       });
       if ("error" in result) {
         setError(result.error);
       } else {
         setLastOrderNumber(result.orderNumber);
         setCartItems([]);
+        setTableNumber("");
+        setCustomerId(null);
       }
     });
   }
 
+  const pendingProductModifiers: ModifierWithOptions[] = pendingProduct
+    ? (productModifierMap.get(pendingProduct.id) ?? [])
+        .map((modId) => allModifiers.find((m) => m.id === modId))
+        .filter((m): m is ModifierWithOptions => m !== undefined)
+    : [];
+
   return (
-    <div className="flex gap-4 h-[calc(100vh-8rem)]">
-      <div className="flex-1 overflow-y-auto">
-        {/* Temporary shim — pos-screen.tsx will be fully rewritten in Task 4.
-            For now, just make the TypeScript call site compile with the new ProductGrid signature.
-            Pass empty sets/arrays so the component renders without crashing. */}
-        <ProductGrid
-          products={products.map((p) => ({
-            id: p.id,
-            name: p.name,
-            price: Number(p.price),
-            image_url: null,
-            drink_type: null,
-            category_id: null,
-            categoryName: (p.categories as { name: string } | null)?.name ?? null,
-          }))}
-          categories={[]}
-          productsWithModifiers={new Set<string>()}
-          onProductClick={(prod) => addToCart(prod)}
-        />
+    <div className="flex flex-col h-[calc(100vh-8rem)]">
+      <PosHeader userName={userName} todayOrderCount={todayOrderCount} />
+      <div className="flex gap-4 flex-1 min-h-0 mt-2">
+        <div className="flex-1 min-w-0">
+          <ProductGrid
+            products={products}
+            categories={categories}
+            productsWithModifiers={productsWithModifiers}
+            onProductClick={handleProductClick}
+          />
+        </div>
+        <div className="w-72 shrink-0">
+          <SmartCart
+            cartItems={cartItems}
+            onUpdateQty={updateQty}
+            onRemove={removeItem}
+            onClear={clearCart}
+            orderType={orderType}
+            onOrderTypeChange={setOrderType}
+            tableNumber={tableNumber}
+            onTableNumberChange={setTableNumber}
+            paymentMethod={paymentMethod}
+            onPaymentChange={setPaymentMethod}
+            customerId={customerId}
+            onCustomerIdChange={setCustomerId}
+            pending={checkoutPending}
+            error={error}
+            lastOrderNumber={lastOrderNumber}
+            onCheckout={handleCheckout}
+          />
+        </div>
       </div>
-      <div className="w-72 shrink-0">
-        <CartPanel
-          cartItems={cartItems}
-          onUpdateQty={updateQty}
-          onRemove={removeItem}
-          onClear={clearCart}
-          paymentMethod={paymentMethod}
-          onPaymentChange={setPaymentMethod}
-          onCheckout={handleCheckout}
-          pending={pending}
-          error={error}
-          lastOrderNumber={lastOrderNumber}
+      {pendingProduct !== null && (
+        <ModifierModal
+          product={pendingProduct}
+          modifiers={pendingProductModifiers}
+          onAddToCart={handleAddFromModal}
+          onClose={() => setPendingProduct(null)}
         />
-      </div>
+      )}
     </div>
   );
 }
