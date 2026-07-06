@@ -25,7 +25,7 @@ export function PosScreen({ products }: Props) {
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function addToCart(product: Product) {
+  function addToCart(product: { id: string; name: string; price: number }) {
     setCartItems((prev) => {
       const existing = prev.find((i) => i.productId === product.id);
       if (existing) {
@@ -108,7 +108,23 @@ export function PosScreen({ products }: Props) {
   return (
     <div className="flex gap-4 h-[calc(100vh-8rem)]">
       <div className="flex-1 overflow-y-auto">
-        <ProductGrid products={products} onAddToCart={addToCart} />
+        {/* Temporary shim — pos-screen.tsx will be fully rewritten in Task 4.
+            For now, just make the TypeScript call site compile with the new ProductGrid signature.
+            Pass empty sets/arrays so the component renders without crashing. */}
+        <ProductGrid
+          products={products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            price: Number(p.price),
+            image_url: null,
+            drink_type: null,
+            category_id: null,
+            categoryName: (p.categories as { name: string } | null)?.name ?? null,
+          }))}
+          categories={[]}
+          productsWithModifiers={new Set<string>()}
+          onProductClick={(prod) => addToCart(prod)}
+        />
       </div>
       <div className="w-72 shrink-0">
         <CartPanel
