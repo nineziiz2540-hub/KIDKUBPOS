@@ -96,7 +96,7 @@ export default async function InventoryPage({
       <div className="rounded-lg border bg-white overflow-hidden">
         {materials.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            ยังไม่มีวัตถุดิบ — กด "เพิ่มวัตถุดิบ" เพื่อเริ่มต้น
+            ยังไม่มีวัตถุดิบ — กด &quot;เพิ่มวัตถุดิบ&quot; เพื่อเริ่มต้น
           </div>
         ) : (
           <table className="w-full text-sm">

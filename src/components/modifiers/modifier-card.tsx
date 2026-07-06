@@ -10,7 +10,7 @@ type Props = {
   isEditing: boolean;
 };
 
-export function ModifierCard({ modifier, isEditing }: Props) {
+export function ModifierCard({ modifier }: Props) {
   return (
     <div className="rounded-lg border bg-white p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">

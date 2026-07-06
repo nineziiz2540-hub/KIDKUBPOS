@@ -16,7 +16,7 @@ type Props = {
   unit: string;
 };
 
-export function StockActionForm({ action, rawMaterialId, type, materialName, currentStock, unit }: Props) {
+export function StockActionForm({ action, rawMaterialId, type, currentStock, unit }: Props) {
   const [state, formAction, pending] = useActionState<InventoryState, FormData>(
     action,
     undefined

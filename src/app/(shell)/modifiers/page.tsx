@@ -64,7 +64,7 @@ export default async function ModifiersPage({
       {/* Modifier cards */}
       {modifiers.length === 0 ? (
         <div className="rounded-lg border bg-white p-8 text-center text-muted-foreground">
-          ยังไม่มีกลุ่มตัวเลือก — กด "เพิ่มกลุ่มตัวเลือก" เพื่อเริ่มต้น
+          ยังไม่มีกลุ่มตัวเลือก — กด &quot;เพิ่มกลุ่มตัวเลือก&quot; เพื่อเริ่มต้น
         </div>
       ) : (
         <div className="grid gap-4">
