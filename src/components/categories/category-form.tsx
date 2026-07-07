@@ -33,7 +33,7 @@ export function CategoryForm({ action, defaultName = "", id }: Props) {
         />
       </div>
       {state?.error !== undefined && (
-        <p className="text-sm font-medium text-danger">{state.error}</p>
+        <p className="text-sm font-medium text-destructive">{state.error}</p>
       )}
       <div className="flex gap-2">
         <Button
