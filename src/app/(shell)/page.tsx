@@ -11,8 +11,11 @@ import {
   getHourlyPattern,
   getSalesSummary,
   getSalesByCategory,
+  getProductsForCalculator,
+  getTenantDeliveryGp,
 } from "@/lib/dal";
 import type { DashboardStats } from "@/lib/dal";
+import { PricingCalculator } from "@/components/dashboard/pricing-calculator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LowStockWidget } from "@/components/dashboard/low-stock-widget";
 import { AnalyticsSection } from "@/components/dashboard/analytics-section";
@@ -140,6 +143,8 @@ export default async function DashboardPage({
     monthlyData,
     peakHours,
     categoryData,
+    calcProducts,
+    defaultDeliveryGp,
   ] = await Promise.all([
     getDashboardStats(profile.tenant_id),
     getTopProducts(profile.tenant_id, 5),
@@ -158,6 +163,8 @@ export default async function DashboardPage({
       ? getHourlyPattern(profile.tenant_id, startDate, endDate)
       : Promise.resolve(null),
     getSalesByCategory(profile.tenant_id, range),
+    getProductsForCalculator(profile.tenant_id),
+    getTenantDeliveryGp(profile.tenant_id),
   ]);
 
   return (
@@ -179,6 +186,11 @@ export default async function DashboardPage({
         monthlyData={monthlyData}
         peakHours={peakHours}
         categoryData={categoryData}
+      />
+
+      <PricingCalculator
+        products={calcProducts}
+        defaultDeliveryGp={defaultDeliveryGp}
       />
 
       <div>

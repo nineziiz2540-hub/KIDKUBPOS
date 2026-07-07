@@ -5,7 +5,7 @@ import type { ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/ap
 
 export type Role = "owner" | "manager" | "staff";
 
-export type { LowStockAlert };
+export type { LowStockAlert, ProductCost };
 
 export type ProfileWithTenant = {
   id: string;
@@ -588,4 +588,32 @@ export async function getSalesSummary(
     totalSales: rows.reduce((sum, r) => sum + Number(r.total), 0),
     totalOrders: rows.length,
   };
+}
+
+// ─── Calculator Helpers ───────────────────────────────────────────────────────
+
+export type CalcProduct = { id: string; name: string };
+
+export async function getProductsForCalculator(
+  tenantId: string
+): Promise<CalcProduct[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("products")
+    .select("id, name")
+    .eq("tenant_id", tenantId)
+    .eq("is_active", true)
+    .order("name");
+  return (data ?? []) as CalcProduct[];
+}
+
+export async function getTenantDeliveryGp(tenantId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("tenants")
+    .select("delivery_gp_percent")
+    .eq("id", tenantId)
+    .single();
+  const row = data as { delivery_gp_percent: number | null } | null;
+  return row?.delivery_gp_percent ?? 30;
 }
