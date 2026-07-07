@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   getProfile,
@@ -178,15 +179,17 @@ export default async function DashboardPage({
 
       <LowStockWidget alerts={lowStockAlerts} />
 
-      <AnalyticsSection
-        range={range}
-        summary={summary}
-        hourlyData={hourlyData}
-        dailyData={dailyData}
-        monthlyData={monthlyData}
-        peakHours={peakHours}
-        categoryData={categoryData}
-      />
+      <Suspense fallback={null}>
+        <AnalyticsSection
+          range={range}
+          summary={summary}
+          hourlyData={hourlyData}
+          dailyData={dailyData}
+          monthlyData={monthlyData}
+          peakHours={peakHours}
+          categoryData={categoryData}
+        />
+      </Suspense>
 
       <PricingCalculator
         products={calcProducts}

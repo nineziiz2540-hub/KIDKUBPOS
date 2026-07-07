@@ -155,7 +155,7 @@ export function PricingCalculator({
                 min={min}
                 max={max}
                 step={step}
-                onChange={(e) => onChange(Number(e.target.value))}
+                onChange={(e) => onChange(Math.max(min ?? 0, Number(e.target.value)))}
                 className="w-full h-9 rounded-md border border-input bg-white px-3 text-sm tabular-nums text-sidebar focus:outline-none focus:ring-2 focus:ring-sidebar/30"
               />
             </div>

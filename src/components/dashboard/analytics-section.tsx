@@ -47,7 +47,7 @@ export function AnalyticsSection({
   function setRange(r: Range) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("range", r);
-    router.push(`?${params.toString()}`);
+    router.replace(`?${params.toString()}`);
   }
 
   return (
