@@ -330,8 +330,19 @@ export async function getModifiersForProduct(
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export async function getProductCost(productId: string): Promise<ProductCost> {
+export async function getProductCost(tenantId: string, productId: string): Promise<ProductCost> {
   const supabase = await createClient();
+
+  // Verify product belongs to this tenant
+  const { data: productCheck } = await supabase
+    .from("products")
+    .select("id")
+    .eq("id", productId)
+    .eq("tenant_id", tenantId)
+    .single();
+
+  if (!productCheck) return { productId, ingredientCost: 0, recipes: [] };
+
   const { data } = await supabase
     .from("product_recipes")
     .select("quantity_used, raw_materials(name, unit, cost_per_unit)")
