@@ -399,7 +399,7 @@ export async function getSalesByHour(
 
 export async function getSalesByCategory(
   tenantId: string,
-  range: "day" | "week" | "month"
+  range: "day" | "week" | "month" | "year"
 ): Promise<{ category: string; total: number }[]> {
   const supabase = await createClient();
   const offsetMs = 7 * 60 * 60 * 1000;
@@ -416,8 +416,11 @@ export async function getSalesByCategory(
     rangeStart = new Date(midnight - offsetMs);
   } else if (range === "week") {
     rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  } else {
+  } else if (range === "month") {
     rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  } else {
+    // year — ตั้งแต่ 1 ม.ค. ของปีนี้ตาม Bangkok time
+    rangeStart = new Date(`${bangkokNow.getUTCFullYear()}-01-01T00:00:00+07:00`);
   }
 
   const { data: orders } = await supabase
@@ -448,4 +451,141 @@ export async function getSalesByCategory(
   return [...byCategory.entries()]
     .map(([category, total]) => ({ category, total }))
     .sort((a, b) => b.total - a.total);
+}
+
+// ─── Analytics Types ─────────────────────────────────────────────────────────
+
+export type SalesByDay = { date: string; total: number };
+export type SalesByMonth = { month: number; total: number };
+export type HourlyPattern = { hour: number; total: number };
+export type SalesSummary = { totalSales: number; totalOrders: number };
+
+// ─── getSalesByDay ────────────────────────────────────────────────────────────
+
+export async function getSalesByDay(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<SalesByDay[]> {
+  const supabase = await createClient();
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000); // exclusive
+
+  const { data } = await supabase
+    .from("orders")
+    .select("created_at, total")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  const byDate = new Map<string, number>();
+  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+    const d = new Date(new Date(row.created_at).getTime() + offsetMs);
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    byDate.set(key, (byDate.get(key) ?? 0) + Number(row.total));
+  }
+
+  const result: SalesByDay[] = [];
+  let cursor = new Date(rangeStart);
+  while (cursor.getTime() < rangeEnd.getTime()) {
+    const d = new Date(cursor.getTime() + offsetMs);
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    result.push({ date: key, total: byDate.get(key) ?? 0 });
+    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return result;
+}
+
+// ─── getSalesByMonth ──────────────────────────────────────────────────────────
+
+export async function getSalesByMonth(
+  tenantId: string,
+  year: number // Bangkok calendar year
+): Promise<SalesByMonth[]> {
+  const supabase = await createClient();
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const yearStart = new Date(`${year}-01-01T00:00:00+07:00`);
+  const yearEnd = new Date(`${year + 1}-01-01T00:00:00+07:00`);
+
+  const { data } = await supabase
+    .from("orders")
+    .select("created_at, total")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .gte("created_at", yearStart.toISOString())
+    .lt("created_at", yearEnd.toISOString());
+
+  const byMonth = new Map<number, number>();
+  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+    const m = new Date(new Date(row.created_at).getTime() + offsetMs).getUTCMonth() + 1;
+    byMonth.set(m, (byMonth.get(m) ?? 0) + Number(row.total));
+  }
+
+  return Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1,
+    total: byMonth.get(i + 1) ?? 0,
+  }));
+}
+
+// ─── getHourlyPattern ─────────────────────────────────────────────────────────
+
+export async function getHourlyPattern(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<HourlyPattern[]> {
+  const supabase = await createClient();
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data } = await supabase
+    .from("orders")
+    .select("created_at, total")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  const byHour = new Map<number, number>();
+  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+    const h = new Date(new Date(row.created_at).getTime() + offsetMs).getUTCHours();
+    byHour.set(h, (byHour.get(h) ?? 0) + Number(row.total));
+  }
+
+  return Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    total: byHour.get(h) ?? 0,
+  }));
+}
+
+// ─── getSalesSummary ──────────────────────────────────────────────────────────
+
+export async function getSalesSummary(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<SalesSummary> {
+  const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data } = await supabase
+    .from("orders")
+    .select("total")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  const rows = (data ?? []) as { total: number }[];
+  return {
+    totalSales: rows.reduce((sum, r) => sum + Number(r.total), 0),
+    totalOrders: rows.length,
+  };
 }
