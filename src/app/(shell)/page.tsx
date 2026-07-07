@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { getProfile, getDashboardStats, getTopProducts } from "@/lib/dal";
+import { getProfile, getDashboardStats, getTopProducts, getLowStockAlerts } from "@/lib/dal";
 import type { DashboardStats } from "@/lib/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LowStockWidget } from "@/components/dashboard/low-stock-widget";
 
 function TrendBadge({
   today,
@@ -91,9 +92,10 @@ export default async function DashboardPage() {
     );
   }
 
-  const [stats, topProducts] = await Promise.all([
+  const [stats, topProducts, lowStockAlerts] = await Promise.all([
     getDashboardStats(profile.tenant_id),
     getTopProducts(profile.tenant_id, 5),
+    getLowStockAlerts(profile.tenant_id),
   ]);
 
   return (
@@ -106,6 +108,8 @@ export default async function DashboardPage() {
       </div>
 
       <StatCards stats={stats} />
+
+      <LowStockWidget alerts={lowStockAlerts} />
 
       <div>
         <h2 className="text-base font-semibold text-sidebar mb-3">

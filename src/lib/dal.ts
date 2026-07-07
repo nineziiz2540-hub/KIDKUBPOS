@@ -5,6 +5,8 @@ import type { ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/ap
 
 export type Role = "owner" | "manager" | "staff";
 
+export type { LowStockAlert };
+
 export type ProfileWithTenant = {
   id: string;
   full_name: string | null;
