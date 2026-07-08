@@ -276,6 +276,7 @@ export type Database = {
           order_number: string | null
           order_type: string
           payment_method: string
+          shift_id: string | null
           status: string
           table_number: string | null
           tenant_id: string
@@ -291,6 +292,7 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          shift_id?: string | null
           status?: string
           table_number?: string | null
           tenant_id: string
@@ -306,6 +308,7 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          shift_id?: string | null
           status?: string
           table_number?: string | null
           tenant_id?: string
@@ -318,6 +321,13 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
           {
@@ -554,6 +564,73 @@ export type Database = {
           },
         ]
       }
+      shifts: {
+        Row: {
+          closed_at: string | null
+          closed_by: string | null
+          closing_cash_counted: number | null
+          created_at: string
+          expected_cash: number | null
+          id: string
+          opened_at: string
+          opened_by: string
+          opening_cash: number
+          status: string
+          tenant_id: string
+          variance: number | null
+        }
+        Insert: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closing_cash_counted?: number | null
+          created_at?: string
+          expected_cash?: number | null
+          id?: string
+          opened_at?: string
+          opened_by: string
+          opening_cash?: number
+          status?: string
+          tenant_id: string
+          variance?: number | null
+        }
+        Update: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closing_cash_counted?: number | null
+          created_at?: string
+          expected_cash?: number | null
+          id?: string
+          opened_at?: string
+          opened_by?: string
+          opening_cash?: number
+          status?: string
+          tenant_id?: string
+          variance?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shifts_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_opened_by_fkey"
+            columns: ["opened_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenants: {
         Row: {
           created_at: string
@@ -563,6 +640,7 @@ export type Database = {
           name: string
           order_prefix: string
           order_sequence: number
+          promptpay_id: string | null
           slug: string
           updated_at: string
         }
@@ -574,6 +652,7 @@ export type Database = {
           name: string
           order_prefix?: string
           order_sequence?: number
+          promptpay_id?: string | null
           slug: string
           updated_at?: string
         }
@@ -585,6 +664,7 @@ export type Database = {
           name?: string
           order_prefix?: string
           order_sequence?: number
+          promptpay_id?: string | null
           slug?: string
           updated_at?: string
         }
