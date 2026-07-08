@@ -9,6 +9,8 @@ import {
   Sliders,
   BarChart3,
   Settings,
+  Clock,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { LogoutButton } from "./logout-button";
@@ -25,10 +27,12 @@ const allNavItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, minRole: "staff" },
   { href: "/pos", label: "POS", icon: CreditCard, minRole: "staff" },
   { href: "/orders", label: "Orders", icon: ShoppingBag, minRole: "staff" },
+  { href: "/shifts", label: "Shifts", icon: Clock, minRole: "staff" },
   { href: "/products", label: "Products", icon: Package, minRole: "staff" },
   { href: "/categories", label: "Categories", icon: Tag, minRole: "manager" },
   { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
   { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
+  { href: "/customers", label: "Customers", icon: Users, minRole: "manager" },
   { href: "/reports", label: "Reports", icon: BarChart3, minRole: "manager" },
   { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
 ];
