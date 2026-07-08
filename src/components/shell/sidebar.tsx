@@ -7,7 +7,6 @@ import {
   Tag,
   FlaskConical,
   Sliders,
-  BarChart3,
   Settings,
   Clock,
   Users,
@@ -33,7 +32,6 @@ const allNavItems: NavItem[] = [
   { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
   { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
   { href: "/customers", label: "Customers", icon: Users, minRole: "manager" },
-  { href: "/reports", label: "Reports", icon: BarChart3, minRole: "manager" },
   { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
 ];
 

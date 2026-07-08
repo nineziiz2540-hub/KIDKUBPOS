@@ -14,6 +14,7 @@ type OrderItem = {
 
 type OrderDetail = {
   id: string;
+  order_number: string | null;
   payment_method: string;
   status: string;
   total: number;
@@ -42,7 +43,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, payment_method, status, total, note, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, total, note, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -62,7 +63,7 @@ export default async function OrderDetailPage({ params }: Props) {
         </Link>
         <div>
           <h1 className="text-2xl font-bold text-sidebar font-mono">
-            #{order.id.slice(0, 8).toUpperCase()}
+            {order.order_number ?? `#${order.id.slice(0, 8).toUpperCase()}`}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {new Date(order.created_at).toLocaleString("th-TH", {
