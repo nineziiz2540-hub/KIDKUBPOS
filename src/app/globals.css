@@ -152,6 +152,7 @@ body {
 @theme {
   --color-accent:  #ff6b35;
   --color-sidebar: #0c1a3d;
+  --font-sans: var(--font-geist-sans);
 }
 
 /* Surface as page background (overrides shadcn --background: white) */
