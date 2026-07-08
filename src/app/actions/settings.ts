@@ -110,3 +110,36 @@ export async function updateBusinessSettings(
   revalidatePath("/settings");
   return { success: true };
 }
+
+export async function updatePromptPayId(
+  prevState: SettingsState,
+  formData: FormData
+): Promise<SettingsState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const raw = formData.get("promptpay_id");
+  if (typeof raw !== "string") {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+
+  const digits = raw.replace(/[^0-9]/g, "");
+  if (digits !== "" && digits.length !== 10 && digits.length !== 13 && digits.length !== 15) {
+    return {
+      error: "เลข PromptPay ต้องเป็นเบอร์โทร (10 หลัก) หรือเลขผู้เสียภาษี (13 หลัก)",
+    };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("tenants")
+    .update({ promptpay_id: digits === "" ? null : digits })
+    .eq("id", profile.tenant_id);
+
+  if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+
+  revalidatePath("/settings");
+  return { success: true };
+}

@@ -11,6 +11,7 @@ import { PosHeader } from "./pos-header";
 import { ProductGrid } from "./product-grid";
 import { ModifierModal } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
+import { QrPaymentModal } from "./qr-payment-modal";
 
 type Props = {
   products: PosProduct[];
@@ -37,6 +38,7 @@ export function PosScreen({
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [checkoutPending, startCheckout] = useTransition();
 
   const productsWithModifiers = useMemo(
@@ -48,6 +50,8 @@ export function PosScreen({
     () => new Map(Object.entries(productModifierRecord)),
     [productModifierRecord]
   );
+
+  const total = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
   function handleProductClick(product: PosProduct) {
     if (productsWithModifiers.has(product.id)) {
@@ -121,7 +125,7 @@ export function PosScreen({
     setTableNumber("");
   }
 
-  function handleCheckout() {
+  function submitOrder() {
     setError(null);
     setLastOrderNumber(null);
     startCheckout(async () => {
@@ -141,6 +145,20 @@ export function PosScreen({
         setCustomerId(null);
       }
     });
+  }
+
+  function handleCheckout() {
+    if (paymentMethod === "transfer") {
+      setError(null);
+      setShowQrModal(true);
+      return;
+    }
+    submitOrder();
+  }
+
+  function handleQrConfirm() {
+    setShowQrModal(false);
+    submitOrder();
   }
 
   const pendingProductModifiers: ModifierWithOptions[] = pendingProduct
@@ -188,6 +206,13 @@ export function PosScreen({
           modifiers={pendingProductModifiers}
           onAddToCart={handleAddFromModal}
           onClose={() => setPendingProduct(null)}
+        />
+      )}
+      {showQrModal && (
+        <QrPaymentModal
+          total={total}
+          onConfirm={handleQrConfirm}
+          onCancel={() => setShowQrModal(false)}
         />
       )}
     </div>
