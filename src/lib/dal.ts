@@ -628,3 +628,236 @@ export async function getTenantDeliveryGp(tenantId: string): Promise<number> {
   const row = data as { delivery_gp_percent: number | null } | null;
   return row?.delivery_gp_percent ?? 30;
 }
+
+// ─── PromptPay ───────────────────────────────────────────────────────────────
+
+export async function getTenantPromptPayId(tenantId: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("tenants")
+    .select("promptpay_id")
+    .eq("id", tenantId)
+    .single();
+  const row = data as { promptpay_id: string | null } | null;
+  return row?.promptpay_id ?? null;
+}
+
+// ─── Shifts ──────────────────────────────────────────────────────────────────
+
+export type Shift = {
+  id: string;
+  openedAt: string;
+  openingCash: number;
+  status: "open" | "closed";
+};
+
+export type ShiftSummary = {
+  totalCash: number;
+  totalTransfer: number;
+  totalCard: number;
+  orderCount: number;
+  expectedCash: number;
+};
+
+export async function getActiveShift(tenantId: string): Promise<Shift | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("shifts")
+    .select("id, opened_at, opening_cash, status")
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .maybeSingle();
+
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    openedAt: data.opened_at,
+    openingCash: Number(data.opening_cash),
+    status: "open",
+  };
+}
+
+export async function getShiftSummary(
+  tenantId: string,
+  shiftId: string
+): Promise<ShiftSummary> {
+  const supabase = await createClient();
+  const { data: orderRows } = await supabase
+    .from("orders")
+    .select("total, payment_method")
+    .eq("tenant_id", tenantId)
+    .eq("shift_id", shiftId)
+    .neq("status", "cancelled");
+
+  const rows = (orderRows ?? []) as { total: number; payment_method: string }[];
+  const totalCash = rows
+    .filter((r) => r.payment_method === "cash")
+    .reduce((sum, r) => sum + Number(r.total), 0);
+  const totalTransfer = rows
+    .filter((r) => r.payment_method === "transfer")
+    .reduce((sum, r) => sum + Number(r.total), 0);
+  const totalCard = rows
+    .filter((r) => r.payment_method === "card")
+    .reduce((sum, r) => sum + Number(r.total), 0);
+
+  const { data: shiftRow } = await supabase
+    .from("shifts")
+    .select("opening_cash")
+    .eq("id", shiftId)
+    .eq("tenant_id", tenantId)
+    .single();
+  const openingCash = Number(
+    (shiftRow as { opening_cash: number } | null)?.opening_cash ?? 0
+  );
+
+  return {
+    totalCash,
+    totalTransfer,
+    totalCard,
+    orderCount: rows.length,
+    expectedCash: openingCash + totalCash,
+  };
+}
+
+// ─── Customer History ────────────────────────────────────────────────────────
+
+export type CustomerListItem = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  orderCount: number;
+  totalSpent: number;
+  lastOrderAt: string | null;
+};
+
+export type CustomerOrderHistoryItem = {
+  id: string;
+  orderNumber: string | null;
+  createdAt: string;
+  total: number;
+  paymentMethod: string;
+  status: string;
+};
+
+export async function getCustomers(tenantId: string): Promise<CustomerListItem[]> {
+  const supabase = await createClient();
+
+  const { data: customerRows } = await supabase
+    .from("customers")
+    .select("id, name, phone, email")
+    .eq("tenant_id", tenantId);
+
+  const { data: orderRows } = await supabase
+    .from("orders")
+    .select("customer_id, total, created_at")
+    .eq("tenant_id", tenantId)
+    .not("customer_id", "is", null)
+    .neq("status", "cancelled");
+
+  type OrderAggRow = { customer_id: string | null; total: number; created_at: string };
+  const byCustomer = new Map<string, { count: number; spent: number; last: string }>();
+  for (const row of (orderRows ?? []) as OrderAggRow[]) {
+    if (!row.customer_id) continue;
+    const existing = byCustomer.get(row.customer_id);
+    if (existing) {
+      existing.count += 1;
+      existing.spent += Number(row.total);
+      if (row.created_at > existing.last) existing.last = row.created_at;
+    } else {
+      byCustomer.set(row.customer_id, {
+        count: 1,
+        spent: Number(row.total),
+        last: row.created_at,
+      });
+    }
+  }
+
+  type CustomerRow = { id: string; name: string; phone: string | null; email: string | null };
+  const result: CustomerListItem[] = ((customerRows ?? []) as CustomerRow[]).map((c) => {
+    const agg = byCustomer.get(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      orderCount: agg?.count ?? 0,
+      totalSpent: agg?.spent ?? 0,
+      lastOrderAt: agg?.last ?? null,
+    };
+  });
+
+  return result.sort((a, b) => b.totalSpent - a.totalSpent);
+}
+
+export async function getCustomerById(
+  tenantId: string,
+  customerId: string
+): Promise<CustomerListItem | null> {
+  const supabase = await createClient();
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("id, name, phone, email")
+    .eq("tenant_id", tenantId)
+    .eq("id", customerId)
+    .single();
+  if (!customer) return null;
+
+  const { data: orderRows } = await supabase
+    .from("orders")
+    .select("total, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .neq("status", "cancelled");
+
+  const rows = (orderRows ?? []) as { total: number; created_at: string }[];
+  const totalSpent = rows.reduce((sum, r) => sum + Number(r.total), 0);
+  let lastOrderAt: string | null = null;
+  for (const row of rows) {
+    if (lastOrderAt === null || row.created_at > lastOrderAt) {
+      lastOrderAt = row.created_at;
+    }
+  }
+
+  return {
+    id: customer.id,
+    name: customer.name,
+    phone: customer.phone,
+    email: customer.email,
+    orderCount: rows.length,
+    totalSpent,
+    lastOrderAt,
+  };
+}
+
+export async function getCustomerOrders(
+  tenantId: string,
+  customerId: string
+): Promise<CustomerOrderHistoryItem[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("orders")
+    .select("id, order_number, created_at, total, payment_method, status")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: false });
+
+  type Row = {
+    id: string;
+    order_number: string | null;
+    created_at: string;
+    total: number;
+    payment_method: string;
+    status: string;
+  };
+  return ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    orderNumber: r.order_number,
+    createdAt: r.created_at,
+    total: Number(r.total),
+    paymentMethod: r.payment_method,
+    status: r.status,
+  }));
+}
