@@ -13,6 +13,7 @@ type Props = {
 export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -72,7 +73,12 @@ export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
               </Button>
               <Button
                 type="button"
-                onClick={onConfirm}
+                onClick={() => {
+                  if (isConfirming) return;
+                  setIsConfirming(true);
+                  onConfirm();
+                }}
+                disabled={isConfirming}
                 className="flex-1 bg-accent hover:bg-accent/90 text-white"
               >
                 ยืนยันชำระเงินแล้ว
