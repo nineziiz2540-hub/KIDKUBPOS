@@ -127,7 +127,7 @@ export function PosScreen({
     setTableNumber("");
   }
 
-  function submitOrder() {
+  function submitOrder(onSettled?: () => void) {
     setError(null);
     setLastOrderNumber(null);
     startCheckout(async () => {
@@ -146,6 +146,7 @@ export function PosScreen({
         setTableNumber("");
         setCustomerId(null);
       }
+      onSettled?.();
     });
   }
 
@@ -159,8 +160,7 @@ export function PosScreen({
   }
 
   function handleQrConfirm() {
-    setShowQrModal(false);
-    submitOrder();
+    submitOrder(() => setShowQrModal(false));
   }
 
   const pendingProductModifiers: ModifierWithOptions[] = pendingProduct

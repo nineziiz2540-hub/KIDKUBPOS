@@ -47,7 +47,7 @@ export async function closeShift(
   const variance = closingCashCounted - summary.expectedCash;
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("shifts")
     .update({
       closed_by: profile.id,
@@ -58,9 +58,14 @@ export async function closeShift(
       status: "closed",
     })
     .eq("id", shiftId)
-    .eq("tenant_id", profile.tenant_id);
+    .eq("tenant_id", profile.tenant_id)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
 
-  if (error) return { error: "ปิดกะไม่สำเร็จ" };
+  if (error || !updated) {
+    return { error: "ปิดกะไม่สำเร็จ (กะอาจถูกปิดไปแล้ว)" };
+  }
 
   revalidatePath("/shifts");
   revalidatePath("/pos");
