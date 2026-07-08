@@ -20,6 +20,7 @@ type Props = {
   allModifiers: ModifierWithOptions[];
   userName: string;
   todayOrderCount: number;
+  activeShiftId: string | null;
 };
 
 export function PosScreen({
@@ -29,6 +30,7 @@ export function PosScreen({
   allModifiers,
   userName,
   todayOrderCount,
+  activeShiftId,
 }: Props) {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
@@ -169,7 +171,11 @@ export function PosScreen({
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <PosHeader userName={userName} todayOrderCount={todayOrderCount} />
+      <PosHeader
+        userName={userName}
+        todayOrderCount={todayOrderCount}
+        hasActiveShift={activeShiftId !== null}
+      />
       <div className="flex gap-4 flex-1 min-h-0 mt-2">
         <div className="flex-1 min-w-0">
           <ProductGrid

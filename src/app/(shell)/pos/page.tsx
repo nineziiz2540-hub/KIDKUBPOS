@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getProfile, getModifiers } from "@/lib/dal";
+import { getProfile, getModifiers, getActiveShift } from "@/lib/dal";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -88,6 +88,8 @@ export default async function PosPage() {
     .neq("status", "cancelled")
     .gte("created_at", todayStart.toISOString());
 
+  const activeShift = await getActiveShift(profile.tenant_id);
+
   return (
     <PosScreen
       products={products}
@@ -96,6 +98,7 @@ export default async function PosPage() {
       allModifiers={allModifiers}
       userName={profile.full_name ?? "ผู้ใช้"}
       todayOrderCount={todayOrderCount ?? 0}
+      activeShiftId={activeShift?.id ?? null}
     />
   );
 }
