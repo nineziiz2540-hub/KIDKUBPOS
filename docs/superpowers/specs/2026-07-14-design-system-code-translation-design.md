@@ -95,6 +95,18 @@ Wrap the active link's icon+label in a pill: when `active` is true, add a wrappi
 
 ### 7. Search filter — new client component + 2 page wire-ups
 
+> **Updated post-implementation:** the render-prop design below
+> (`children: (filtered: T[]) => React.ReactNode`) was caught by task
+> review as an illegal Server→Client boundary crossing — a Server Component
+> cannot pass a function as `children` into a `"use client"` component (not
+> serializable; crashes at runtime; `tsc --noEmit` cannot catch it, only
+> `npm run build` or a real render does). The shipped component instead
+> takes pre-rendered `children: React.ReactNode` and filters client-side via
+> `data-search-value` attributes + `querySelectorAll` + `style.display`
+> toggling — no React state/re-render involved. See the real file at
+> `src/components/ui/search-filter.tsx`. The code below is kept only as a
+> historical record of the original (rejected) design.
+
 **New file:** `src/components/ui/search-filter.tsx`
 
 ```tsx

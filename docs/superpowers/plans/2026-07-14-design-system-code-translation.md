@@ -434,6 +434,17 @@ git commit -m "feat(design-system): BottomNav active tab gets accent pill highli
 
 ### Task 7: SearchFilter (new component) + wire into Products and Inventory pages
 
+> **Updated post-implementation:** the render-prop signature below
+> (`children: (filtered: T[]) => React.ReactNode`) was rejected during task
+> review — a Server Component cannot pass a function as `children` into a
+> `"use client"` component (illegal Server→Client boundary crossing, not
+> serializable, crashes at runtime; `tsc --noEmit` does not catch it). The
+> shipped component takes `children: React.ReactNode` instead and filters
+> client-side via `data-search-value` attributes + `querySelectorAll` +
+> `style.display` toggling. Steps 1-8 below are kept as the historical
+> record of what was actually attempted first; see
+> `src/components/ui/search-filter.tsx` for the real, shipped shape.
+
 **Files:**
 - Create: `src/components/ui/search-filter.tsx`
 - Modify: `src/app/(shell)/products/page.tsx`
@@ -441,7 +452,7 @@ git commit -m "feat(design-system): BottomNav active tab gets accent pill highli
 
 **Interfaces:**
 - Consumes: `Input`'s `icon="search"` prop from Task 4.
-- Produces: `SearchFilter<T>({ items: T[], filterKey: keyof T, placeholder: string, children: (filtered: T[]) => React.ReactNode })` — a generic client component. `filterKey` must name a string-coercible field on `T` (both call sites use `"name"`).
+- Produces (as shipped): `SearchFilter({ placeholder: string, emptyMessage: string, children: React.ReactNode })` — filters pre-rendered rows client-side by toggling `display` on elements carrying `data-search-value`. (Originally planned as `SearchFilter<T>({ items: T[], filterKey: keyof T, placeholder: string, children: (filtered: T[]) => React.ReactNode })` — superseded, see note above.)
 
 - [ ] **Step 1: Create `src/components/ui/search-filter.tsx`**
 

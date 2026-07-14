@@ -160,12 +160,17 @@ body {
   --background: #eef3fc;
 }
 
-/* KIDKUBPOS: elevation scale (shadow-sm/md/lg auto-generated as Tailwind
+/* KIDKUBPOS: elevation scale (shadow-sm/md/lg/xl auto-generated as Tailwind
    utilities via the --shadow-* theme namespace; shadow-accent is a new,
-   non-default utility name generated the same way) */
+   non-default utility name generated the same way).
+   Note: overriding these standard Tailwind keys also restyles a few
+   pre-existing, out-of-scope call sites (analytics-section.tsx active tab,
+   product-form.tsx select/textarea, product-grid.tsx hover, pos-screen.tsx
+   sticky bar) — accepted intentionally, same navy-tinted elevation family. */
 @theme {
   --shadow-sm:     0 1px 2px rgba(12,26,61,0.06);
   --shadow-md:     0 2px 4px rgba(12,26,61,0.06), 0 4px 12px rgba(12,26,61,0.08);
   --shadow-lg:     0 2px 4px rgba(12,26,61,0.06), 0 8px 16px rgba(12,26,61,0.10);
+  --shadow-xl:     0 4px 8px rgba(12,26,61,0.08), 0 16px 32px rgba(12,26,61,0.12);
   --shadow-accent: 0 4px 12px rgba(255,107,53,0.25);
 }

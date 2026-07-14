@@ -49,7 +49,7 @@ function SearchFilter({
         {children}
         <p
           data-empty-message
-          className="hidden absolute inset-0 items-center justify-center bg-white px-4 py-8 text-center text-muted-foreground"
+          className="hidden absolute inset-0 items-center justify-center rounded-lg border bg-white px-4 py-8 text-center text-muted-foreground"
         >
           {emptyMessage}
         </p>
