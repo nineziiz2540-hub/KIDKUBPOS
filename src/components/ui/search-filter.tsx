@@ -1,37 +1,56 @@
 "use client"
 
-import { useState } from "react"
+import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 
-function SearchFilter<T>({
-  items,
-  filterKey,
+function SearchFilter({
   placeholder,
+  emptyMessage,
   children,
 }: {
-  items: T[]
-  filterKey: keyof T
   placeholder: string
-  children: (filtered: T[]) => React.ReactNode
+  emptyMessage: string
+  children: React.ReactNode
 }) {
-  const [query, setQuery] = useState("")
-  const filtered =
-    query.trim() === ""
-      ? items
-      : items.filter((item) =>
-          String(item[filterKey]).toLowerCase().includes(query.toLowerCase())
-        )
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const query = e.target.value.trim().toLowerCase()
+    const container = containerRef.current
+    if (!container) return
+
+    const rows = container.querySelectorAll<HTMLElement>("[data-search-value]")
+    let anyVisible = false
+    rows.forEach((row) => {
+      const value = row.dataset.searchValue?.toLowerCase() ?? ""
+      const match = query === "" || value.includes(query)
+      row.style.display = match ? "" : "none"
+      if (match) anyVisible = true
+    })
+
+    const emptyEl = container.querySelector<HTMLElement>("[data-empty-message]")
+    if (emptyEl) {
+      emptyEl.style.display = query !== "" && !anyVisible ? "" : "none"
+    }
+  }
 
   return (
     <div className="space-y-4">
       <Input
         icon="search"
         placeholder={placeholder}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={handleChange}
         className="max-w-xs"
       />
-      {children(filtered)}
+      <div ref={containerRef}>
+        {children}
+        <p
+          data-empty-message
+          className="hidden px-4 py-8 text-center text-muted-foreground"
+        >
+          {emptyMessage}
+        </p>
+      </div>
     </div>
   )
 }

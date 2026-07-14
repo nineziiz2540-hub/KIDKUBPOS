@@ -53,51 +53,52 @@ export default async function ProductsPage() {
         )}
       </div>
 
-      <SearchFilter items={products ?? []} filterKey="name" placeholder="ค้นหาสินค้า...">
-        {(filtered) => (
+      {products && products.length > 0 ? (
+        <SearchFilter placeholder="ค้นหาสินค้า..." emptyMessage="ไม่พบสินค้าที่ค้นหา">
           <div className="rounded-lg border bg-white divide-y divide-border">
-            {filtered.length > 0 ? (
-              filtered.map((product) => (
-                <div
-                  key={product.id}
-                  className="flex items-center gap-4 px-4 py-3"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sidebar truncate">
-                      {product.name}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {product.categories?.name ?? "ไม่ระบุหมวดหมู่"} ·{" "}
-                      ฿{Number(product.price).toFixed(2)}
-                    </p>
-                  </div>
-                  <Badge variant={product.is_active ? "default" : "secondary"}>
-                    {product.is_active ? "เปิด" : "ปิด"}
-                  </Badge>
-                  {canManage && (
-                    <div className="flex gap-2 shrink-0">
-                      <Link
-                        href={`/products/${product.id}/edit`}
-                        className={buttonVariants({ variant: "outline", size: "sm" })}
-                      >
-                        แก้ไข
-                      </Link>
-                      <form action={deleteProduct}>
-                        <input type="hidden" name="id" value={product.id} />
-                        <DeleteButton message={`ลบสินค้า "${product.name}"?`} />
-                      </form>
-                    </div>
-                  )}
+            {products.map((product) => (
+              <div
+                key={product.id}
+                data-search-value={product.name}
+                className="flex items-center gap-4 px-4 py-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sidebar truncate">
+                    {product.name}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {product.categories?.name ?? "ไม่ระบุหมวดหมู่"} ·{" "}
+                    ฿{Number(product.price).toFixed(2)}
+                  </p>
                 </div>
-              ))
-            ) : (
-              <p className="px-4 py-8 text-center text-muted-foreground">
-                {products && products.length > 0 ? "ไม่พบสินค้าที่ค้นหา" : "ยังไม่มีสินค้า"}
-              </p>
-            )}
+                <Badge variant={product.is_active ? "default" : "secondary"}>
+                  {product.is_active ? "เปิด" : "ปิด"}
+                </Badge>
+                {canManage && (
+                  <div className="flex gap-2 shrink-0">
+                    <Link
+                      href={`/products/${product.id}/edit`}
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                    >
+                      แก้ไข
+                    </Link>
+                    <form action={deleteProduct}>
+                      <input type="hidden" name="id" value={product.id} />
+                      <DeleteButton message={`ลบสินค้า "${product.name}"?`} />
+                    </form>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        )}
-      </SearchFilter>
+        </SearchFilter>
+      ) : (
+        <div className="rounded-lg border bg-white divide-y divide-border">
+          <p className="px-4 py-8 text-center text-muted-foreground">
+            ยังไม่มีสินค้า
+          </p>
+        </div>
+      )}
     </div>
   );
 }
