@@ -30,7 +30,10 @@ function SearchFilter({
 
     const emptyEl = container.querySelector<HTMLElement>("[data-empty-message]")
     if (emptyEl) {
-      emptyEl.style.display = query !== "" && !anyVisible ? "" : "none"
+      // Tailwind's `hidden` class sets display:none in the stylesheet;
+      // clearing the inline style ("") falls back to that class, not to
+      // visible — an explicit value is required to actually reveal it.
+      emptyEl.style.display = query !== "" && !anyVisible ? "flex" : "none"
     }
   }
 
@@ -42,11 +45,11 @@ function SearchFilter({
         onChange={handleChange}
         className="max-w-xs"
       />
-      <div ref={containerRef}>
+      <div ref={containerRef} className="relative min-h-20">
         {children}
         <p
           data-empty-message
-          className="hidden px-4 py-8 text-center text-muted-foreground"
+          className="hidden absolute inset-0 items-center justify-center bg-white px-4 py-8 text-center text-muted-foreground"
         >
           {emptyMessage}
         </p>
