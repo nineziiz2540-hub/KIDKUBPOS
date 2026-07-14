@@ -6,6 +6,7 @@ import type { ModifierWithOptions } from "@/types/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 type Props = {
   action: (prevState: ModifierState, formData: FormData) => Promise<ModifierState>;
@@ -46,22 +47,18 @@ export function ModifierForm({ action, defaults }: Props) {
         </div>
         <div className="flex flex-col gap-3 pt-1">
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Switch
               id="mod-required"
               name="is_required"
               defaultChecked={defaults?.isRequired ?? false}
-              className="h-4 w-4 rounded border-input accent-accent"
             />
             <Label htmlFor="mod-required">บังคับเลือก</Label>
           </div>
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Switch
               id="mod-multi"
               name="is_multi_select"
               defaultChecked={defaults?.isMultiSelect ?? false}
-              className="h-4 w-4 rounded border-input accent-accent"
             />
             <Label htmlFor="mod-multi">เลือกได้หลายตัวเลือก</Label>
           </div>

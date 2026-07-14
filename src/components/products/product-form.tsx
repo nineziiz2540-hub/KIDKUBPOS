@@ -4,6 +4,7 @@ import type { ProductState } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 type Category = { id: string; name: string };
@@ -107,12 +108,10 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
       </div>
 
       <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
+        <Switch
           id="is_active"
           name="is_active"
           defaultChecked={defaults.is_active ?? true}
-          className="h-4 w-4 rounded border-input accent-accent"
         />
         <Label htmlFor="is_active">เปิดใช้งาน</Label>
       </div>
