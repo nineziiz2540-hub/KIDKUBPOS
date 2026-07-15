@@ -11,7 +11,6 @@ import {
 import { RawMaterialForm } from "@/components/inventory/raw-material-form";
 import { StockActionForm } from "@/components/inventory/stock-action-form";
 import { MaterialRow } from "@/components/inventory/material-row";
-import { Badge } from "@/components/ui/badge";
 import { SearchFilter } from "@/components/ui/search-filter";
 
 export default async function InventoryPage({
