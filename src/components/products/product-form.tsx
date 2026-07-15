@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import type { ProductState } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,12 +35,14 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
     undefined
   );
   const toastManager = useToastManager();
+  const toastManagerRef = useRef(toastManager);
+  toastManagerRef.current = toastManager;
 
   useEffect(() => {
     if (state?.error) {
-      toastManager.add({ title: state.error, type: "error" });
+      toastManagerRef.current.add({ title: state.error, type: "error" });
     }
-  }, [state?.error, toastManager]);
+  }, [state?.error]);
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
