@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { deleteProduct } from "@/app/actions/products";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DeleteButton } from "@/components/ui/delete-button";
+import { MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuLinkItem, MenuSeparator } from "@/components/ui/menu";
 import { SearchFilter } from "@/components/ui/search-filter";
 import { cn } from "@/lib/utils";
 
@@ -75,18 +76,32 @@ export default async function ProductsPage() {
                   {product.is_active ? "เปิด" : "ปิด"}
                 </Badge>
                 {canManage && (
-                  <div className="flex gap-2 shrink-0">
-                    <Link
-                      href={`/products/${product.id}/edit`}
-                      className={buttonVariants({ variant: "outline", size: "sm" })}
-                    >
-                      แก้ไข
-                    </Link>
-                    <form action={deleteProduct}>
+                  <>
+                    <Menu>
+                      <MenuTrigger className="rounded p-1.5 text-muted-foreground hover:bg-muted/20">
+                        <MoreVertical size={16} />
+                      </MenuTrigger>
+                      <MenuPopup>
+                        <MenuLinkItem href={`/products/${product.id}/edit`}>
+                          <Pencil size={14} /> แก้ไข
+                        </MenuLinkItem>
+                        <MenuSeparator />
+                        <MenuItem
+                          destructive
+                          onClick={() => {
+                            if (confirm(`ลบสินค้า "${product.name}"?`)) {
+                              (document.getElementById(`delete-form-${product.id}`) as HTMLFormElement | null)?.requestSubmit();
+                            }
+                          }}
+                        >
+                          <Trash2 size={14} /> ลบ
+                        </MenuItem>
+                      </MenuPopup>
+                    </Menu>
+                    <form id={`delete-form-${product.id}`} action={deleteProduct} className="hidden">
                       <input type="hidden" name="id" value={product.id} />
-                      <DeleteButton message={`ลบสินค้า "${product.name}"?`} />
                     </form>
-                  </div>
+                  </>
                 )}
               </div>
             ))}
