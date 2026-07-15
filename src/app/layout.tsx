@@ -1,15 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Prompt, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider, Toaster } from "@/components/ui/toast";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const prompt = Prompt({
+  variable: "--font-prompt",
+  subsets: ["thai", "latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -36,7 +37,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${prompt.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="h-full">
         <ToastProvider>
