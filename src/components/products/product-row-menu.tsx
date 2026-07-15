@@ -24,7 +24,10 @@ export function ProductRowMenu({
   return (
     <>
       <Menu>
-        <MenuTrigger className="rounded p-1.5 text-muted-foreground hover:bg-muted/20">
+        <MenuTrigger
+          aria-label={`ตัวเลือกสำหรับ ${productName}`}
+          className="rounded p-1.5 text-muted-foreground hover:bg-muted/20"
+        >
           <MoreVertical size={16} />
         </MenuTrigger>
         <MenuPopup>
