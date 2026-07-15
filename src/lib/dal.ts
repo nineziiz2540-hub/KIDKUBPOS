@@ -410,7 +410,8 @@ export async function getSalesByHour(
 
 export async function getSalesByCategory(
   tenantId: string,
-  range: "day" | "week" | "month" | "year"
+  range: "day" | "week" | "month" | "year" | "custom",
+  customRange?: { start: string; end: string } // "YYYY-MM-DD" Bangkok, required when range === "custom"
 ): Promise<{ category: string; total: number }[]> {
   const supabase = await createClient();
   const offsetMs = 7 * 60 * 60 * 1000;
@@ -418,7 +419,12 @@ export async function getSalesByCategory(
   const bangkokNow = new Date(now.getTime() + offsetMs);
 
   let rangeStart: Date;
-  if (range === "day") {
+  let rangeEndExclusive: Date | null = null;
+  if (range === "custom" && customRange) {
+    rangeStart = new Date(`${customRange.start}T00:00:00+07:00`);
+    rangeEndExclusive = new Date(`${customRange.end}T00:00:00+07:00`);
+    rangeEndExclusive.setTime(rangeEndExclusive.getTime() + 24 * 60 * 60 * 1000);
+  } else if (range === "day") {
     const midnight = Date.UTC(
       bangkokNow.getUTCFullYear(),
       bangkokNow.getUTCMonth(),
@@ -434,12 +440,16 @@ export async function getSalesByCategory(
     rangeStart = new Date(`${bangkokNow.getUTCFullYear()}-01-01T00:00:00+07:00`);
   }
 
-  const { data: orders } = await supabase
+  let query = supabase
     .from("orders")
     .select("id")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
     .gte("created_at", rangeStart.toISOString());
+  if (rangeEndExclusive) {
+    query = query.lt("created_at", rangeEndExclusive.toISOString());
+  }
+  const { data: orders } = await query;
 
   if (!orders || orders.length === 0) return [];
 

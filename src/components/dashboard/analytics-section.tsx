@@ -6,6 +6,7 @@ import { SummaryCards } from "./summary-cards";
 import { SalesTrendChart } from "./sales-trend-chart";
 import { PeakHoursChart } from "./peak-hours-chart";
 import { CategoryPerformanceChart } from "./category-performance-chart";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import type {
   SalesSummary,
   SalesByDay,
@@ -13,7 +14,7 @@ import type {
   HourlyPattern,
 } from "@/lib/dal";
 
-type Range = "day" | "week" | "month" | "year";
+type Range = "day" | "week" | "month" | "year" | "custom";
 
 const RANGE_TABS: { value: Range; label: string }[] = [
   { value: "day", label: "วันนี้" },
@@ -21,6 +22,11 @@ const RANGE_TABS: { value: Range; label: string }[] = [
   { value: "month", label: "30 วัน" },
   { value: "year", label: "ปีนี้" },
 ];
+
+function formatShortDate(dateStr: string): string {
+  const parts = dateStr.split("-");
+  return `${Number(parts[2] ?? "0")}/${Number(parts[1] ?? "0")}`;
+}
 
 type Props = {
   range: Range;
@@ -50,6 +56,21 @@ export function AnalyticsSection({
     router.replace(`?${params.toString()}`);
   }
 
+  function setCustomRange(from: string, to: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("range", "custom");
+    params.set("from", from);
+    params.set("to", to);
+    router.replace(`?${params.toString()}`);
+  }
+
+  const customFrom = searchParams.get("from");
+  const customTo = searchParams.get("to");
+  const customLabel =
+    range === "custom" && customFrom && customTo
+      ? `${formatShortDate(customFrom)} - ${formatShortDate(customTo)}`
+      : "กำหนดเอง";
+
   return (
     <div className="space-y-4">
       {/* Range Tabs */}
@@ -68,6 +89,11 @@ export function AnalyticsSection({
             {label}
           </button>
         ))}
+        <DateRangePicker
+          active={range === "custom"}
+          label={customLabel}
+          onApply={setCustomRange}
+        />
       </div>
 
       {/* Summary Cards */}
@@ -84,7 +110,7 @@ export function AnalyticsSection({
           {range === "day" && hourlyData !== null && (
             <SalesTrendChart range="day" data={hourlyData} />
           )}
-          {(range === "week" || range === "month") && dailyData !== null && (
+          {(range === "week" || range === "month" || range === "custom") && dailyData !== null && (
             <SalesTrendChart range={range} data={dailyData} />
           )}
           {range === "year" && monthlyData !== null && (

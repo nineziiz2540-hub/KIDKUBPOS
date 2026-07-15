@@ -86,7 +86,7 @@ function StatCards({ stats }: { stats: DashboardStats }) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
@@ -106,11 +106,20 @@ export default async function DashboardPage({
     );
   }
 
-  const { range: rawRange } = await searchParams;
-  const range: "day" | "week" | "month" | "year" =
+  const { range: rawRange, from: rawFrom, to: rawTo } = await searchParams;
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const hasValidCustomDates =
+    typeof rawFrom === "string" &&
+    typeof rawTo === "string" &&
+    ISO_DATE.test(rawFrom) &&
+    ISO_DATE.test(rawTo) &&
+    rawFrom <= rawTo;
+  const range: "day" | "week" | "month" | "year" | "custom" =
     rawRange === "week" || rawRange === "month" || rawRange === "year"
       ? rawRange
-      : "day";
+      : rawRange === "custom" && hasValidCustomDates
+        ? "custom"
+        : "day";
 
   // Bangkok date strings ("YYYY-MM-DD")
   const offsetMs = 7 * 60 * 60 * 1000;
@@ -125,14 +134,16 @@ export default async function DashboardPage({
   }
 
   const startDate =
-    range === "week"
+    range === "custom" && hasValidCustomDates
+      ? (rawFrom as string)
+      : range === "week"
       ? daysAgoStr(6)
       : range === "month"
       ? daysAgoStr(29)
       : range === "year"
       ? `${bangkokYear}-01-01`
       : todayStr;
-  const endDate = todayStr;
+  const endDate = range === "custom" && hasValidCustomDates ? (rawTo as string) : todayStr;
 
   const [
     stats,
@@ -154,7 +165,7 @@ export default async function DashboardPage({
     range === "day"
       ? getSalesByHour(profile.tenant_id, todayStr)
       : Promise.resolve(null),
-    range === "week" || range === "month"
+    range === "week" || range === "month" || range === "custom"
       ? getSalesByDay(profile.tenant_id, startDate, endDate)
       : Promise.resolve(null),
     range === "year"
@@ -163,7 +174,11 @@ export default async function DashboardPage({
     range !== "day"
       ? getHourlyPattern(profile.tenant_id, startDate, endDate)
       : Promise.resolve(null),
-    getSalesByCategory(profile.tenant_id, range),
+    getSalesByCategory(
+      profile.tenant_id,
+      range,
+      range === "custom" ? { start: startDate, end: endDate } : undefined
+    ),
     getProductsForCalculator(profile.tenant_id),
     getTenantDeliveryGp(profile.tenant_id),
   ]);

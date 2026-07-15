@@ -20,7 +20,7 @@ const THAI_MONTHS = [
 
 type Props =
   | { range: "day"; data: { hour: number; total: number }[] }
-  | { range: "week" | "month"; data: SalesByDay[] }
+  | { range: "week" | "month" | "custom"; data: SalesByDay[] }
   | { range: "year"; data: SalesByMonth[] };
 
 function formatDayLabel(dateStr: string): string {
@@ -60,7 +60,7 @@ export function SalesTrendChart(props: Props) {
     );
   }
 
-  if (props.range === "week" || props.range === "month") {
+  if (props.range === "week" || props.range === "month" || props.range === "custom") {
     const chartData = props.data.map((d) => ({
       label: formatDayLabel(d.date),
       total: d.total,
@@ -72,7 +72,7 @@ export function SalesTrendChart(props: Props) {
           <XAxis
             dataKey="label"
             tick={{ fontSize: 11 }}
-            interval={props.range === "month" ? 4 : 0}
+            interval={chartData.length > 10 ? Math.ceil(chartData.length / 8) : 0}
           />
           <YAxis tick={{ fontSize: 11 }} width={52} tickFormatter={yFormatter} />
           <Tooltip formatter={tooltipFormatter} />
