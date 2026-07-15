@@ -100,12 +100,12 @@ export function MaterialRow({
             </MenuTrigger>
             <MenuPopup>{menuItems}</MenuPopup>
           </Menu>
+          <form ref={formRef} action={deleteRawMaterial} className="hidden">
+            <input type="hidden" name="id" value={id} />
+          </form>
         </td>
       </ContextMenuTrigger>
       <MenuPopup>{menuItems}</MenuPopup>
-      <form ref={formRef} action={deleteRawMaterial} className="hidden">
-        <input type="hidden" name="id" value={id} />
-      </form>
     </ContextMenu>
   );
 }
