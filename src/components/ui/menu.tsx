@@ -1,10 +1,13 @@
 "use client"
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu"
 import { cn } from "@/lib/utils"
 
 const Menu = MenuPrimitive.Root
 const MenuTrigger = MenuPrimitive.Trigger
+const ContextMenu = ContextMenuPrimitive.Root
+const ContextMenuTrigger = ContextMenuPrimitive.Trigger
 
 function MenuPopup({ className, ...props }: MenuPrimitive.Popup.Props) {
   return (
@@ -60,4 +63,4 @@ function MenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   )
 }
 
-export { Menu, MenuTrigger, MenuPopup, MenuItem, MenuLinkItem, MenuSeparator }
+export { Menu, MenuTrigger, MenuPopup, MenuItem, MenuLinkItem, MenuSeparator, ContextMenu, ContextMenuTrigger }
