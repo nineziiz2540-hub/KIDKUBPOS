@@ -1,11 +1,12 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import type { ProductState } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useToastManager } from "@/components/ui/toast";
 
 type Category = { id: string; name: string };
 
@@ -33,6 +34,14 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
     action,
     undefined
   );
+  const toastManager = useToastManager();
+
+  useEffect(() => {
+    if (state?.error) {
+      toastManager.add({ title: state.error, type: "error" });
+    }
+  }, [state?.error, toastManager]);
+
   return (
     <form action={formAction} className="max-w-lg space-y-4">
       {defaults.id !== undefined && (
@@ -115,10 +124,6 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
         />
         <Label htmlFor="is_active">เปิดใช้งาน</Label>
       </div>
-
-      {state?.error !== undefined && (
-        <p className="text-sm font-medium text-destructive">{state.error}</p>
-      )}
 
       <div className="flex gap-2">
         <Button

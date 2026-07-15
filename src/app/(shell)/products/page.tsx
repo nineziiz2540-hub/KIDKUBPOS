@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProductRowMenu } from "@/components/products/product-row-menu";
 import { SearchFilter } from "@/components/ui/search-filter";
+import { SavedToastTrigger } from "@/components/products/saved-toast-trigger";
 import { cn } from "@/lib/utils";
 
 type ProductRow = {
@@ -17,11 +18,16 @@ type ProductRow = {
   categories: { name: string } | null;
 };
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ saved?: string }>;
+}) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
 
   const canManage = profile.role === "owner" || profile.role === "manager";
+  const { saved } = await searchParams;
 
   const supabase = await createClient();
   const { data: products } = (await supabase
@@ -31,6 +37,7 @@ export default async function ProductsPage() {
 
   return (
     <div className="space-y-6">
+      {saved === "1" && <SavedToastTrigger />}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-sidebar">สินค้า</h1>

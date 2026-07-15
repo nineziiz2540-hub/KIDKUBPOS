@@ -52,7 +52,7 @@ export async function createProduct(
 
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
-  redirect("/products");
+  redirect("/products?saved=1");
 }
 
 export async function updateProduct(
@@ -107,7 +107,7 @@ export async function updateProduct(
 
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
-  redirect("/products");
+  redirect("/products?saved=1");
 }
 
 export async function deleteProduct(formData: FormData): Promise<void> {
