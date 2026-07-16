@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { signIn, type SignInState } from "@/app/actions/auth";
+import { OAuthButtons } from "@/components/auth/oauth-buttons";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -72,6 +73,15 @@ export default function LoginPage() {
             </Link>
           </p>
         </form>
+        <div className="relative py-2">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-white px-2 text-muted-foreground">หรือ</span>
+          </div>
+        </div>
+        <OAuthButtons />
       </CardContent>
     </Card>
   );
