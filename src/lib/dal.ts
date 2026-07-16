@@ -12,6 +12,9 @@ export type ProfileWithTenant = {
   full_name: string | null;
   role: Role;
   tenant_id: string;
+  pin_hash: string | null;
+  pin_failed_attempts: number;
+  pin_locked_until: string | null;
   created_at: string;
   updated_at: string;
   tenants: {

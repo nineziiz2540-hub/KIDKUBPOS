@@ -487,25 +487,40 @@ export type Database = {
       }
       profiles: {
         Row: {
+          auth_managed: boolean
           created_at: string
           full_name: string | null
           id: string
+          pin_failed_attempts: number
+          pin_hash: string | null
+          pin_locked_until: string | null
+          recovery_contact: string | null
           role: string
           tenant_id: string
           updated_at: string
         }
         Insert: {
+          auth_managed?: boolean
           created_at?: string
           full_name?: string | null
           id: string
+          pin_failed_attempts?: number
+          pin_hash?: string | null
+          pin_locked_until?: string | null
+          recovery_contact?: string | null
           role?: string
           tenant_id: string
           updated_at?: string
         }
         Update: {
+          auth_managed?: boolean
           created_at?: string
           full_name?: string | null
           id?: string
+          pin_failed_attempts?: number
+          pin_hash?: string | null
+          pin_locked_until?: string | null
+          recovery_contact?: string | null
           role?: string
           tenant_id?: string
           updated_at?: string
@@ -675,6 +690,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_tenant_and_owner: {
+        Args: { p_store_name: string; p_user_id: string }
+        Returns: string
+      }
       deduct_stock_for_order: {
         Args: { p_order_id: string }
         Returns: undefined
