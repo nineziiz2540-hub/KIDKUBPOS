@@ -36,7 +36,9 @@ export function ProductForm({ action, categories, defaults = {} }: Props) {
   );
   const toastManager = useToastManager();
   const toastManagerRef = useRef(toastManager);
-  toastManagerRef.current = toastManager;
+  useEffect(() => {
+    toastManagerRef.current = toastManager;
+  });
 
   useEffect(() => {
     if (state?.error) {
