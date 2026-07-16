@@ -4,6 +4,8 @@ import { ChevronLeft } from "lucide-react";
 import { getProfile, getTeamMembers } from "@/lib/dal";
 import { updateMemberRole } from "@/app/actions/settings";
 import { RoleSelectForm } from "@/components/settings/role-select-form";
+import { TeamMemberForm } from "@/components/settings/team-member-form";
+import { ResetPinForm } from "@/components/settings/reset-pin-form";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
@@ -51,11 +53,14 @@ export default async function TeamPage() {
                 คุณ
               </span>
             ) : (
-              <RoleSelectForm
-                action={updateMemberRole}
-                memberId={member.id}
-                currentRole={member.role}
-              />
+              <div className="flex items-center gap-2">
+                <RoleSelectForm
+                  action={updateMemberRole}
+                  memberId={member.id}
+                  currentRole={member.role}
+                />
+                <ResetPinForm memberId={member.id} />
+              </div>
             )}
           </div>
         ))}
@@ -65,6 +70,8 @@ export default async function TeamPage() {
           </p>
         )}
       </div>
+
+      <TeamMemberForm />
     </div>
   );
 }
