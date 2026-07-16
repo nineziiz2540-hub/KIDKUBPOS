@@ -212,6 +212,10 @@ export async function createTeamMember(
     auth_managed: false,
   });
   if (insertError) {
+    const { error: deleteError } = await admin.auth.admin.deleteUser(created.user.id);
+    if (deleteError) {
+      console.error("Failed to clean up orphaned auth user:", deleteError);
+    }
     return { error: "บันทึกข้อมูลพนักงานไม่สำเร็จ" };
   }
 
@@ -257,7 +261,8 @@ export async function resetTeamMemberPin(
   }
 
   const pinHash = await bcrypt.hash(pin, 10);
-  const { error } = await supabase
+  const admin = createAdminClient();
+  const { error } = await admin
     .from("profiles")
     .update({ pin_hash: pinHash, pin_failed_attempts: 0, pin_locked_until: null })
     .eq("id", memberId)

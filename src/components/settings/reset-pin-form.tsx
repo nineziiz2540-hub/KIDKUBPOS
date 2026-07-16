@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { resetTeamMemberPin, type TeamMemberState } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,13 @@ export function ResetPinForm({ memberId }: { memberId: string }) {
     resetTeamMemberPin,
     undefined
   );
+
+  useEffect(() => {
+    if (state?.success) {
+      const timer = setTimeout(() => setOpen(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [state?.success]);
 
   if (!open) {
     return (
@@ -45,6 +52,9 @@ export function ResetPinForm({ memberId }: { memberId: string }) {
       </Button>
       {state?.error !== undefined && (
         <p className="text-xs text-destructive">{state.error}</p>
+      )}
+      {state?.success && (
+        <p className="text-xs text-success">ตั้ง PIN ใหม่สำเร็จ</p>
       )}
     </form>
   );
