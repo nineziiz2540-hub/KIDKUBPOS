@@ -1,7 +1,7 @@
 "use client";
 import { useActionState } from "react";
 import Link from "next/link";
-import { signIn, type SignInState } from "@/app/actions/auth";
+import { signUp, type SignUpState } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,28 +13,31 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export default function LoginPage() {
-  const [state, action, pending] = useActionState<SignInState, FormData>(
-    signIn,
+export default function RegisterPage() {
+  const [state, action, pending] = useActionState<SignUpState, FormData>(
+    signUp,
     undefined
   );
 
   return (
     <Card className="w-full max-w-sm">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl text-sidebar">KIDKUBPOS</CardTitle>
-        <CardDescription>เข้าสู่ระบบเพื่อดำเนินการต่อ</CardDescription>
+        <CardTitle className="text-2xl text-sidebar">สมัครใช้งาน KIDKUBPOS</CardTitle>
+        <CardDescription>สร้างร้านค้าของคุณ</CardDescription>
       </CardHeader>
       <CardContent>
         <form action={action} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="store_name">ชื่อร้าน</Label>
+            <Input id="store_name" name="store_name" type="text" required />
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="email">อีเมล</Label>
             <Input
               id="email"
               name="email"
               type="email"
-              placeholder="you@example.com"
-              autoComplete="email"
+              autoComplete="username"
               required
             />
           </div>
@@ -44,8 +47,17 @@ export default function LoginPage() {
               id="password"
               name="password"
               type="password"
-              placeholder="••••••••"
-              autoComplete="current-password"
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm_password">ยืนยันรหัสผ่าน</Label>
+            <Input
+              id="confirm_password"
+              name="confirm_password"
+              type="password"
+              autoComplete="new-password"
               required
             />
           </div>
@@ -57,12 +69,12 @@ export default function LoginPage() {
             disabled={pending}
             className="w-full bg-accent hover:bg-accent/90 text-white"
           >
-            {pending ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
+            {pending ? "กำลังสมัคร…" : "สมัครใช้งาน"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">
-            ยังไม่มีบัญชี?{" "}
-            <Link href="/register" className="text-accent font-medium hover:underline">
-              สมัครใช้งาน
+            มีบัญชีอยู่แล้ว?{" "}
+            <Link href="/login" className="text-accent font-medium hover:underline">
+              เข้าสู่ระบบ
             </Link>
           </p>
         </form>

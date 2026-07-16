@@ -30,3 +30,47 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+export type SignUpState = { error?: string } | undefined;
+
+export async function signUp(
+  prevState: SignUpState,
+  formData: FormData
+): Promise<SignUpState> {
+  const storeName = formData.get("store_name");
+  const email = formData.get("email");
+  const password = formData.get("password");
+  const confirmPassword = formData.get("confirm_password");
+
+  if (
+    typeof storeName !== "string" ||
+    typeof email !== "string" ||
+    typeof password !== "string" ||
+    typeof confirmPassword !== "string" ||
+    storeName.trim() === ""
+  ) {
+    return { error: "กรุณากรอกข้อมูลให้ครบถ้วน" };
+  }
+  if (password !== confirmPassword) {
+    return { error: "รหัสผ่านไม่ตรงกัน" };
+  }
+  if (password.length < 6) {
+    return { error: "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร" };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error || !data.user) {
+    return { error: "สมัครสมาชิกไม่สำเร็จ อีเมลนี้อาจถูกใช้แล้ว" };
+  }
+
+  const { error: rpcError } = await supabase.rpc("create_tenant_and_owner", {
+    p_user_id: data.user.id,
+    p_store_name: storeName.trim(),
+  });
+  if (rpcError) {
+    return { error: "สร้างร้านค้าไม่สำเร็จ กรุณาติดต่อผู้ดูแลระบบ" };
+  }
+
+  redirect("/job-level");
+}
