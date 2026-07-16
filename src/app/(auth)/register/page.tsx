@@ -48,6 +48,7 @@ export default function RegisterPage() {
               name="password"
               type="password"
               autoComplete="new-password"
+              minLength={6}
               required
             />
           </div>
@@ -58,6 +59,7 @@ export default function RegisterPage() {
               name="confirm_password"
               type="password"
               autoComplete="new-password"
+              minLength={6}
               required
             />
           </div>

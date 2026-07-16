@@ -1,6 +1,7 @@
 "use server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type SignInState = { error?: string } | undefined;
 
@@ -69,6 +70,12 @@ export async function signUp(
     p_store_name: storeName.trim(),
   });
   if (rpcError) {
+    const admin = createAdminClient();
+    const { error: deleteError } = await admin.auth.admin.deleteUser(data.user.id);
+    if (deleteError) {
+      console.error("Failed to clean up orphaned auth user:", deleteError);
+    }
+    console.error("create_tenant_and_owner failed:", rpcError);
     return { error: "สร้างร้านค้าไม่สำเร็จ กรุณาติดต่อผู้ดูแลระบบ" };
   }
 
