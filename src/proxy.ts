@@ -32,12 +32,18 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthed = user !== null;
   const isLoginPage = pathname === "/login";
+  const isPublicAuthRoute =
+    isLoginPage ||
+    pathname === "/register" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname.startsWith("/auth/callback");
 
-  if (!isAuthed && !isLoginPage) {
+  if (!isAuthed && !isPublicAuthRoute) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (isAuthed && isLoginPage) {
+  if (isAuthed && (isLoginPage || pathname === "/register")) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 

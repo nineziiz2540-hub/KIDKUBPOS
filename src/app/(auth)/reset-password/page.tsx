@@ -1,8 +1,9 @@
 "use client";
 import { useActionState } from "react";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { updatePassword, type UpdatePasswordState } from "@/app/actions/auth";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,12 +15,48 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+type ExchangeState = "pending" | "ready" | "error";
+
+function PendingCard() {
+  return (
+    <Card className="w-full max-w-sm">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl text-sidebar">กำลังตรวจสอบลิงก์...</CardTitle>
+      </CardHeader>
+    </Card>
+  );
+}
+
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<PendingCard />}>
+      <ResetPasswordForm />
+    </Suspense>
+  );
+}
+
+function ResetPasswordForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [exchangeState, setExchangeState] = useState<ExchangeState>("pending");
   const [state, action, pending] = useActionState<UpdatePasswordState, FormData>(
     updatePassword,
     undefined
   );
+
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (!code) {
+      setExchangeState("error");
+      return;
+    }
+
+    const supabase = createClient();
+    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+      setExchangeState(error ? "error" : "ready");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (state?.success) {
@@ -34,6 +71,25 @@ export default function ResetPasswordPage() {
         <CardHeader className="text-center">
           <CardTitle className="text-2xl text-sidebar">เปลี่ยนรหัสผ่านสำเร็จ</CardTitle>
           <CardDescription>กำลังพาไปหน้าเข้าสู่ระบบ…</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (exchangeState === "pending") {
+    return <PendingCard />;
+  }
+
+  if (exchangeState === "error") {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl text-sidebar">ลิงก์ไม่ถูกต้องหรือหมดอายุ</CardTitle>
+          <CardDescription>
+            <a href="/forgot-password" className="text-accent underline">
+              ขอลิงก์ใหม่
+            </a>
+          </CardDescription>
         </CardHeader>
       </Card>
     );
