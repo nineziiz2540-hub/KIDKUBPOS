@@ -186,3 +186,9 @@ export async function switchToMember(
   });
   redirect("/");
 }
+
+export async function switchWorker(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(WORKER_COOKIE);
+  redirect("/job-level");
+}

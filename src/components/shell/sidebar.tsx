@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { LogoutButton } from "./logout-button";
+import { SwitchWorkerButton } from "./switch-worker-button";
 import { getProfile, type Role } from "@/lib/dal";
 
 type NavItem = {
@@ -27,7 +28,7 @@ const allNavItems: NavItem[] = [
   { href: "/pos", label: "POS", icon: CreditCard, minRole: "staff" },
   { href: "/orders", label: "Orders", icon: ShoppingBag, minRole: "staff" },
   { href: "/shifts", label: "Shifts", icon: Clock, minRole: "staff" },
-  { href: "/products", label: "Products", icon: Package, minRole: "staff" },
+  { href: "/products", label: "Products", icon: Package, minRole: "manager" },
   { href: "/categories", label: "Categories", icon: Tag, minRole: "manager" },
   { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
   { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
@@ -84,6 +85,7 @@ export async function Sidebar() {
           </p>
           <p className="text-xs text-accent font-medium capitalize">{role}</p>
         </div>
+        <SwitchWorkerButton />
         <LogoutButton />
       </div>
     </aside>

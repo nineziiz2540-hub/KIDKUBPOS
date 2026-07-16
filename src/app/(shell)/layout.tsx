@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { BottomNav } from "@/components/shell/bottom-nav";
@@ -11,6 +12,9 @@ export default async function ShellLayout({
 }) {
   const user = await getAuthUser();
   if (!user) redirect("/login");
+
+  const cookieStore = await cookies();
+  if (!cookieStore.has("worker_verified")) redirect("/job-level");
 
   return (
     <div className="flex h-full">

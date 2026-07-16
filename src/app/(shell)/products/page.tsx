@@ -25,6 +25,7 @@ export default async function ProductsPage({
 }) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
+  if (profile.role !== "owner" && profile.role !== "manager") redirect("/");
 
   const canManage = profile.role === "owner" || profile.role === "manager";
   const { saved } = await searchParams;
