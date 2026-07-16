@@ -5,7 +5,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function ResetPinForm({ memberId }: { memberId: string }) {
-  const [open, setOpen] = useState(false);
+  const [formInstance, setFormInstance] = useState<number | null>(null);
+
+  if (formInstance !== null) {
+    return (
+      <ResetPinFormInner
+        key={formInstance}
+        memberId={memberId}
+        onDone={() => setFormInstance(null)}
+      />
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => setFormInstance((n) => (n ?? 0) + 1)}
+    >
+      ตั้ง PIN ใหม่
+    </Button>
+  );
+}
+
+function ResetPinFormInner({
+  memberId,
+  onDone,
+}: {
+  memberId: string;
+  onDone: () => void;
+}) {
   const [state, action, pending] = useActionState<TeamMemberState, FormData>(
     resetTeamMemberPin,
     undefined
@@ -13,18 +43,10 @@ export function ResetPinForm({ memberId }: { memberId: string }) {
 
   useEffect(() => {
     if (state?.success) {
-      const timer = setTimeout(() => setOpen(false), 1500);
+      const timer = setTimeout(() => onDone(), 1500);
       return () => clearTimeout(timer);
     }
-  }, [state?.success]);
-
-  if (!open) {
-    return (
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        ตั้ง PIN ใหม่
-      </Button>
-    );
-  }
+  }, [state?.success, onDone]);
 
   return (
     <form action={action} className="flex items-center gap-2">
