@@ -81,3 +81,51 @@ export async function signUp(
 
   redirect("/job-level");
 }
+
+export type ForgotPasswordState = { error?: string; success?: boolean } | undefined;
+
+export async function requestPasswordReset(
+  prevState: ForgotPasswordState,
+  formData: FormData
+): Promise<ForgotPasswordState> {
+  const email = formData.get("email");
+  if (typeof email !== "string" || email.trim() === "") {
+    return { error: "กรุณากรอกอีเมล" };
+  }
+
+  const supabase = await createClient();
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/reset-password`,
+  });
+
+  // Always the same response, regardless of whether the email exists —
+  // avoids leaking which emails are registered.
+  return { success: true };
+}
+
+export type UpdatePasswordState = { error?: string; success?: boolean } | undefined;
+
+export async function updatePassword(
+  prevState: UpdatePasswordState,
+  formData: FormData
+): Promise<UpdatePasswordState> {
+  const password = formData.get("password");
+  const confirmPassword = formData.get("confirm_password");
+
+  if (typeof password !== "string" || typeof confirmPassword !== "string") {
+    return { error: "กรุณากรอกรหัสผ่านให้ครบถ้วน" };
+  }
+  if (password !== confirmPassword) {
+    return { error: "รหัสผ่านไม่ตรงกัน" };
+  }
+  if (password.length < 6) {
+    return { error: "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: "เปลี่ยนรหัสผ่านไม่สำเร็จ ลิงก์อาจหมดอายุ" };
+
+  return { success: true };
+}

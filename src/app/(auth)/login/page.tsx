@@ -49,6 +49,12 @@ export default function LoginPage() {
               required
             />
           </div>
+          <Link
+            href="/forgot-password"
+            className="block text-right text-sm text-accent hover:underline"
+          >
+            ลืมรหัสผ่าน?
+          </Link>
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
           )}
