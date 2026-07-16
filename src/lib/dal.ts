@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/app";
 
 export type Role = "owner" | "manager" | "staff";
@@ -188,7 +189,7 @@ export async function getTeamMembersByRole(
   tenantId: string,
   role: "manager" | "staff"
 ): Promise<Pick<TeamMember, "id" | "full_name">[]> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("profiles")
     .select("id, full_name")

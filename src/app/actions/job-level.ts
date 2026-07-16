@@ -116,7 +116,8 @@ export async function switchToMember(
   }
 
   const supabase = await createClient();
-  const { data: target } = await supabase
+  const admin = createAdminClient();
+  const { data: target } = await admin
     .from("profiles")
     .select("id, pin_hash, pin_failed_attempts, pin_locked_until")
     .eq("id", memberId)
@@ -132,8 +133,6 @@ export async function switchToMember(
     );
     return { error: `ลองใหม่ในอีก ${secondsLeft} วินาที` };
   }
-
-  const admin = createAdminClient();
 
   const correct = await bcrypt.compare(pin, target.pin_hash);
   if (!correct) {
