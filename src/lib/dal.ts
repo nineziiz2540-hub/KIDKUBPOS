@@ -184,6 +184,20 @@ export async function getTeamMembers(tenantId: string): Promise<TeamMember[]> {
   return (data ?? []) as TeamMember[];
 }
 
+export async function getTeamMembersByRole(
+  tenantId: string,
+  role: "manager" | "staff"
+): Promise<Pick<TeamMember, "id" | "full_name">[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("tenant_id", tenantId)
+    .eq("role", role)
+    .order("full_name", { ascending: true });
+  return (data ?? []) as Pick<TeamMember, "id" | "full_name">[];
+}
+
 export async function getCustomerByPhone(
   phone: string,
   tenantId: string

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 
 const LOCKOUT_THRESHOLD = 5;
@@ -93,6 +94,91 @@ export async function verifyOwnPin(
 
   const cookieStore = await cookies();
   cookieStore.set(WORKER_COOKIE, profile.id, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+  });
+  redirect("/");
+}
+
+export async function switchToMember(
+  prevState: PinState,
+  formData: FormData
+): Promise<PinState> {
+  const callerProfile = await getProfile();
+  if (!callerProfile) return { error: "กรุณาเข้าสู่ระบบใหม่" };
+
+  const memberId = formData.get("member_id");
+  const pin = formData.get("pin");
+  if (typeof memberId !== "string" || typeof pin !== "string" || !/^\d{6}$/.test(pin)) {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+
+  const supabase = await createClient();
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("id, pin_hash, pin_failed_attempts, pin_locked_until")
+    .eq("id", memberId)
+    .eq("tenant_id", callerProfile.tenant_id)
+    .single();
+
+  if (!target || !target.pin_hash) {
+    return { error: "ไม่พบข้อมูลพนักงาน" };
+  }
+  if (target.pin_locked_until && new Date(target.pin_locked_until) > new Date()) {
+    const secondsLeft = Math.ceil(
+      (new Date(target.pin_locked_until).getTime() - Date.now()) / 1000
+    );
+    return { error: `ลองใหม่ในอีก ${secondsLeft} วินาที` };
+  }
+
+  const admin = createAdminClient();
+
+  const correct = await bcrypt.compare(pin, target.pin_hash);
+  if (!correct) {
+    const attempts = target.pin_failed_attempts + 1;
+    const lockedOut = attempts >= LOCKOUT_THRESHOLD;
+    await admin
+      .from("profiles")
+      .update({
+        pin_failed_attempts: lockedOut ? 0 : attempts,
+        pin_locked_until: lockedOut
+          ? new Date(Date.now() + LOCKOUT_SECONDS * 1000).toISOString()
+          : null,
+      })
+      .eq("id", target.id);
+    return { error: "PIN ไม่ถูกต้อง" };
+  }
+
+  await admin
+    .from("profiles")
+    .update({ pin_failed_attempts: 0, pin_locked_until: null })
+    .eq("id", target.id);
+
+  const { data: authUser, error: getUserError } = await admin.auth.admin.getUserById(target.id);
+  if (getUserError || !authUser.user?.email) {
+    return { error: "สลับผู้ใช้งานไม่สำเร็จ" };
+  }
+
+  const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: authUser.user.email,
+  });
+  if (linkError || !linkData) {
+    return { error: "สลับผู้ใช้งานไม่สำเร็จ" };
+  }
+
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    token_hash: linkData.properties.hashed_token,
+    type: "magiclink",
+  });
+  if (verifyError) {
+    return { error: "สลับผู้ใช้งานไม่สำเร็จ" };
+  }
+
+  const cookieStore = await cookies();
+  cookieStore.set(WORKER_COOKIE, target.id, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
