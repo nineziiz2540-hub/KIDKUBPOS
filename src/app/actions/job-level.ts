@@ -129,6 +129,7 @@ export async function resetOwnPinViaPassword(
 
   if (!profile || profile.role !== "owner") {
     await supabase.auth.signOut();
+    (await cookies()).delete(WORKER_COOKIE);
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
@@ -138,10 +139,14 @@ export async function resetOwnPinViaPassword(
     .eq("id", profile.id)
     .select("id");
   if (updateError || !updated || updated.length === 0) {
-    console.error("resetOwnPinViaPassword: failed to clear pin_hash:", updateError);
+    console.error(
+      "resetOwnPinViaPassword: failed to clear pin_hash:",
+      updateError ?? "update matched 0 rows (RLS rejected or row missing)"
+    );
     return { error: "รีเซ็ต PIN ไม่สำเร็จ" };
   }
 
+  (await cookies()).delete(WORKER_COOKIE);
   redirect("/job-level");
 }
 
