@@ -102,6 +102,39 @@ export async function verifyOwnPin(
   redirect("/");
 }
 
+export async function resetOwnPinViaPassword(
+  prevState: PinState,
+  formData: FormData
+): Promise<PinState> {
+  const email = formData.get("email");
+  const password = formData.get("password");
+  if (typeof email !== "string" || typeof password !== "string") {
+    return { error: "กรุณากรอกอีเมลและรหัสผ่าน" };
+  }
+
+  const supabase = await createClient();
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (signInError) {
+    return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
+  }
+
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
+  }
+
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ pin_hash: null, pin_failed_attempts: 0, pin_locked_until: null })
+    .eq("id", profile.id);
+  if (updateError) return { error: "รีเซ็ต PIN ไม่สำเร็จ" };
+
+  redirect("/job-level");
+}
+
 export async function switchToMember(
   prevState: PinState,
   formData: FormData

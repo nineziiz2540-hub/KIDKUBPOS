@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
-import { setOwnPin, verifyOwnPin, type PinState } from "@/app/actions/job-level";
+import { setOwnPin, verifyOwnPin, resetOwnPinViaPassword, type PinState } from "@/app/actions/job-level";
 import { PinPad } from "@/components/ui/pin-pad";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,11 @@ function SetOwnerPin() {
 function VerifyOwnerPin() {
   const [state, action, pending] = useActionState<PinState, FormData>(verifyOwnPin, undefined);
   const [formRef, setFormRef] = useState<HTMLFormElement | null>(null);
+  const [forgotMode, setForgotMode] = useState(false);
+
+  if (forgotMode) {
+    return <ForgotOwnerPinForm onCancel={() => setForgotMode(false)} />;
+  }
 
   return (
     <Card>
@@ -90,6 +95,75 @@ function VerifyOwnerPin() {
               formRef.requestSubmit();
             }}
           />
+          <button
+            type="button"
+            onClick={() => setForgotMode(true)}
+            className="text-sm text-accent hover:underline"
+          >
+            ลืม PIN?
+          </button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ForgotOwnerPinForm({ onCancel }: { onCancel: () => void }) {
+  const [state, action, pending] = useActionState<PinState, FormData>(
+    resetOwnPinViaPassword,
+    undefined
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-center text-base">ยืนยันตัวตนด้วยบัญชีของคุณ</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form action={action} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="reset_email">อีเมล</Label>
+            <Input
+              id="reset_email"
+              name="email"
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reset_password">รหัสผ่าน</Label>
+            <Input
+              id="reset_password"
+              name="password"
+              type="password"
+              placeholder="••••••••"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {state?.error !== undefined && (
+            <p className="text-sm text-destructive font-medium">{state.error}</p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={pending}
+              className="flex-1"
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="submit"
+              disabled={pending}
+              className="flex-1 bg-accent hover:bg-accent/90 text-white"
+            >
+              {pending ? "กำลังตรวจสอบ…" : "ยืนยัน"}
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>
