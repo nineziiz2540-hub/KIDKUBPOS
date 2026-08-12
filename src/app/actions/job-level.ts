@@ -113,24 +113,34 @@ export async function resetOwnPinViaPassword(
   }
 
   const supabase = await createClient();
-  const { error: signInError } = await supabase.auth.signInWithPassword({
+  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
-  if (signInError) {
+  if (signInError || !signInData.user) {
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
-  const profile = await getProfile();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, role")
+    .eq("id", signInData.user.id)
+    .single();
+
   if (!profile || profile.role !== "owner") {
+    await supabase.auth.signOut();
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("profiles")
     .update({ pin_hash: null, pin_failed_attempts: 0, pin_locked_until: null })
-    .eq("id", profile.id);
-  if (updateError) return { error: "รีเซ็ต PIN ไม่สำเร็จ" };
+    .eq("id", profile.id)
+    .select("id");
+  if (updateError || !updated || updated.length === 0) {
+    console.error("resetOwnPinViaPassword: failed to clear pin_hash:", updateError);
+    return { error: "รีเซ็ต PIN ไม่สำเร็จ" };
+  }
 
   redirect("/job-level");
 }
