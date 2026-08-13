@@ -14,7 +14,8 @@ export default async function ShellLayout({
   if (!user) redirect("/login");
 
   const cookieStore = await cookies();
-  if (!cookieStore.has("worker_verified")) redirect("/job-level");
+  const workerVerified = cookieStore.get("worker_verified")?.value;
+  if (workerVerified !== user.id) redirect("/job-level");
 
   return (
     <div className="flex h-full">
