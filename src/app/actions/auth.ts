@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getProfile } from "@/lib/dal";
 
 export type SignInState = { error?: string } | undefined;
 
@@ -32,7 +33,7 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
-export type SignUpState = { error?: string } | undefined;
+export type SignUpState = { error?: string; success?: boolean } | undefined;
 
 export async function signUp(
   prevState: SignUpState,
@@ -77,6 +78,10 @@ export async function signUp(
     }
     console.error("create_tenant_and_owner failed:", rpcError);
     return { error: "สร้างร้านค้าไม่สำเร็จ กรุณาติดต่อผู้ดูแลระบบ" };
+  }
+
+  if (!data.session) {
+    return { success: true };
   }
 
   redirect("/job-level");
@@ -128,4 +133,45 @@ export async function updatePassword(
   if (error) return { error: "เปลี่ยนรหัสผ่านไม่สำเร็จ ลิงก์อาจหมดอายุ" };
 
   return { success: true };
+}
+
+export type SetBackupPasswordState = { error?: string } | undefined;
+
+export async function setBackupPassword(
+  prevState: SetBackupPasswordState,
+  formData: FormData
+): Promise<SetBackupPasswordState> {
+  const profile = await getProfile();
+  if (!profile) return { error: "กรุณาเข้าสู่ระบบใหม่" };
+
+  const password = formData.get("password");
+  const confirmPassword = formData.get("confirm_password");
+  if (typeof password !== "string" || typeof confirmPassword !== "string") {
+    return { error: "กรุณากรอกรหัสผ่านให้ครบถ้วน" };
+  }
+  if (password !== confirmPassword) {
+    return { error: "รหัสผ่านไม่ตรงกัน" };
+  }
+  if (password.length < 6) {
+    return { error: "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร" };
+  }
+
+  const supabase = await createClient();
+  const { error: updateError } = await supabase.auth.updateUser({ password });
+  if (updateError) return { error: "ตั้งรหัสผ่านไม่สำเร็จ กรุณาลองใหม่" };
+
+  const { data: updated, error: profileError } = await supabase
+    .from("profiles")
+    .update({ has_backup_password: true })
+    .eq("id", profile.id)
+    .select("id");
+  if (profileError || !updated || updated.length === 0) {
+    console.error(
+      "setBackupPassword: failed to flag has_backup_password:",
+      profileError ?? "update matched 0 rows (RLS rejected or row missing)"
+    );
+    return { error: "ตั้งรหัสผ่านไม่สำเร็จ กรุณาลองใหม่" };
+  }
+
+  redirect("/job-level");
 }

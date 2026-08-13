@@ -26,6 +26,7 @@ export async function GET(request: Request) {
         const { error: rpcError } = await supabase.rpc("create_tenant_and_owner", {
           p_user_id: data.user.id,
           p_store_name: `ร้านของ ${displayName}`,
+          p_has_backup_password: false,
         });
 
         if (rpcError) {

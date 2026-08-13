@@ -16,6 +16,7 @@ export type ProfileWithTenant = {
   pin_hash: string | null;
   pin_failed_attempts: number;
   pin_locked_until: string | null;
+  has_backup_password: boolean;
   created_at: string;
   updated_at: string;
   tenants: {

@@ -6,6 +6,9 @@ import { RoleTile } from "@/components/job-level/role-tile";
 export default async function JobLevelPage() {
   const profile = await getProfile();
   if (!profile) redirect("/login");
+  if (profile.role === "owner" && !profile.has_backup_password) {
+    redirect("/onboarding/set-password");
+  }
 
   const [managers, staff] = await Promise.all([
     getTeamMembersByRole(profile.tenant_id, "manager"),

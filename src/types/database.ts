@@ -490,6 +490,7 @@ export type Database = {
           auth_managed: boolean
           created_at: string
           full_name: string | null
+          has_backup_password: boolean
           id: string
           pin_failed_attempts: number
           pin_hash: string | null
@@ -503,6 +504,7 @@ export type Database = {
           auth_managed?: boolean
           created_at?: string
           full_name?: string | null
+          has_backup_password?: boolean
           id: string
           pin_failed_attempts?: number
           pin_hash?: string | null
@@ -516,6 +518,7 @@ export type Database = {
           auth_managed?: boolean
           created_at?: string
           full_name?: string | null
+          has_backup_password?: boolean
           id?: string
           pin_failed_attempts?: number
           pin_hash?: string | null
@@ -690,8 +693,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      auth_role: { Args: never; Returns: string }
+      auth_tenant_id: { Args: never; Returns: string }
       create_tenant_and_owner: {
-        Args: { p_store_name: string; p_user_id: string }
+        Args: {
+          p_has_backup_password?: boolean
+          p_store_name: string
+          p_user_id: string
+        }
         Returns: string
       }
       deduct_stock_for_order: {

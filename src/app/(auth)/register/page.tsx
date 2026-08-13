@@ -20,6 +20,27 @@ export default function RegisterPage() {
     undefined
   );
 
+  if (state?.success) {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl text-sidebar">สมัครสำเร็จ</CardTitle>
+          <CardDescription>
+            กรุณาตรวจสอบอีเมลของคุณและกดยืนยันตัวตน ก่อนเข้าสู่ระบบครั้งแรก
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            href="/login"
+            className="block text-center text-sm text-accent font-medium hover:underline"
+          >
+            กลับไปเข้าสู่ระบบ
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="w-full max-w-sm">
       <CardHeader className="text-center">
