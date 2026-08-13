@@ -38,25 +38,23 @@ export default function ResetPasswordPage() {
 function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [exchangeState, setExchangeState] = useState<ExchangeState>("pending");
+  const code = searchParams.get("code");
+  const [exchangeState, setExchangeState] = useState<ExchangeState>(
+    code ? "pending" : "error"
+  );
   const [state, action, pending] = useActionState<UpdatePasswordState, FormData>(
     updatePassword,
     undefined
   );
 
   useEffect(() => {
-    const code = searchParams.get("code");
-    if (!code) {
-      setExchangeState("error");
-      return;
-    }
+    if (!code) return;
 
     const supabase = createClient();
     supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
       setExchangeState(error ? "error" : "ready");
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [code]);
 
   useEffect(() => {
     if (state?.success) {
