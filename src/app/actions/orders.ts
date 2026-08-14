@@ -16,14 +16,7 @@ export async function createOrder(
 
   const supabase = await createClient();
 
-  // 1. Generate order number atomically
-  const { data: orderNumber, error: seqError } = await supabase.rpc(
-    "generate_order_number",
-    { p_tenant_id: profile.tenant_id }
-  );
-  if (seqError || !orderNumber) return { error: "สร้างเลขออเดอร์ไม่สำเร็จ" };
-
-  // 2. Fetch category names for snapshot (one query for all products in cart)
+  // 1. Fetch category names for snapshot (one query for all products in cart)
   const productIds = [...new Set(data.items.map((i) => i.productId))];
   const { data: productRows } = await supabase
     .from("products")
@@ -37,10 +30,10 @@ export async function createOrder(
     if (cat) categoryMap.set(p.id, cat.name);
   }
 
-  // 3. Calculate subtotal from CartItem.totalPrice
+  // 2. Calculate subtotal from CartItem.totalPrice
   const subtotal = data.items.reduce((sum, item) => sum + item.totalPrice, 0);
 
-  // 3.5. Resolve and validate the discount, if any
+  // 3. Resolve and validate the discount, if any
   let discountType: "percent" | "amount" | null = null;
   let discountValue: number | null = null;
   let discountReason: string | null = null;
@@ -48,6 +41,9 @@ export async function createOrder(
   let requiresApproval = false;
 
   if (data.discountType !== undefined) {
+    if (data.discountType !== "percent" && data.discountType !== "amount") {
+      return { error: "ส่วนลดไม่ถูกต้อง" };
+    }
     const value = data.discountValue;
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
       return { error: "ส่วนลดไม่ถูกต้อง" };
@@ -74,7 +70,7 @@ export async function createOrder(
 
   const total = subtotal - discountAmount;
 
-  // 3.6. PIN-verify a Manager/Owner approver when the discount crosses the threshold
+  // 4. PIN-verify a Manager/Owner approver when the discount crosses the threshold
   let approverId: string | null = null;
   if (requiresApproval) {
     const pin = data.approverPin;
@@ -99,10 +95,18 @@ export async function createOrder(
     if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
   }
 
-  // 3.7. Best-effort: attach the currently open shift (does not block the sale if none is open)
+  // 5. Best-effort: attach the currently open shift (does not block the sale if none is open)
   const activeShift = await getActiveShift(profile.tenant_id);
 
-  // 4. Insert order row. Written via the admin client only when an approval was just verified
+  // 6. Generate order number atomically — deferred until after all validation above so a
+  // rejected attempt (bad discount value, wrong PIN, etc.) never burns a sequence number.
+  const { data: orderNumber, error: seqError } = await supabase.rpc(
+    "generate_order_number",
+    { p_tenant_id: profile.tenant_id }
+  );
+  if (seqError || !orderNumber) return { error: "สร้างเลขออเดอร์ไม่สำเร็จ" };
+
+  // 7. Insert order row. Written via the admin client only when an approval was just verified
   // above (discount_approved_by non-null) — prevent_direct_discount_approval rejects that exact
   // write from any caller except service_role, so the trigger and this client choice must be
   // changed together.
@@ -132,7 +136,7 @@ export async function createOrder(
 
   if (orderError || !order) return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
 
-  // 5. Build order_items with snapshots
+  // 8. Build order_items with snapshots
   const orderItems = data.items.map((item) => ({
     order_id: order.id,
     product_id: item.productId,
@@ -156,7 +160,7 @@ export async function createOrder(
     .insert(orderItems);
   if (itemsError) return { error: "บันทึกรายการสินค้าไม่สำเร็จ" };
 
-  // 6. Deduct stock (best-effort — don't block on failure)
+  // 9. Deduct stock (best-effort — don't block on failure)
   const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {
     p_order_id: order.id,
   });

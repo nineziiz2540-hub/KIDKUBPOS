@@ -45,6 +45,7 @@ export function PosScreen({
   const [discountValue, setDiscountValue] = useState("");
   const [discountReason, setDiscountReason] = useState("");
   const [approverPin, setApproverPin] = useState<string | null>(null);
+  const [approvedForAmount, setApprovedForAmount] = useState<number | null>(null);
   const [pinAttempts, setPinAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
@@ -70,13 +71,25 @@ export function PosScreen({
     discountType,
     Number.isFinite(parsedDiscountValue) ? parsedDiscountValue : 0
   );
+  const hasApproverPin = approverPin !== null && approvedForAmount === discountAmount;
+  const discountExceedsSubtotal =
+    discountType === "amount" &&
+    Number.isFinite(parsedDiscountValue) &&
+    parsedDiscountValue > 0 &&
+    parsedDiscountValue > subtotal;
 
   function resetDiscount() {
     setDiscountType(null);
     setDiscountValue("");
     setDiscountReason("");
     setApproverPin(null);
+    setApprovedForAmount(null);
     setPinAttempts(0);
+  }
+
+  function handleApproverPinCapture(pin: string) {
+    setApproverPin(pin);
+    setApprovedForAmount(discountAmount);
   }
 
   function handleProductClick(product: PosProduct) {
@@ -162,8 +175,8 @@ export function PosScreen({
         orderType,
         tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
         customerId: customerId ?? undefined,
-        discountType: discountType ?? undefined,
-        discountValue: discountType !== null ? parsedDiscountValue : undefined,
+        discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
+        discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
         discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
         approverPin: approverPin ?? undefined,
       });
@@ -190,7 +203,7 @@ export function PosScreen({
   }
 
   function handleCheckout() {
-    if (requiresApproval && approverPin === null) return;
+    if (requiresApproval && !hasApproverPin) return;
     if (paymentMethod === "transfer") {
       setError(null);
       setShowMobileCart(false);
@@ -249,9 +262,10 @@ export function PosScreen({
             subtotal={subtotal}
             discountAmount={discountAmount}
             requiresApproval={requiresApproval}
+            discountExceedsSubtotal={discountExceedsSubtotal}
             total={total}
-            hasApproverPin={approverPin !== null}
-            onApproverPinComplete={setApproverPin}
+            hasApproverPin={hasApproverPin}
+            onApproverPinComplete={handleApproverPinCapture}
             onCancelDiscount={resetDiscount}
             pending={checkoutPending}
             error={error}
@@ -310,9 +324,10 @@ export function PosScreen({
                 subtotal={subtotal}
                 discountAmount={discountAmount}
                 requiresApproval={requiresApproval}
+                discountExceedsSubtotal={discountExceedsSubtotal}
                 total={total}
-                hasApproverPin={approverPin !== null}
-                onApproverPinComplete={setApproverPin}
+                hasApproverPin={hasApproverPin}
+                onApproverPinComplete={handleApproverPinCapture}
                 onCancelDiscount={resetDiscount}
                 pending={checkoutPending}
                 error={error}

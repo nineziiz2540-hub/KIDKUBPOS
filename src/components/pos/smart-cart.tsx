@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import type { CartItem } from "@/types/app";
 import type { DiscountType } from "@/lib/discount";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ type Props = {
   subtotal: number;
   discountAmount: number;
   requiresApproval: boolean;
+  discountExceedsSubtotal: boolean;
   total: number;
   hasApproverPin: boolean;
   onApproverPinComplete: (pin: string) => void;
@@ -72,6 +73,7 @@ export function SmartCart({
   subtotal,
   discountAmount,
   requiresApproval,
+  discountExceedsSubtotal,
   total,
   hasApproverPin,
   onApproverPinComplete,
@@ -81,6 +83,7 @@ export function SmartCart({
   lastOrderNumber,
   onCheckout,
 }: Props) {
+  const reasonId = useId();
   const [phone, setPhone] = useState("");
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
@@ -317,6 +320,9 @@ export function SmartCart({
                 className="h-7 text-xs flex-1"
               />
             </div>
+            {discountExceedsSubtotal && (
+              <p className="text-xs text-destructive">ส่วนลดมากกว่ายอดรวม</p>
+            )}
           </div>
         )}
 
@@ -362,7 +368,10 @@ export function SmartCart({
           type="button"
           onClick={onCheckout}
           disabled={
-            cartItems.length === 0 || pending || (requiresApproval && !hasApproverPin)
+            cartItems.length === 0 ||
+            pending ||
+            discountExceedsSubtotal ||
+            (requiresApproval && !hasApproverPin)
           }
           className="w-full bg-accent hover:bg-accent/90 text-white"
         >
@@ -371,7 +380,7 @@ export function SmartCart({
       </div>
 
       {/* Discount approval modal */}
-      {requiresApproval && !hasApproverPin && (
+      {requiresApproval && !hasApproverPin && !discountExceedsSubtotal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
             <h2 className="text-lg font-bold text-sidebar text-center">
@@ -382,9 +391,9 @@ export function SmartCart({
             </p>
 
             <div className="space-y-1.5">
-              <Label htmlFor="discount-reason">เหตุผลที่ให้ส่วนลด</Label>
+              <Label htmlFor={reasonId}>เหตุผลที่ให้ส่วนลด</Label>
               <textarea
-                id="discount-reason"
+                id={reasonId}
                 value={discountReason}
                 onChange={(e) => onDiscountReasonChange(e.target.value)}
                 required
