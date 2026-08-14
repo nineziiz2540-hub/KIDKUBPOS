@@ -1,6 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
 import type { CreateOrderInput } from "@/types/app";
 
@@ -97,4 +99,101 @@ export async function createOrder(
 
   revalidatePath("/orders");
   return { orderId: order.id, orderNumber };
+}
+
+export type VoidOrderState = { error?: string; success?: boolean } | undefined;
+
+export async function voidOrder(
+  prevState: VoidOrderState,
+  formData: FormData
+): Promise<VoidOrderState> {
+  const profile = await getProfile();
+  if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  const orderId = formData.get("order_id");
+  const reason = formData.get("reason");
+  const pin = formData.get("pin");
+
+  if (
+    typeof orderId !== "string" ||
+    typeof reason !== "string" ||
+    typeof pin !== "string"
+  ) {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+  if (reason.trim() === "") {
+    return { error: "กรุณาระบุเหตุผล" };
+  }
+  if (!/^\d{6}$/.test(pin)) {
+    return { error: "PIN ไม่ถูกต้อง" };
+  }
+
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, status, shift_id")
+    .eq("id", orderId)
+    .eq("tenant_id", profile.tenant_id)
+    .single();
+
+  if (!order) return { error: "ไม่พบบิลนี้" };
+  if (order.status === "cancelled") return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
+
+  const activeShift = await getActiveShift(profile.tenant_id);
+  if (!activeShift || order.shift_id !== activeShift.id) {
+    return { error: "ยกเลิกได้เฉพาะบิลในกะที่เปิดอยู่ตอนนี้" };
+  }
+
+  const admin = createAdminClient();
+  const { data: approvers } = await admin
+    .from("profiles")
+    .select("id, pin_hash")
+    .eq("tenant_id", profile.tenant_id)
+    .in("role", ["owner", "manager"])
+    .not("pin_hash", "is", null);
+
+  let approverId: string | null = null;
+  for (const approver of approvers ?? []) {
+    if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
+      approverId = approver.id;
+      break;
+    }
+  }
+
+  if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
+
+  const { data: updated, error: updateError } = await supabase
+    .from("orders")
+    .update({
+      status: "cancelled",
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: profile.id,
+      cancelled_approved_by: approverId,
+      cancel_reason: reason.trim(),
+    })
+    .eq("id", orderId)
+    .select("id");
+
+  if (updateError || !updated || updated.length === 0) {
+    console.error(
+      "voidOrder: failed to update order:",
+      updateError ?? "update matched 0 rows (RLS rejected or row missing)"
+    );
+    return { error: "ยกเลิกบิลไม่สำเร็จ" };
+  }
+
+  const { error: restockError } = await supabase.rpc("restock_for_voided_order", {
+    p_order_id: orderId,
+  });
+  if (restockError) {
+    console.error(
+      "[voidOrder] restock_for_voided_order failed:",
+      restockError.message
+    );
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  return { success: true };
 }

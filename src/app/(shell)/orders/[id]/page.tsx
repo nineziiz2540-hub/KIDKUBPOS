@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { VoidOrderButton } from "@/components/orders/void-order-button";
 
 type OrderItem = {
   id: string;
@@ -19,6 +20,8 @@ type OrderDetail = {
   status: string;
   total: number;
   note: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
   created_at: string;
   order_items: OrderItem[];
 };
@@ -43,7 +46,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, total, note, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, total, note, cancelled_at, cancel_reason, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -126,6 +129,25 @@ export default async function OrderDetailPage({ params }: Props) {
             </span>
           </div>
         )}
+        {order.status === "cancelled" && order.cancel_reason !== null && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">เหตุผลที่ยกเลิก</span>
+            <span className="font-medium text-sidebar text-right max-w-[60%]">
+              {order.cancel_reason}
+            </span>
+          </div>
+        )}
+        {order.status === "cancelled" && order.cancelled_at !== null && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">เวลาที่ยกเลิก</span>
+            <span className="font-medium text-sidebar">
+              {new Date(order.cancelled_at).toLocaleString("th-TH", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </span>
+          </div>
+        )}
         <div className="flex justify-between font-semibold text-sidebar pt-2 border-t border-border">
           <span>รวมทั้งหมด</span>
           <span className="tabular-nums">
@@ -133,6 +155,8 @@ export default async function OrderDetailPage({ params }: Props) {
           </span>
         </div>
       </div>
+
+      {order.status !== "cancelled" && <VoidOrderButton orderId={order.id} />}
     </div>
   );
 }
