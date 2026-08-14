@@ -73,10 +73,13 @@ export function PosScreen({
   );
   const hasApproverPin = approverPin !== null && approvedForAmount === discountAmount;
   const discountExceedsSubtotal =
-    discountType === "amount" &&
-    Number.isFinite(parsedDiscountValue) &&
-    parsedDiscountValue > 0 &&
-    parsedDiscountValue > subtotal;
+    (discountType === "amount" &&
+      Number.isFinite(parsedDiscountValue) &&
+      parsedDiscountValue > 0 &&
+      parsedDiscountValue > subtotal) ||
+    (discountType === "percent" &&
+      Number.isFinite(parsedDiscountValue) &&
+      parsedDiscountValue > 100);
 
   function resetDiscount() {
     setDiscountType(null);
@@ -166,6 +169,10 @@ export function PosScreen({
   }
 
   function submitOrder(onSettled?: () => void) {
+    // Re-checked here, not just in handleCheckout: this is the single write path (also reached
+    // via the QR/transfer confirm flow), so the approval invariant must hold regardless of how
+    // we got here, not just at the moment the "ชำระ" button was tapped.
+    if (requiresApproval && !hasApproverPin) return;
     setError(null);
     setLastOrderNumber(null);
     startCheckout(async () => {

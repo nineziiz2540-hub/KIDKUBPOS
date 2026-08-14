@@ -12,7 +12,9 @@ export function computeDiscount(
     return { discountAmount: 0, requiresApproval: false, total: subtotal };
   }
   const rawAmount =
-    type === "percent" ? subtotal * (value / 100) : Math.min(value, subtotal);
+    type === "percent"
+      ? subtotal * (Math.min(value, 100) / 100)
+      : Math.min(value, subtotal);
   const discountAmount = Math.round(rawAmount * 100) / 100;
   const requiresApproval =
     discountAmount > DISCOUNT_APPROVAL_THRESHOLD_AMOUNT ||

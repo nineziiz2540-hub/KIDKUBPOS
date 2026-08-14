@@ -321,7 +321,11 @@ export function SmartCart({
               />
             </div>
             {discountExceedsSubtotal && (
-              <p className="text-xs text-destructive">ส่วนลดมากกว่ายอดรวม</p>
+              <p className="text-xs text-destructive">
+                {discountType === "percent"
+                  ? "ส่วนลดต้องไม่เกิน 100%"
+                  : "ส่วนลดมากกว่ายอดรวม"}
+              </p>
             )}
           </div>
         )}
