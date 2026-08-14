@@ -1,8 +1,11 @@
 "use client";
 import { useState, useTransition } from "react";
 import type { CartItem } from "@/types/app";
+import type { DiscountType } from "@/lib/discount";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { PinPad } from "@/components/ui/pin-pad";
 import { findOrCreateCustomer } from "@/app/actions/customers";
 
 type PaymentMethod = "cash" | "transfer" | "card";
@@ -28,6 +31,19 @@ type Props = {
   onPaymentChange: (method: PaymentMethod) => void;
   customerId: string | null;
   onCustomerIdChange: (id: string | null) => void;
+  discountType: DiscountType | null;
+  onDiscountTypeChange: (type: DiscountType | null) => void;
+  discountValue: string;
+  onDiscountValueChange: (value: string) => void;
+  discountReason: string;
+  onDiscountReasonChange: (value: string) => void;
+  subtotal: number;
+  discountAmount: number;
+  requiresApproval: boolean;
+  total: number;
+  hasApproverPin: boolean;
+  onApproverPinComplete: (pin: string) => void;
+  onCancelDiscount: () => void;
   pending: boolean;
   error: string | null;
   lastOrderNumber: string | null;
@@ -47,6 +63,19 @@ export function SmartCart({
   onPaymentChange,
   customerId,
   onCustomerIdChange,
+  discountType,
+  onDiscountTypeChange,
+  discountValue,
+  onDiscountValueChange,
+  discountReason,
+  onDiscountReasonChange,
+  subtotal,
+  discountAmount,
+  requiresApproval,
+  total,
+  hasApproverPin,
+  onApproverPinComplete,
+  onCancelDiscount,
   pending,
   error,
   lastOrderNumber,
@@ -56,8 +85,6 @@ export function SmartCart({
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [searchPending, startSearch] = useTransition();
-
-  const total = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
   function handleLinkCustomer() {
     const trimmed = phone.trim();
@@ -242,10 +269,75 @@ export function SmartCart({
           />
         )}
 
+        {/* Discount */}
+        {discountType === null ? (
+          cartItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onDiscountTypeChange("percent")}
+              className="text-xs text-accent font-medium hover:underline"
+            >
+              + เพิ่มส่วนลด
+            </button>
+          )
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">ส่วนลด</span>
+              <button
+                type="button"
+                onClick={onCancelDiscount}
+                className="text-xs text-muted-foreground hover:text-destructive"
+              >
+                ลบส่วนลด
+              </button>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => onDiscountTypeChange("percent")}
+                className={orderTypeCls(discountType === "percent")}
+              >
+                %
+              </button>
+              <button
+                type="button"
+                onClick={() => onDiscountTypeChange("amount")}
+                className={orderTypeCls(discountType === "amount")}
+              >
+                ฿
+              </button>
+              <Input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                value={discountValue}
+                onChange={(e) => onDiscountValueChange(e.target.value)}
+                placeholder={discountType === "percent" ? "% ส่วนลด" : "บาท"}
+                className="h-7 text-xs flex-1"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Total */}
-        <div className="flex justify-between font-semibold text-sidebar text-base">
-          <span>รวม</span>
-          <span className="tabular-nums">฿{total.toFixed(0)}</span>
+        <div className="space-y-1">
+          {discountType !== null && discountAmount > 0 && (
+            <>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>ยอดก่อนลด</span>
+                <span className="tabular-nums">฿{subtotal.toFixed(0)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-destructive">
+                <span>ส่วนลด</span>
+                <span className="tabular-nums">-฿{discountAmount.toFixed(0)}</span>
+              </div>
+            </>
+          )}
+          <div className="flex justify-between font-semibold text-sidebar text-base">
+            <span>รวม</span>
+            <span className="tabular-nums">฿{total.toFixed(0)}</span>
+          </div>
         </div>
 
         {/* Payment method */}
@@ -269,12 +361,69 @@ export function SmartCart({
         <Button
           type="button"
           onClick={onCheckout}
-          disabled={cartItems.length === 0 || pending}
+          disabled={
+            cartItems.length === 0 || pending || (requiresApproval && !hasApproverPin)
+          }
           className="w-full bg-accent hover:bg-accent/90 text-white"
         >
           {pending ? "กำลังบันทึก…" : `ชำระ ฿${total.toFixed(0)}`}
         </Button>
       </div>
+
+      {/* Discount approval modal */}
+      {requiresApproval && !hasApproverPin && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h2 className="text-lg font-bold text-sidebar text-center">
+              ขออนุมัติส่วนลด
+            </h2>
+            <p className="text-sm text-muted-foreground text-center">
+              ส่วนลดนี้เกินเพดาน ต้องได้รับอนุมัติจาก Manager หรือ Owner
+            </p>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="discount-reason">เหตุผลที่ให้ส่วนลด</Label>
+              <textarea
+                id="discount-reason"
+                value={discountReason}
+                onChange={(e) => onDiscountReasonChange(e.target.value)}
+                required
+                rows={2}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm"
+                placeholder="เช่น ลูกค้าประจำ, โปรโมชั่นพิเศษ"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>PIN ของ Manager/Owner เพื่ออนุมัติ</Label>
+              <PinPad
+                disabled={discountReason.trim() === ""}
+                onComplete={onApproverPinComplete}
+              />
+              {discountReason.trim() === "" && (
+                <p className="text-xs text-muted-foreground text-center">
+                  กรอกเหตุผลก่อนกดตัวเลข
+                </p>
+              )}
+            </div>
+
+            {error && (
+              <p className="text-sm text-destructive font-medium text-center">
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancelDiscount}
+              className="w-full"
+            >
+              ยกเลิกส่วนลด
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

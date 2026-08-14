@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
+import { computeDiscount } from "@/lib/discount";
 import type { CreateOrderInput } from "@/types/app";
 
 export async function createOrder(
@@ -36,20 +37,89 @@ export async function createOrder(
     if (cat) categoryMap.set(p.id, cat.name);
   }
 
-  // 3. Calculate total from CartItem.totalPrice
-  const total = data.items.reduce((sum, item) => sum + item.totalPrice, 0);
+  // 3. Calculate subtotal from CartItem.totalPrice
+  const subtotal = data.items.reduce((sum, item) => sum + item.totalPrice, 0);
 
-  // 3.5. Best-effort: attach the currently open shift (does not block the sale if none is open)
+  // 3.5. Resolve and validate the discount, if any
+  let discountType: "percent" | "amount" | null = null;
+  let discountValue: number | null = null;
+  let discountReason: string | null = null;
+  let discountAmount = 0;
+  let requiresApproval = false;
+
+  if (data.discountType !== undefined) {
+    const value = data.discountValue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return { error: "ส่วนลดไม่ถูกต้อง" };
+    }
+    if (data.discountType === "percent" && value > 100) {
+      return { error: "ส่วนลดไม่ถูกต้อง" };
+    }
+    if (data.discountType === "amount" && value > subtotal) {
+      return { error: "ส่วนลดมากกว่ายอดรวม" };
+    }
+
+    const computed = computeDiscount(subtotal, data.discountType, value);
+    discountType = data.discountType;
+    discountValue = value;
+    discountAmount = computed.discountAmount;
+    requiresApproval = computed.requiresApproval;
+
+    const reason = (data.discountReason ?? "").trim();
+    if (requiresApproval && reason === "") {
+      return { error: "กรุณาระบุเหตุผลสำหรับส่วนลดนี้" };
+    }
+    discountReason = reason !== "" ? reason : null;
+  }
+
+  const total = subtotal - discountAmount;
+
+  // 3.6. PIN-verify a Manager/Owner approver when the discount crosses the threshold
+  let approverId: string | null = null;
+  if (requiresApproval) {
+    const pin = data.approverPin;
+    if (typeof pin !== "string" || !/^\d{6}$/.test(pin)) {
+      return { error: "PIN ไม่ถูกต้อง" };
+    }
+
+    const admin = createAdminClient();
+    const { data: approvers } = await admin
+      .from("profiles")
+      .select("id, pin_hash")
+      .eq("tenant_id", profile.tenant_id)
+      .in("role", ["owner", "manager"])
+      .not("pin_hash", "is", null);
+
+    for (const approver of approvers ?? []) {
+      if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
+        approverId = approver.id;
+        break;
+      }
+    }
+    if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
+  }
+
+  // 3.7. Best-effort: attach the currently open shift (does not block the sale if none is open)
   const activeShift = await getActiveShift(profile.tenant_id);
 
-  // 4. Insert order row
-  const { data: order, error: orderError } = await supabase
+  // 4. Insert order row. Written via the admin client only when an approval was just verified
+  // above (discount_approved_by non-null) — prevent_direct_discount_approval rejects that exact
+  // write from any caller except service_role, so the trigger and this client choice must be
+  // changed together.
+  const insertClient = approverId !== null ? createAdminClient() : supabase;
+  const { data: order, error: orderError } = await insertClient
     .from("orders")
     .insert({
       tenant_id: profile.tenant_id,
       created_by: profile.id,
       payment_method: data.paymentMethod,
+      subtotal,
       total,
+      discount_type: discountType,
+      discount_value: discountValue,
+      discount_amount: discountAmount,
+      discount_reason: discountReason,
+      discount_approved_by: approverId,
       order_number: orderNumber,
       order_type: data.orderType,
       table_number: data.tableNumber ?? null,

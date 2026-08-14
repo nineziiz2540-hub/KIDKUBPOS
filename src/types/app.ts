@@ -1,3 +1,5 @@
+import type { DiscountType } from "@/lib/discount";
+
 export type SelectedModifier = {
   modifierId: string;
   modifierName: string;
@@ -23,6 +25,10 @@ export type CreateOrderInput = {
   tableNumber?: string;
   customerId?: string;
   note?: string;
+  discountType?: DiscountType;
+  discountValue?: number;
+  discountReason?: string;
+  approverPin?: string;
 };
 
 export type ProductCost = {

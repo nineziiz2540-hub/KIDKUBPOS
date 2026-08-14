@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition, useMemo } from "react";
 import { createOrder } from "@/app/actions/orders";
+import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type {
   CartItem,
   ModifierWithOptions,
@@ -12,6 +13,8 @@ import { ProductGrid } from "./product-grid";
 import { ModifierModal } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
 import { QrPaymentModal } from "./qr-payment-modal";
+
+const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 
 type Props = {
   products: PosProduct[];
@@ -38,6 +41,11 @@ export function PosScreen({
   const [tableNumber, setTableNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "card">("cash");
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [discountType, setDiscountType] = useState<DiscountType | null>(null);
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
+  const [approverPin, setApproverPin] = useState<string | null>(null);
+  const [pinAttempts, setPinAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -54,8 +62,22 @@ export function PosScreen({
     [productModifierRecord]
   );
 
-  const total = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const parsedDiscountValue = Number(discountValue);
+  const { discountAmount, requiresApproval, total } = computeDiscount(
+    subtotal,
+    discountType,
+    Number.isFinite(parsedDiscountValue) ? parsedDiscountValue : 0
+  );
+
+  function resetDiscount() {
+    setDiscountType(null);
+    setDiscountValue("");
+    setDiscountReason("");
+    setApproverPin(null);
+    setPinAttempts(0);
+  }
 
   function handleProductClick(product: PosProduct) {
     if (productsWithModifiers.has(product.id)) {
@@ -127,6 +149,7 @@ export function PosScreen({
     setLastOrderNumber(null);
     setCustomerId(null);
     setTableNumber("");
+    resetDiscount();
   }
 
   function submitOrder(onSettled?: () => void) {
@@ -139,20 +162,35 @@ export function PosScreen({
         orderType,
         tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
         customerId: customerId ?? undefined,
+        discountType: discountType ?? undefined,
+        discountValue: discountType !== null ? parsedDiscountValue : undefined,
+        discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
+        approverPin: approverPin ?? undefined,
       });
       if ("error" in result) {
         setError(result.error);
+        if (result.error === "PIN ไม่ถูกต้อง" && requiresApproval) {
+          const next = pinAttempts + 1;
+          if (next >= MAX_DISCOUNT_PIN_ATTEMPTS) {
+            resetDiscount();
+          } else {
+            setApproverPin(null);
+            setPinAttempts(next);
+          }
+        }
       } else {
         setLastOrderNumber(result.orderNumber);
         setCartItems([]);
         setTableNumber("");
         setCustomerId(null);
+        resetDiscount();
       }
       onSettled?.();
     });
   }
 
   function handleCheckout() {
+    if (requiresApproval && approverPin === null) return;
     if (paymentMethod === "transfer") {
       setError(null);
       setShowMobileCart(false);
@@ -202,6 +240,19 @@ export function PosScreen({
             onPaymentChange={setPaymentMethod}
             customerId={customerId}
             onCustomerIdChange={setCustomerId}
+            discountType={discountType}
+            onDiscountTypeChange={setDiscountType}
+            discountValue={discountValue}
+            onDiscountValueChange={setDiscountValue}
+            discountReason={discountReason}
+            onDiscountReasonChange={setDiscountReason}
+            subtotal={subtotal}
+            discountAmount={discountAmount}
+            requiresApproval={requiresApproval}
+            total={total}
+            hasApproverPin={approverPin !== null}
+            onApproverPinComplete={setApproverPin}
+            onCancelDiscount={resetDiscount}
             pending={checkoutPending}
             error={error}
             lastOrderNumber={lastOrderNumber}
@@ -250,6 +301,19 @@ export function PosScreen({
                 onPaymentChange={setPaymentMethod}
                 customerId={customerId}
                 onCustomerIdChange={setCustomerId}
+                discountType={discountType}
+                onDiscountTypeChange={setDiscountType}
+                discountValue={discountValue}
+                onDiscountValueChange={setDiscountValue}
+                discountReason={discountReason}
+                onDiscountReasonChange={setDiscountReason}
+                subtotal={subtotal}
+                discountAmount={discountAmount}
+                requiresApproval={requiresApproval}
+                total={total}
+                hasApproverPin={approverPin !== null}
+                onApproverPinComplete={setApproverPin}
+                onCancelDiscount={resetDiscount}
                 pending={checkoutPending}
                 error={error}
                 lastOrderNumber={lastOrderNumber}

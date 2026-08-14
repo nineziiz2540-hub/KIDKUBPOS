@@ -275,6 +275,11 @@ export type Database = {
           created_at: string
           created_by: string
           customer_id: string | null
+          discount_amount: number
+          discount_approved_by: string | null
+          discount_reason: string | null
+          discount_type: string | null
+          discount_value: number | null
           id: string
           note: string | null
           order_number: string | null
@@ -282,6 +287,7 @@ export type Database = {
           payment_method: string
           shift_id: string | null
           status: string
+          subtotal: number
           table_number: string | null
           tenant_id: string
           total: number
@@ -295,6 +301,11 @@ export type Database = {
           created_at?: string
           created_by: string
           customer_id?: string | null
+          discount_amount?: number
+          discount_approved_by?: string | null
+          discount_reason?: string | null
+          discount_type?: string | null
+          discount_value?: number | null
           id?: string
           note?: string | null
           order_number?: string | null
@@ -302,6 +313,7 @@ export type Database = {
           payment_method?: string
           shift_id?: string | null
           status?: string
+          subtotal?: number
           table_number?: string | null
           tenant_id: string
           total?: number
@@ -315,6 +327,11 @@ export type Database = {
           created_at?: string
           created_by?: string
           customer_id?: string | null
+          discount_amount?: number
+          discount_approved_by?: string | null
+          discount_reason?: string | null
+          discount_type?: string | null
+          discount_value?: number | null
           id?: string
           note?: string | null
           order_number?: string | null
@@ -322,6 +339,7 @@ export type Database = {
           payment_method?: string
           shift_id?: string | null
           status?: string
+          subtotal?: number
           table_number?: string | null
           tenant_id?: string
           total?: number
@@ -347,6 +365,13 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_discount_approved_by_fkey"
+            columns: ["discount_approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {

@@ -18,6 +18,11 @@ type OrderDetail = {
   order_number: string | null;
   payment_method: string;
   status: string;
+  subtotal: number;
+  discount_type: string | null;
+  discount_value: number | null;
+  discount_amount: number;
+  discount_reason: string | null;
   total: number;
   note: string | null;
   cancelled_at: string | null;
@@ -46,7 +51,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, total, note, cancelled_at, cancel_reason, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, note, cancelled_at, cancel_reason, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -128,6 +133,35 @@ export default async function OrderDetailPage({ params }: Props) {
               {order.note}
             </span>
           </div>
+        )}
+        {order.discount_type !== null && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">ยอดก่อนลด</span>
+              <span className="font-medium text-sidebar tabular-nums">
+                ฿{Number(order.subtotal).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                ส่วนลด
+                {order.discount_type === "percent"
+                  ? ` (${Number(order.discount_value)}%)`
+                  : ""}
+              </span>
+              <span className="font-medium text-destructive tabular-nums">
+                -฿{Number(order.discount_amount).toFixed(2)}
+              </span>
+            </div>
+            {order.discount_reason !== null && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">เหตุผลส่วนลด</span>
+                <span className="font-medium text-sidebar text-right max-w-[60%]">
+                  {order.discount_reason}
+                </span>
+              </div>
+            )}
+          </>
         )}
         {order.status === "cancelled" && order.cancel_reason !== null && (
           <div className="flex justify-between text-sm">
