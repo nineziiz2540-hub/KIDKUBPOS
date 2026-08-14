@@ -31,8 +31,15 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
       setIsOpen(false);
     } else if (state?.error === "PIN ไม่ถูกต้อง") {
       const next = attempts + 1;
-      setAttempts(next);
-      if (next >= MAX_PIN_ATTEMPTS) setIsOpen(false);
+      if (next >= MAX_PIN_ATTEMPTS) {
+        // Full reset, not just closing: reopening should give a fresh attempt
+        // budget, not immediately re-trip the cap on the next wrong guess.
+        setIsOpen(false);
+        setReason("");
+        setAttempts(0);
+      } else {
+        setAttempts(next);
+      }
     }
   }
 
@@ -96,6 +103,11 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
                 ) as HTMLInputElement;
                 hidden.value = pin;
                 formRef.current.requestSubmit();
+                // Clear immediately after submit — FormData is captured synchronously
+                // by requestSubmit, so this can't affect what was sent. Leaving the
+                // real PIN sitting in the DOM after a wrong guess would let anyone
+                // read it back out (devtools, or just view-source on a shared device).
+                hidden.value = "";
               }}
             />
             {reason.trim() === "" && (

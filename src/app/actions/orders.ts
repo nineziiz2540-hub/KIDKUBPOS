@@ -163,7 +163,13 @@ export async function voidOrder(
 
   if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
 
-  const { data: updated, error: updateError } = await supabase
+  // Written via the admin client, not the regular one: orders_update_own_tenant RLS has no
+  // WITH CHECK, so any tenant member could otherwise PATCH status/cancelled_* directly through
+  // the Data API and skip this PIN check entirely. A BEFORE UPDATE trigger
+  // (prevent_direct_order_void) rejects this exact write from any caller whose auth.uid() is
+  // non-null — i.e. everyone except this service_role call — so the trigger and this client
+  // choice must be changed together.
+  const { data: updated, error: updateError } = await admin
     .from("orders")
     .update({
       status: "cancelled",
@@ -173,18 +179,34 @@ export async function voidOrder(
       cancel_reason: reason.trim(),
     })
     .eq("id", orderId)
+    .eq("tenant_id", profile.tenant_id)
     .eq("status", "completed")
     .select("id");
 
   if (updateError || !updated || updated.length === 0) {
+    if (!updateError) {
+      // 0 rows with no error means the status/tenant/id filter didn't match — most likely
+      // someone else's concurrent void already won the race, not a real failure.
+      const { data: recheck } = await admin
+        .from("orders")
+        .select("status")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (recheck?.status === "cancelled") {
+        return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
+      }
+    }
     console.error(
       "voidOrder: failed to update order:",
-      updateError ?? "update matched 0 rows (RLS rejected or row missing)"
+      updateError ?? "update matched 0 rows (row missing or tenant mismatch)"
     );
     return { error: "ยกเลิกบิลไม่สำเร็จ" };
   }
 
-  const { error: restockError } = await supabase.rpc("restock_for_voided_order", {
+  // Also via the admin client: restock_for_voided_order's EXECUTE grant was revoked from
+  // authenticated/anon so it can't be called directly (and looped) through the Data API to
+  // inflate stock without ever actually voiding an order.
+  const { error: restockError } = await admin.rpc("restock_for_voided_order", {
     p_order_id: orderId,
   });
   if (restockError) {
