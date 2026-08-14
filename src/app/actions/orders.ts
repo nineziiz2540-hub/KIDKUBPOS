@@ -173,6 +173,7 @@ export async function voidOrder(
       cancel_reason: reason.trim(),
     })
     .eq("id", orderId)
+    .eq("status", "completed")
     .select("id");
 
   if (updateError || !updated || updated.length === 0) {
