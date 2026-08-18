@@ -5,7 +5,7 @@ import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { OrdersFilter } from "@/components/orders/orders-filter";
 
-type FilterValue = "all" | "cash" | "transfer" | "card" | "cancelled";
+type FilterValue = "all" | "cash" | "transfer" | "card" | "cancelled" | "refunded";
 
 type OrderRow = {
   id: string;
@@ -43,9 +43,14 @@ export default async function OrdersPage({ searchParams }: Props) {
   const filteredQuery =
     filterValue === "cancelled"
       ? baseQuery.eq("status", "cancelled")
-      : filterValue !== "all"
-        ? baseQuery.eq("payment_method", filterValue).neq("status", "cancelled")
-        : baseQuery;
+      : filterValue === "refunded"
+        ? baseQuery.eq("status", "refunded")
+        : filterValue !== "all"
+          ? baseQuery
+              .eq("payment_method", filterValue)
+              .neq("status", "cancelled")
+              .neq("status", "refunded")
+          : baseQuery;
 
   const { data: orders } = (await filteredQuery) as { data: OrderRow[] | null };
 
@@ -85,12 +90,16 @@ export default async function OrdersPage({ searchParams }: Props) {
                 className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
                   order.status === "cancelled"
                     ? "border-destructive/30 bg-destructive/10 text-destructive"
-                    : "border-green-200 bg-green-50 text-green-700"
+                    : order.status === "refunded"
+                      ? "border-orange-300 bg-orange-50 text-orange-600"
+                      : "border-green-200 bg-green-50 text-green-700"
                 }`}
               >
                 {order.status === "cancelled"
                   ? "ยกเลิก"
-                  : (PAYMENT_LABELS[order.payment_method] ?? order.payment_method)}
+                  : order.status === "refunded"
+                    ? "คืนเงิน"
+                    : (PAYMENT_LABELS[order.payment_method] ?? order.payment_method)}
               </span>
               <p className="text-sm font-semibold text-sidebar tabular-nums w-24 text-right">
                 ฿{Number(order.total).toFixed(2)}

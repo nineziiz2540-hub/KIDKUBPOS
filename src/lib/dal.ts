@@ -78,6 +78,7 @@ export async function getDashboardStats(tenantId: string): Promise<DashboardStat
       .select("total")
       .eq("tenant_id", tenantId)
       .neq("status", "cancelled")
+      .neq("status", "refunded")
       .gte("created_at", todayStart.toISOString())
       .lt("created_at", tomorrowStart.toISOString()),
     supabase
@@ -85,6 +86,7 @@ export async function getDashboardStats(tenantId: string): Promise<DashboardStat
       .select("total")
       .eq("tenant_id", tenantId)
       .neq("status", "cancelled")
+      .neq("status", "refunded")
       .gte("created_at", yesterdayStart.toISOString())
       .lt("created_at", todayStart.toISOString()),
   ]);
@@ -116,7 +118,8 @@ export async function getTopProducts(
     .from("orders")
     .select("id")
     .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")) as { data: { id: string }[] | null };
+    .neq("status", "cancelled")
+    .neq("status", "refunded")) as { data: { id: string }[] | null };
 
   if (!orderRows || orderRows.length === 0) return [];
 
@@ -410,6 +413,7 @@ export async function getSalesByHour(
     .select("created_at, total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", dayStart.toISOString())
     .lt("created_at", dayEnd.toISOString());
 
@@ -464,6 +468,7 @@ export async function getSalesByCategory(
     .select("id")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", rangeStart.toISOString());
   if (rangeEndExclusive) {
     query = query.lt("created_at", rangeEndExclusive.toISOString());
@@ -518,6 +523,7 @@ export async function getSalesByDay(
     .select("created_at, total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", rangeStart.toISOString())
     .lt("created_at", rangeEnd.toISOString());
 
@@ -555,6 +561,7 @@ export async function getSalesByMonth(
     .select("created_at, total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", yearStart.toISOString())
     .lt("created_at", yearEnd.toISOString());
 
@@ -588,6 +595,7 @@ export async function getHourlyPattern(
     .select("created_at, total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", rangeStart.toISOString())
     .lt("created_at", rangeEnd.toISOString());
 
@@ -620,6 +628,7 @@ export async function getSalesSummary(
     .select("total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", rangeStart.toISOString())
     .lt("created_at", rangeEnd.toISOString());
 
@@ -682,6 +691,7 @@ export type Shift = {
 
 export type ShiftSummary = {
   totalCash: number;
+  totalCashRefunded: number;
   totalTransfer: number;
   totalCard: number;
   orderCount: number;
@@ -718,9 +728,14 @@ export async function getShiftSummary(
     .eq("tenant_id", tenantId)
     .eq("shift_id", shiftId)
     .neq("status", "cancelled");
+  // Deliberately NOT excluding 'refunded' here: the cash from a later-refunded order's original
+  // sale genuinely entered this shift's drawer historically. The refund's cash outflow is
+  // subtracted separately below, tagged to whichever shift the refund itself happened in
+  // (refund_shift_id) — which may differ from this shift. Excluding 'refunded' here too would
+  // double-subtract when the refund happens in the same shift as its original sale.
 
   const rows = (orderRows ?? []) as { total: number; payment_method: string }[];
-  const totalCash = rows
+  const totalCashGross = rows
     .filter((r) => r.payment_method === "cash")
     .reduce((sum, r) => sum + Number(r.total), 0);
   const totalTransfer = rows
@@ -729,6 +744,18 @@ export async function getShiftSummary(
   const totalCard = rows
     .filter((r) => r.payment_method === "card")
     .reduce((sum, r) => sum + Number(r.total), 0);
+
+  const { data: refundRows } = await supabase
+    .from("orders")
+    .select("total")
+    .eq("tenant_id", tenantId)
+    .eq("refund_shift_id", shiftId)
+    .eq("status", "refunded")
+    .eq("refund_method", "cash");
+  const totalCashRefunded = ((refundRows ?? []) as { total: number }[]).reduce(
+    (sum, r) => sum + Number(r.total),
+    0
+  );
 
   const { data: shiftRow } = await supabase
     .from("shifts")
@@ -740,8 +767,11 @@ export async function getShiftSummary(
     (shiftRow as { opening_cash: number } | null)?.opening_cash ?? 0
   );
 
+  const totalCash = totalCashGross - totalCashRefunded;
+
   return {
     totalCash,
+    totalCashRefunded,
     totalTransfer,
     totalCard,
     orderCount: rows.length,
@@ -783,7 +813,8 @@ export async function getCustomers(tenantId: string): Promise<CustomerListItem[]
     .select("customer_id, total, created_at")
     .eq("tenant_id", tenantId)
     .not("customer_id", "is", null)
-    .neq("status", "cancelled");
+    .neq("status", "cancelled")
+    .neq("status", "refunded");
 
   type OrderAggRow = { customer_id: string | null; total: number; created_at: string };
   const byCustomer = new Map<string, { count: number; spent: number; last: string }>();
@@ -839,7 +870,8 @@ export async function getCustomerById(
     .select("total, created_at")
     .eq("tenant_id", tenantId)
     .eq("customer_id", customerId)
-    .neq("status", "cancelled");
+    .neq("status", "cancelled")
+    .neq("status", "refunded");
 
   const rows = (orderRows ?? []) as { total: number; created_at: string }[];
   const totalSpent = rows.reduce((sum, r) => sum + Number(r.total), 0);

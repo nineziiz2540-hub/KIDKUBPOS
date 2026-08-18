@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { VoidOrderButton } from "@/components/orders/void-order-button";
+import { RefundOrderButton } from "@/components/orders/refund-order-button";
 
 type OrderItem = {
   id: string;
@@ -27,6 +28,9 @@ type OrderDetail = {
   note: string | null;
   cancelled_at: string | null;
   cancel_reason: string | null;
+  refunded_at: string | null;
+  refund_reason: string | null;
+  refund_method: string | null;
   created_at: string;
   order_items: OrderItem[];
 };
@@ -51,7 +55,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, note, cancelled_at, cancel_reason, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -120,10 +124,16 @@ export default async function OrderDetailPage({ params }: Props) {
             className={`font-medium ${
               order.status === "cancelled"
                 ? "text-destructive"
-                : "text-green-700"
+                : order.status === "refunded"
+                  ? "text-orange-600"
+                  : "text-green-700"
             }`}
           >
-            {order.status === "cancelled" ? "ยกเลิก" : "สำเร็จ"}
+            {order.status === "cancelled"
+              ? "ยกเลิก"
+              : order.status === "refunded"
+                ? "คืนเงิน"
+                : "สำเร็จ"}
           </span>
         </div>
         {order.note !== null && (
@@ -182,6 +192,33 @@ export default async function OrderDetailPage({ params }: Props) {
             </span>
           </div>
         )}
+        {order.status === "refunded" && order.refund_reason !== null && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">เหตุผลที่คืนเงิน</span>
+            <span className="font-medium text-sidebar text-right max-w-[60%]">
+              {order.refund_reason}
+            </span>
+          </div>
+        )}
+        {order.status === "refunded" && order.refund_method !== null && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">วิธีคืนเงิน</span>
+            <span className="font-medium text-sidebar">
+              {PAYMENT_LABELS[order.refund_method] ?? order.refund_method}
+            </span>
+          </div>
+        )}
+        {order.status === "refunded" && order.refunded_at !== null && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">เวลาที่คืนเงิน</span>
+            <span className="font-medium text-sidebar">
+              {new Date(order.refunded_at).toLocaleString("th-TH", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </span>
+          </div>
+        )}
         <div className="flex justify-between font-semibold text-sidebar pt-2 border-t border-border">
           <span>รวมทั้งหมด</span>
           <span className="tabular-nums">
@@ -190,7 +227,12 @@ export default async function OrderDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {order.status !== "cancelled" && <VoidOrderButton orderId={order.id} />}
+      {order.status === "completed" && (
+        <div className="space-y-2">
+          <VoidOrderButton orderId={order.id} />
+          <RefundOrderButton orderId={order.id} />
+        </div>
+      )}
     </div>
   );
 }

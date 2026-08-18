@@ -86,6 +86,7 @@ export default async function PosPage() {
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", profile.tenant_id)
     .neq("status", "cancelled")
+    .neq("status", "refunded")
     .gte("created_at", todayStart.toISOString());
 
   const activeShift = await getActiveShift(profile.tenant_id);

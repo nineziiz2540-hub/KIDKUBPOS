@@ -120,6 +120,14 @@ export function ShiftPanel({ activeShift, summary }: Props) {
           </p>
         </div>
       </div>
+      {summary && summary.totalCashRefunded > 0 && (
+        <p className="text-sm text-muted-foreground">
+          คืนเงินสดระหว่างกะนี้:{" "}
+          <span className="font-semibold text-destructive">
+            -฿{summary.totalCashRefunded.toFixed(2)}
+          </span>
+        </p>
+      )}
       <p className="text-sm text-muted-foreground">
         เงินสดที่ควรมีในลิ้นชัก:{" "}
         <span className="font-semibold text-sidebar">

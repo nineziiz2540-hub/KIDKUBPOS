@@ -213,6 +213,7 @@ export async function voidOrder(
 
   if (!order) return { error: "ไม่พบบิลนี้" };
   if (order.status === "cancelled") return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
+  if (order.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว ไม่สามารถยกเลิกได้" };
 
   const activeShift = await getActiveShift(profile.tenant_id);
   if (!activeShift || order.shift_id !== activeShift.id) {
@@ -288,6 +289,130 @@ export async function voidOrder(
       "[voidOrder] restock_for_voided_order failed:",
       restockError.message
     );
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  return { success: true };
+}
+
+export type RefundOrderState = { error?: string; success?: boolean } | undefined;
+
+export async function refundOrder(
+  prevState: RefundOrderState,
+  formData: FormData
+): Promise<RefundOrderState> {
+  const profile = await getProfile();
+  if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  const orderId = formData.get("order_id");
+  const refundMethod = formData.get("refund_method");
+  const reason = formData.get("reason");
+  const pin = formData.get("pin");
+
+  if (
+    typeof orderId !== "string" ||
+    typeof refundMethod !== "string" ||
+    typeof reason !== "string" ||
+    typeof pin !== "string"
+  ) {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+  if (
+    refundMethod !== "cash" &&
+    refundMethod !== "transfer" &&
+    refundMethod !== "card"
+  ) {
+    return { error: "กรุณาเลือกวิธีคืนเงิน" };
+  }
+  if (reason.trim() === "") {
+    return { error: "กรุณาระบุเหตุผล" };
+  }
+  if (!/^\d{6}$/.test(pin)) {
+    return { error: "PIN ไม่ถูกต้อง" };
+  }
+
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .eq("tenant_id", profile.tenant_id)
+    .single();
+
+  if (!order) return { error: "ไม่พบบิลนี้" };
+  if (order.status === "cancelled") {
+    return { error: "บิลนี้ถูกยกเลิกไปแล้ว ไม่สามารถคืนเงินได้" };
+  }
+  if (order.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว" };
+
+  const activeShift = await getActiveShift(profile.tenant_id);
+  if (refundMethod === "cash" && !activeShift) {
+    return { error: "ต้องเปิดกะก่อนจึงจะคืนเงินสดได้" };
+  }
+
+  const admin = createAdminClient();
+  const { data: approvers } = await admin
+    .from("profiles")
+    .select("id, pin_hash")
+    .eq("tenant_id", profile.tenant_id)
+    .in("role", ["owner", "manager"])
+    .not("pin_hash", "is", null);
+
+  let approverId: string | null = null;
+  for (const approver of approvers ?? []) {
+    if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
+      approverId = approver.id;
+      break;
+    }
+  }
+
+  if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
+
+  // Written via the admin client from the start (unlike voidOrder's original commit, which
+  // needed a later fix): orders_update_own_tenant RLS has no WITH CHECK, so any tenant member
+  // could otherwise PATCH the refund_* columns directly through the Data API. The
+  // prevent_direct_order_refund trigger rejects this exact write from any caller whose
+  // auth.uid() is non-null — i.e. everyone except this service_role call — so the trigger and
+  // this client choice must be changed together.
+  const { data: updated, error: updateError } = await admin
+    .from("orders")
+    .update({
+      status: "refunded",
+      refunded_at: new Date().toISOString(),
+      refunded_by: profile.id,
+      refunded_approved_by: approverId,
+      refund_reason: reason.trim(),
+      refund_method: refundMethod,
+      refund_shift_id: activeShift?.id ?? null,
+    })
+    .eq("id", orderId)
+    .eq("tenant_id", profile.tenant_id)
+    .eq("status", "completed")
+    .select("id");
+
+  if (updateError || !updated || updated.length === 0) {
+    if (!updateError) {
+      // 0 rows with no error means the status/tenant/id filter didn't match — most likely
+      // someone else's concurrent void/refund already won the race, not a real failure.
+      const { data: recheck } = await admin
+        .from("orders")
+        .select("status")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (recheck?.status === "cancelled") {
+        return { error: "บิลนี้ถูกยกเลิกไปแล้ว ไม่สามารถคืนเงินได้" };
+      }
+      if (recheck?.status === "refunded") {
+        return { error: "บิลนี้ถูกคืนเงินไปแล้ว" };
+      }
+    }
+    console.error(
+      "refundOrder: failed to update order:",
+      updateError ?? "update matched 0 rows (row missing or tenant mismatch)"
+    );
+    return { error: "คืนเงินไม่สำเร็จ" };
   }
 
   revalidatePath(`/orders/${orderId}`);

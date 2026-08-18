@@ -285,6 +285,12 @@ export type Database = {
           order_number: string | null
           order_type: string
           payment_method: string
+          refund_method: string | null
+          refund_reason: string | null
+          refund_shift_id: string | null
+          refunded_approved_by: string | null
+          refunded_at: string | null
+          refunded_by: string | null
           shift_id: string | null
           status: string
           subtotal: number
@@ -311,6 +317,12 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          refund_method?: string | null
+          refund_reason?: string | null
+          refund_shift_id?: string | null
+          refunded_approved_by?: string | null
+          refunded_at?: string | null
+          refunded_by?: string | null
           shift_id?: string | null
           status?: string
           subtotal?: number
@@ -337,6 +349,12 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          refund_method?: string | null
+          refund_reason?: string | null
+          refund_shift_id?: string | null
+          refunded_approved_by?: string | null
+          refunded_at?: string | null
+          refunded_by?: string | null
           shift_id?: string | null
           status?: string
           subtotal?: number
@@ -370,6 +388,27 @@ export type Database = {
           {
             foreignKeyName: "orders_discount_approved_by_fkey"
             columns: ["discount_approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_refund_shift_id_fkey"
+            columns: ["refund_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_refunded_approved_by_fkey"
+            columns: ["refunded_approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_refunded_by_fkey"
+            columns: ["refunded_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
