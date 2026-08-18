@@ -1,7 +1,9 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { requestPasswordReset, type ForgotPasswordState } from "@/app/actions/auth";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +20,22 @@ export default function ForgotPasswordPage() {
     requestPasswordReset,
     undefined
   );
+  const [token, setToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileInstance>(null);
+
+  const [handledState, setHandledState] = useState<ForgotPasswordState>(undefined);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state?.error !== undefined) {
+      setToken(null);
+    }
+  }
+
+  useEffect(() => {
+    if (state?.error !== undefined) {
+      turnstileRef.current?.reset();
+    }
+  }, [state]);
 
   if (state?.success) {
     return (
@@ -52,12 +70,18 @@ export default function ForgotPasswordPage() {
             <Label htmlFor="email">อีเมล</Label>
             <Input id="email" name="email" type="email" autoComplete="username" required />
           </div>
+          <input type="hidden" name="turnstile_token" value={token ?? ""} />
+          <TurnstileWidget
+            ref={turnstileRef}
+            onSuccess={setToken}
+            onExpireOrError={() => setToken(null)}
+          />
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
           )}
           <Button
             type="submit"
-            disabled={pending}
+            disabled={pending || !token}
             className="w-full bg-accent hover:bg-accent/90 text-white"
           >
             {pending ? "กำลังส่ง…" : "ส่งลิงก์"}

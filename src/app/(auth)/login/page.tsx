@@ -1,8 +1,10 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { signIn, type SignInState } from "@/app/actions/auth";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,6 +21,29 @@ export default function LoginPage() {
     signIn,
     undefined
   );
+  const [token, setToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileInstance>(null);
+
+  // Synchronize local UI state with the latest action result during render (React's "adjust
+  // state while rendering" pattern), same convention already used by void-order-button.tsx in
+  // this codebase — avoids the react-hooks/set-state-in-effect lint violation a useEffect-based
+  // version would trigger.
+  const [handledState, setHandledState] = useState<SignInState>(undefined);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state?.error !== undefined) {
+      setToken(null);
+    }
+  }
+
+  // Resetting the Turnstile widget is a genuine imperative side effect (an external DOM/network
+  // call on the third-party widget instance), so it belongs in an effect, not the render-time
+  // block above — tokens are single-use, so a failed submission must get a fresh one.
+  useEffect(() => {
+    if (state?.error !== undefined) {
+      turnstileRef.current?.reset();
+    }
+  }, [state]);
 
   return (
     <Card className="w-full max-w-sm">
@@ -56,12 +81,18 @@ export default function LoginPage() {
           >
             ลืมรหัสผ่าน?
           </Link>
+          <input type="hidden" name="turnstile_token" value={token ?? ""} />
+          <TurnstileWidget
+            ref={turnstileRef}
+            onSuccess={setToken}
+            onExpireOrError={() => setToken(null)}
+          />
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
           )}
           <Button
             type="submit"
-            disabled={pending}
+            disabled={pending || !token}
             className="w-full bg-accent hover:bg-accent/90 text-white"
           >
             {pending ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}

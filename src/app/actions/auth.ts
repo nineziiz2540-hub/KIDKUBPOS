@@ -13,13 +13,21 @@ export async function signIn(
 ): Promise<SignInState> {
   const email = formData.get("email");
   const password = formData.get("password");
+  const turnstileToken = formData.get("turnstile_token");
 
   if (typeof email !== "string" || typeof password !== "string") {
     return { error: "กรุณากรอกอีเมลและรหัสผ่าน" };
   }
+  if (typeof turnstileToken !== "string" || turnstileToken === "") {
+    return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
+  }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+    options: { captchaToken: turnstileToken },
+  });
 
   if (error) {
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
@@ -45,6 +53,7 @@ export async function signUp(
   const email = formData.get("email");
   const password = formData.get("password");
   const confirmPassword = formData.get("confirm_password");
+  const turnstileToken = formData.get("turnstile_token");
 
   if (
     typeof storeName !== "string" ||
@@ -61,9 +70,16 @@ export async function signUp(
   if (password.length < 6) {
     return { error: "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร" };
   }
+  if (typeof turnstileToken !== "string" || turnstileToken === "") {
+    return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
+  }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { captchaToken: turnstileToken },
+  });
   if (error || !data.user) {
     return { error: "สมัครสมาชิกไม่สำเร็จ อีเมลนี้อาจถูกใช้แล้ว" };
   }
@@ -96,14 +112,19 @@ export async function requestPasswordReset(
   formData: FormData
 ): Promise<ForgotPasswordState> {
   const email = formData.get("email");
+  const turnstileToken = formData.get("turnstile_token");
   if (typeof email !== "string" || email.trim() === "") {
     return { error: "กรุณากรอกอีเมล" };
+  }
+  if (typeof turnstileToken !== "string" || turnstileToken === "") {
+    return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
   }
 
   const supabase = await createClient();
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   await supabase.auth.resetPasswordForEmail(email.trim(), {
     redirectTo: `${origin}/reset-password`,
+    captchaToken: turnstileToken,
   });
 
   // Always the same response, regardless of whether the email exists —
