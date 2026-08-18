@@ -133,9 +133,14 @@ export async function requestPasswordReset(
     captchaToken: turnstileToken,
   });
   // Supabase itself returns no error for an unknown email (built-in enumeration protection —
-  // confirmed live before this change), so any error reaching here is a genuine failure
-  // (captcha rejection, rate limit, etc.), not a signal about whether the email is registered.
-  if (error) {
+  // confirmed live before this change), so most errors reaching here are genuine failures
+  // (captcha rejection, misconfiguration, etc.), not a signal about whether the email is
+  // registered. The one exception is over_email_send_rate_limit: it's a PER-ADDRESS cooldown
+  // driven by the target user's own recovery_sent_at, which only exists for a real registered
+  // user — surfacing it as a distinct error would itself become an enumeration oracle (submit
+  // the same address twice within the cooldown: registered → error, unregistered → always
+  // succeeds). Treat that one case as success, same as an unknown email.
+  if (error && error.code !== "over_email_send_rate_limit") {
     return { error: "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่" };
   }
 

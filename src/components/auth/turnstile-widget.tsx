@@ -19,6 +19,11 @@ export const TurnstileWidget = forwardRef<TurnstileInstance, Props>(function Tur
       onSuccess={onSuccess}
       onExpire={onExpire}
       onError={onError}
+      // onError above only covers the widget's own error-callback (a rendered challenge that
+      // failed). It does NOT fire if Cloudflare's script itself never loads (blocked network,
+      // ad-blocker, missing/invalid site key) — that's a separate failure channel the underlying
+      // script tag's onerror handler catches, wired here so both paths reach the same handler.
+      scriptOptions={{ onError }}
     />
   );
 });
