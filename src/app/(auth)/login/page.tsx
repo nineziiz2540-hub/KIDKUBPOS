@@ -22,6 +22,7 @@ export default function LoginPage() {
     undefined
   );
   const [token, setToken] = useState<string | null>(null);
+  const [widgetError, setWidgetError] = useState(false);
   const turnstileRef = useRef<TurnstileInstance>(null);
 
   // Synchronize local UI state with the latest action result during render (React's "adjust
@@ -84,9 +85,21 @@ export default function LoginPage() {
           <input type="hidden" name="turnstile_token" value={token ?? ""} />
           <TurnstileWidget
             ref={turnstileRef}
-            onSuccess={setToken}
-            onExpireOrError={() => setToken(null)}
+            onSuccess={(t) => {
+              setToken(t);
+              setWidgetError(false);
+            }}
+            onExpire={() => setToken(null)}
+            onError={() => {
+              setToken(null);
+              setWidgetError(true);
+            }}
           />
+          {widgetError && (
+            <p className="text-xs text-muted-foreground text-center">
+              ไม่สามารถโหลดระบบยืนยันตัวตนได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่
+            </p>
+          )}
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
           )}

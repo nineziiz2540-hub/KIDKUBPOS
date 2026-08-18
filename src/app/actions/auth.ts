@@ -30,6 +30,9 @@ export async function signIn(
   });
 
   if (error) {
+    if (error.code === "captcha_failed") {
+      return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
+    }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
@@ -80,6 +83,9 @@ export async function signUp(
     password,
     options: { captchaToken: turnstileToken },
   });
+  if (error?.code === "captcha_failed") {
+    return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
+  }
   if (error || !data.user) {
     return { error: "สมัครสมาชิกไม่สำเร็จ อีเมลนี้อาจถูกใช้แล้ว" };
   }
@@ -122,13 +128,17 @@ export async function requestPasswordReset(
 
   const supabase = await createClient();
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-  await supabase.auth.resetPasswordForEmail(email.trim(), {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
     redirectTo: `${origin}/reset-password`,
     captchaToken: turnstileToken,
   });
+  // Supabase itself returns no error for an unknown email (built-in enumeration protection —
+  // confirmed live before this change), so any error reaching here is a genuine failure
+  // (captcha rejection, rate limit, etc.), not a signal about whether the email is registered.
+  if (error) {
+    return { error: "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่" };
+  }
 
-  // Always the same response, regardless of whether the email exists —
-  // avoids leaking which emails are registered.
   return { success: true };
 }
 

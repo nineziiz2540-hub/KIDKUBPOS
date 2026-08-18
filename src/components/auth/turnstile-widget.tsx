@@ -4,11 +4,12 @@ import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
 
 type Props = {
   onSuccess: (token: string) => void;
-  onExpireOrError: () => void;
+  onExpire: () => void;
+  onError: () => void;
 };
 
 export const TurnstileWidget = forwardRef<TurnstileInstance, Props>(function TurnstileWidget(
-  { onSuccess, onExpireOrError },
+  { onSuccess, onExpire, onError },
   ref
 ) {
   return (
@@ -16,8 +17,8 @@ export const TurnstileWidget = forwardRef<TurnstileInstance, Props>(function Tur
       ref={ref}
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? ""}
       onSuccess={onSuccess}
-      onExpire={onExpireOrError}
-      onError={onExpireOrError}
+      onExpire={onExpire}
+      onError={onError}
     />
   );
 });

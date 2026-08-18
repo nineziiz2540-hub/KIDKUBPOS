@@ -1,6 +1,8 @@
 "use client";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { setOwnPin, verifyOwnPin, resetOwnPinViaPassword, type PinState } from "@/app/actions/job-level";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
 import { PinPad } from "@/components/ui/pin-pad";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -113,6 +115,30 @@ function ForgotOwnerPinForm({ onCancel }: { onCancel: () => void }) {
     resetOwnPinViaPassword,
     undefined
   );
+  const [token, setToken] = useState<string | null>(null);
+  const [widgetError, setWidgetError] = useState(false);
+  const turnstileRef = useRef<TurnstileInstance>(null);
+
+  // Synchronize local UI state with the latest action result during render (React's "adjust
+  // state while rendering" pattern), same convention used by login/register/forgot-password —
+  // avoids the react-hooks/set-state-in-effect lint violation a useEffect-based version would
+  // trigger.
+  const [handledState, setHandledState] = useState<PinState>(undefined);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state?.error !== undefined) {
+      setToken(null);
+    }
+  }
+
+  // Resetting the Turnstile widget is a genuine imperative side effect (an external DOM/network
+  // call on the third-party widget instance), so it belongs in an effect, not the render-time
+  // block above — tokens are single-use, so a failed submission must get a fresh one.
+  useEffect(() => {
+    if (state?.error !== undefined) {
+      turnstileRef.current?.reset();
+    }
+  }, [state]);
 
   return (
     <Card>
@@ -143,6 +169,24 @@ function ForgotOwnerPinForm({ onCancel }: { onCancel: () => void }) {
               required
             />
           </div>
+          <input type="hidden" name="turnstile_token" value={token ?? ""} />
+          <TurnstileWidget
+            ref={turnstileRef}
+            onSuccess={(t) => {
+              setToken(t);
+              setWidgetError(false);
+            }}
+            onExpire={() => setToken(null)}
+            onError={() => {
+              setToken(null);
+              setWidgetError(true);
+            }}
+          />
+          {widgetError && (
+            <p className="text-xs text-muted-foreground text-center">
+              ไม่สามารถโหลดระบบยืนยันตัวตนได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่
+            </p>
+          )}
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
           )}
@@ -158,7 +202,7 @@ function ForgotOwnerPinForm({ onCancel }: { onCancel: () => void }) {
             </Button>
             <Button
               type="submit"
-              disabled={pending}
+              disabled={pending || !token}
               className="flex-1 bg-accent hover:bg-accent/90 text-white"
             >
               {pending ? "กำลังตรวจสอบ…" : "ยืนยัน"}

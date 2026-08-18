@@ -108,14 +108,19 @@ export async function resetOwnPinViaPassword(
 ): Promise<PinState> {
   const email = formData.get("email");
   const password = formData.get("password");
+  const turnstileToken = formData.get("turnstile_token");
   if (typeof email !== "string" || typeof password !== "string") {
     return { error: "กรุณากรอกอีเมลและรหัสผ่าน" };
+  }
+  if (typeof turnstileToken !== "string" || turnstileToken === "") {
+    return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
   }
 
   const supabase = await createClient();
   const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
     email,
     password,
+    options: { captchaToken: turnstileToken },
   });
   if (signInError || !signInData.user) {
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
