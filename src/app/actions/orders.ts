@@ -370,6 +370,18 @@ export async function refundOrder(
 
   if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
 
+  // The PIN-verification loop above does a bcrypt comparison against every Manager/Owner in the
+  // tenant, which can take a noticeable moment. If another device closes the shift fetched into
+  // activeShift during that gap, tagging the refund to the stale activeShift.id would send the
+  // cash into a shift whose expected_cash/variance were already snapshotted and reconciled by
+  // closeShift — it would never surface anywhere, since the shifts page only shows the currently
+  // active shift's summary. Re-fetch immediately before the write and use this fresh result for
+  // refund_shift_id instead of the earlier activeShift.
+  const shiftAtWrite = await getActiveShift(profile.tenant_id);
+  if (refundMethod === "cash" && !shiftAtWrite) {
+    return { error: "ต้องเปิดกะก่อนจึงจะคืนเงินสดได้" };
+  }
+
   // Written via the admin client from the start (unlike voidOrder's original commit, which
   // needed a later fix): orders_update_own_tenant RLS has no WITH CHECK, so any tenant member
   // could otherwise PATCH the refund_* columns directly through the Data API. The
@@ -385,7 +397,7 @@ export async function refundOrder(
       refunded_approved_by: approverId,
       refund_reason: reason.trim(),
       refund_method: refundMethod,
-      refund_shift_id: activeShift?.id ?? null,
+      refund_shift_id: shiftAtWrite?.id ?? null,
     })
     .eq("id", orderId)
     .eq("tenant_id", profile.tenant_id)
