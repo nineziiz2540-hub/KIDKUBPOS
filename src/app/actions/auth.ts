@@ -29,11 +29,18 @@ export async function signIn(
   }
 
   const normalizedEmail = normalizeEmail(email);
-  const admin = createAdminClient();
+  let admin: ReturnType<typeof createAdminClient> | null = null;
+  try {
+    admin = createAdminClient();
+  } catch (err) {
+    console.error("signIn: createAdminClient failed, lockout layer disabled:", err);
+  }
 
-  const lockout = await checkLoginLockout(admin, normalizedEmail);
-  if (lockout.locked) {
-    return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+  if (admin) {
+    const lockout = await checkLoginLockout(admin, normalizedEmail);
+    if (lockout.locked) {
+      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+    }
   }
 
   const supabase = await createClient();
@@ -44,17 +51,22 @@ export async function signIn(
   });
 
   if (error) {
-    if (error.code === "captcha_failed") {
+    if (error.code === "invalid_credentials") {
+      if (admin) {
+        const result = await recordLoginFailure(admin, normalizedEmail);
+        if (result.lockedOut) {
+          return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+        }
+      }
+    } else if (error.code === "captcha_failed") {
       return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
-    }
-    const result = await recordLoginFailure(admin, normalizedEmail);
-    if (result.lockedOut) {
-      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
     }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
-  await clearLoginLockout(admin, normalizedEmail);
+  if (admin) {
+    await clearLoginLockout(admin, normalizedEmail);
+  }
   redirect("/");
 }
 

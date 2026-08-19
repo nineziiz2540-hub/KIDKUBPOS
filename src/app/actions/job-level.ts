@@ -123,11 +123,18 @@ export async function resetOwnPinViaPassword(
   }
 
   const normalizedEmail = normalizeEmail(email);
-  const admin = createAdminClient();
+  let admin: ReturnType<typeof createAdminClient> | null = null;
+  try {
+    admin = createAdminClient();
+  } catch (err) {
+    console.error("resetOwnPinViaPassword: createAdminClient failed, lockout layer disabled:", err);
+  }
 
-  const lockout = await checkLoginLockout(admin, normalizedEmail);
-  if (lockout.locked) {
-    return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+  if (admin) {
+    const lockout = await checkLoginLockout(admin, normalizedEmail);
+    if (lockout.locked) {
+      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+    }
   }
 
   const supabase = await createClient();
@@ -137,19 +144,24 @@ export async function resetOwnPinViaPassword(
     options: { captchaToken: turnstileToken },
   });
   if (signInError) {
-    if (signInError.code === "captcha_failed") {
+    if (signInError.code === "invalid_credentials") {
+      if (admin) {
+        const result = await recordLoginFailure(admin, normalizedEmail);
+        if (result.lockedOut) {
+          return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+        }
+      }
+    } else if (signInError.code === "captcha_failed") {
       return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
-    }
-    const result = await recordLoginFailure(admin, normalizedEmail);
-    if (result.lockedOut) {
-      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
     }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
   if (!signInData.user) {
-    const result = await recordLoginFailure(admin, normalizedEmail);
-    if (result.lockedOut) {
-      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+    if (admin) {
+      const result = await recordLoginFailure(admin, normalizedEmail);
+      if (result.lockedOut) {
+        return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+      }
     }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
@@ -166,7 +178,9 @@ export async function resetOwnPinViaPassword(
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
-  await clearLoginLockout(admin, normalizedEmail);
+  if (admin) {
+    await clearLoginLockout(admin, normalizedEmail);
+  }
 
   const { data: updated, error: updateError } = await supabase
     .from("profiles")
