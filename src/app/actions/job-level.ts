@@ -5,6 +5,12 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import {
+  checkLoginLockout,
+  clearLoginLockout,
+  normalizeEmail,
+  recordLoginFailure,
+} from "@/lib/login-lockout";
 
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_SECONDS = 30;
@@ -116,13 +122,35 @@ export async function resetOwnPinViaPassword(
     return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
   }
 
+  const normalizedEmail = normalizeEmail(email);
+  const admin = createAdminClient();
+
+  const lockout = await checkLoginLockout(admin, normalizedEmail);
+  if (lockout.locked) {
+    return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+  }
+
   const supabase = await createClient();
   const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
     email,
     password,
     options: { captchaToken: turnstileToken },
   });
-  if (signInError || !signInData.user) {
+  if (signInError) {
+    if (signInError.code === "captcha_failed") {
+      return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
+    }
+    const result = await recordLoginFailure(admin, normalizedEmail);
+    if (result.lockedOut) {
+      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+    }
+    return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
+  }
+  if (!signInData.user) {
+    const result = await recordLoginFailure(admin, normalizedEmail);
+    if (result.lockedOut) {
+      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+    }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
@@ -137,6 +165,8 @@ export async function resetOwnPinViaPassword(
     (await cookies()).delete(WORKER_COOKIE);
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
+
+  await clearLoginLockout(admin, normalizedEmail);
 
   const { data: updated, error: updateError } = await supabase
     .from("profiles")
