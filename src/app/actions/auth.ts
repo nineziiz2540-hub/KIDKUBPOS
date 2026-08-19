@@ -4,6 +4,12 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import {
+  checkLoginLockout,
+  clearLoginLockout,
+  normalizeEmail,
+  recordLoginFailure,
+} from "@/lib/login-lockout";
 
 export type SignInState = { error?: string } | undefined;
 
@@ -22,6 +28,14 @@ export async function signIn(
     return { error: "กรุณายืนยันว่าคุณไม่ใช่บอท" };
   }
 
+  const normalizedEmail = normalizeEmail(email);
+  const admin = createAdminClient();
+
+  const lockout = await checkLoginLockout(admin, normalizedEmail);
+  if (lockout.locked) {
+    return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${lockout.minutesLeft} นาที` };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({
     email,
@@ -33,9 +47,14 @@ export async function signIn(
     if (error.code === "captcha_failed") {
       return { error: "ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่" };
     }
+    const result = await recordLoginFailure(admin, normalizedEmail);
+    if (result.lockedOut) {
+      return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
+    }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 
+  await clearLoginLockout(admin, normalizedEmail);
   redirect("/");
 }
 
