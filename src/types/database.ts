@@ -142,6 +142,27 @@ export type Database = {
           },
         ]
       }
+      login_lockouts: {
+        Row: {
+          email: string
+          failed_attempts: number
+          locked_until: string | null
+          updated_at: string
+        }
+        Insert: {
+          email: string
+          failed_attempts?: number
+          locked_until?: string | null
+          updated_at?: string
+        }
+        Update: {
+          email?: string
+          failed_attempts?: number
+          locked_until?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       modifier_options: {
         Row: {
           id: string
