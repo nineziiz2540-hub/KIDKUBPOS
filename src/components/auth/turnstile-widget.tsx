@@ -1,5 +1,5 @@
 "use client";
-import { forwardRef } from "react";
+import { forwardRef, useEffect } from "react";
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
 
 type Props = {
@@ -12,6 +12,20 @@ export const TurnstileWidget = forwardRef<TurnstileInstance, Props>(function Tur
   { onSuccess, onExpire, onError },
   ref
 ) {
+  // @marsidev/react-turnstile tracks Cloudflare's script-load state as a page-load-scoped
+  // singleton (window.turnstile plus a one-time "script ready" callback). That assumption
+  // breaks across a Next.js client-side/soft navigation that remounts this widget without a
+  // full page reload (e.g. logout redirecting back to /login, or a session-expiry redirect
+  // triggered by clicking a Link elsewhere in the app): window.turnstile is already set from
+  // the earlier mount, so the library's own ready-signal never fires again for the new
+  // instance, and the widget renders as an empty, permanently unclickable shell. If we detect
+  // that on mount, force one real reload to land back on the known-good fresh-script-load path.
+  useEffect(() => {
+    if (window.turnstile) {
+      window.location.reload();
+    }
+  }, []);
+
   return (
     <Turnstile
       ref={ref}
