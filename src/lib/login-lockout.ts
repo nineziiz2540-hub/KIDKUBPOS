@@ -41,11 +41,15 @@ export async function recordLoginFailure(
   email: string
 ): Promise<{ lockedOut: true; minutesLeft: number } | { lockedOut: false }> {
   try {
-    const { data: existing } = await admin
+    const { data: existing, error: selectError } = await admin
       .from("login_lockouts")
       .select("failed_attempts")
       .eq("email", email)
       .maybeSingle();
+    if (selectError) {
+      console.error("recordLoginFailure: read failed, recording skipped:", selectError);
+      return { lockedOut: false };
+    }
 
     const attempts = (existing?.failed_attempts ?? 0) + 1;
     const lockedOut = attempts >= LOCKOUT_THRESHOLD;
