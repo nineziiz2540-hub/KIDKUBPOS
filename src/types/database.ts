@@ -838,6 +838,7 @@ export type Database = {
     Functions: {
       auth_role: { Args: never; Returns: string }
       auth_tenant_id: { Args: never; Returns: string }
+      caller_has_verified_mfa_factor: { Args: never; Returns: boolean }
       create_tenant_and_owner: {
         Args: {
           p_has_backup_password?: boolean
