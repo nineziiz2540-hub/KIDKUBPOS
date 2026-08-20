@@ -7,6 +7,7 @@ import { updateStoreName, updateBusinessSettings, updatePromptPayId } from "@/ap
 import { StoreNameForm } from "@/components/settings/store-name-form";
 import { BusinessSettingsForm } from "@/components/settings/business-settings-form";
 import { PromptPayForm } from "@/components/settings/promptpay-form";
+import { MfaSection } from "@/components/settings/mfa-section";
 
 export default async function SettingsPage() {
   const profile = await getProfile();
@@ -19,6 +20,9 @@ export default async function SettingsPage() {
     .select("name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id")
     .eq("id", profile.tenant_id)
     .single();
+
+  const { data: mfaFactors } = await supabase.auth.mfa.listFactors();
+  const hasMfaEnabled = mfaFactors?.totp.some((f) => f.status === "verified") ?? false;
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -71,6 +75,9 @@ export default async function SettingsPage() {
           </Link>
         </div>
       </div>
+
+      {/* MFA */}
+      <MfaSection initiallyEnabled={hasMfaEnabled} />
     </div>
   );
 }
