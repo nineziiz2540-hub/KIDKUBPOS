@@ -15,6 +15,8 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
   const [enrollment, setEnrollment] = useState<EnrollMfaResult | null>(null);
   const [starting, setStarting] = useState(false);
   const [enabled, setEnabled] = useState(initiallyEnabled);
+  const [dismissed, setDismissed] = useState(false);
+  const [disableError, setDisableError] = useState<string | null>(null);
   const [confirmState, confirmAction, confirmPending] = useActionState<MfaEnrollState, FormData>(
     confirmMfaEnrollment,
     undefined
@@ -29,13 +31,16 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
 
   async function handleDisable() {
     const result = await disableMfa();
-    if (!result.error) {
-      setEnabled(false);
-      setEnrollment(null);
+    if (result.error) {
+      setDisableError(result.error);
+      return;
     }
+    setDisableError(null);
+    setEnabled(false);
+    setEnrollment(null);
   }
 
-  if (confirmState && "success" in confirmState && confirmState.success) {
+  if (confirmState && "success" in confirmState && confirmState.success && !dismissed) {
     return (
       <div className="rounded-lg border bg-white p-5 space-y-4">
         <h2 className="text-base font-semibold text-sidebar">เปิดใช้งาน 2FA สำเร็จ</h2>
@@ -50,6 +55,7 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
         </div>
         <Button
           onClick={() => {
+            setDismissed(true);
             setEnrollment(null);
             setEnabled(true);
           }}
@@ -98,9 +104,12 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
         {enabled ? "เปิดใช้งานอยู่" : "เพิ่มความปลอดภัยให้บัญชีของคุณด้วยแอป Authenticator"}
       </p>
       {enabled ? (
-        <Button onClick={handleDisable} variant="destructive">
-          ปิดใช้งาน 2FA
-        </Button>
+        <>
+          <Button onClick={handleDisable} variant="destructive">
+            ปิดใช้งาน 2FA
+          </Button>
+          {disableError && <p className="text-sm text-destructive font-medium">{disableError}</p>}
+        </>
       ) : (
         <Button
           onClick={startEnrollment}
