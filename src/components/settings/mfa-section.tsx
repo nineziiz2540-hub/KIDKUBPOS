@@ -4,30 +4,62 @@ import {
   confirmMfaEnrollment,
   disableMfa,
   enrollMfa,
-  type EnrollMfaResult,
   type MfaEnrollState,
 } from "@/app/actions/mfa";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+// Single source of truth for which screen renders. Earlier revisions derived this from three
+// independently-mutated pieces of state (a stale useActionState result + a local "enrollment"
+// object + a "dismissed" boolean patch) — that combination let a leftover success result from a
+// PRIOR enrollment cycle resurface and hijack rendering the moment a second enrollment started in
+// the same page session, permanently hiding the second attempt's real backup codes. A phase enum,
+// entered only by explicit transitions, makes that class of bug structurally impossible: the only
+// way to reach "success" is the render-time sync below noticing a genuinely NEW action result.
+type Phase =
+  | { kind: "idle" }
+  | { kind: "enrolling"; factorId: string; qrCode: string; secret: string }
+  | { kind: "success"; backupCodes: string[] };
+
 export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) {
-  const [enrollment, setEnrollment] = useState<EnrollMfaResult | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [starting, setStarting] = useState(false);
   const [enabled, setEnabled] = useState(initiallyEnabled);
-  const [dismissed, setDismissed] = useState(false);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
   const [disableError, setDisableError] = useState<string | null>(null);
   const [confirmState, confirmAction, confirmPending] = useActionState<MfaEnrollState, FormData>(
     confirmMfaEnrollment,
     undefined
   );
 
+  // Render-time state sync (this codebase's established pattern, e.g. src/app/(auth)/login/page.tsx)
+  // — reacts once to a genuinely new confirmState value rather than re-deriving "is the
+  // last-seen result success" on every render, which is what let a stale result from an earlier
+  // enrollment cycle keep winning after a disable-then-re-enroll.
+  const [handledConfirmState, setHandledConfirmState] = useState<MfaEnrollState>(undefined);
+  if (confirmState !== handledConfirmState) {
+    setHandledConfirmState(confirmState);
+    if (confirmState && "success" in confirmState && confirmState.success) {
+      setPhase({ kind: "success", backupCodes: confirmState.backupCodes });
+    }
+  }
+
   async function startEnrollment() {
     setStarting(true);
-    setDismissed(false);
+    setEnrollError(null);
     const result = await enrollMfa();
     setStarting(false);
-    setEnrollment(result);
+    if ("error" in result) {
+      setEnrollError(result.error);
+      return;
+    }
+    setPhase({
+      kind: "enrolling",
+      factorId: result.factorId,
+      qrCode: result.qrCode,
+      secret: result.secret,
+    });
   }
 
   async function handleDisable() {
@@ -38,10 +70,10 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
     }
     setDisableError(null);
     setEnabled(false);
-    setEnrollment(null);
+    setPhase({ kind: "idle" });
   }
 
-  if (confirmState && "success" in confirmState && confirmState.success && !dismissed) {
+  if (phase.kind === "success") {
     return (
       <div className="rounded-lg border bg-white p-5 space-y-4">
         <h2 className="text-base font-semibold text-sidebar">เปิดใช้งาน 2FA สำเร็จ</h2>
@@ -50,14 +82,13 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
           และการใช้รหัสสำรองจะปิดการใช้งาน 2FA โดยอัตโนมัติ
         </p>
         <div className="grid grid-cols-2 gap-2 font-mono text-sm bg-muted/40 rounded-md p-4">
-          {confirmState.backupCodes.map((code) => (
+          {phase.backupCodes.map((code) => (
             <div key={code}>{code}</div>
           ))}
         </div>
         <Button
           onClick={() => {
-            setDismissed(true);
-            setEnrollment(null);
+            setPhase({ kind: "idle" });
             setEnabled(true);
           }}
           className="bg-accent hover:bg-accent/90 text-white"
@@ -68,7 +99,7 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
     );
   }
 
-  if (enrollment && "factorId" in enrollment) {
+  if (phase.kind === "enrolling") {
     return (
       <div className="rounded-lg border bg-white p-5 space-y-4">
         <h2 className="text-base font-semibold text-sidebar">สแกน QR Code</h2>
@@ -76,13 +107,13 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
           เปิดแอป Authenticator (เช่น Google Authenticator) แล้วสแกน QR นี้
         </p>
         <img
-          src={`data:image/svg+xml;utf-8,${enrollment.qrCode}`}
+          src={`data:image/svg+xml;utf-8,${phase.qrCode}`}
           alt="TOTP QR code"
           className="mx-auto"
         />
-        <p className="text-xs text-muted-foreground text-center font-mono">{enrollment.secret}</p>
+        <p className="text-xs text-muted-foreground text-center font-mono">{phase.secret}</p>
         <form action={confirmAction} className="space-y-3">
-          <input type="hidden" name="factor_id" value={enrollment.factorId} />
+          <input type="hidden" name="factor_id" value={phase.factorId} />
           <div className="space-y-1.5">
             <Label htmlFor="mfa-code">รหัส 6 หลักจากแอป</Label>
             <Input id="mfa-code" name="code" maxLength={6} placeholder="000000" />
@@ -90,7 +121,11 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
           {confirmState && "error" in confirmState && confirmState.error && (
             <p className="text-sm text-destructive font-medium">{confirmState.error}</p>
           )}
-          <Button type="submit" disabled={confirmPending} className="bg-accent hover:bg-accent/90 text-white">
+          <Button
+            type="submit"
+            disabled={confirmPending}
+            className="bg-accent hover:bg-accent/90 text-white"
+          >
             {confirmPending ? "กำลังยืนยัน…" : "ยืนยัน"}
           </Button>
         </form>
@@ -120,9 +155,7 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
           {starting ? "กำลังเริ่ม…" : "เปิดใช้งาน 2FA"}
         </Button>
       )}
-      {enrollment && "error" in enrollment && (
-        <p className="text-sm text-destructive font-medium">{enrollment.error}</p>
-      )}
+      {enrollError && <p className="text-sm text-destructive font-medium">{enrollError}</p>}
     </div>
   );
 }
