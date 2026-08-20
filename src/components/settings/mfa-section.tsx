@@ -25,6 +25,7 @@ type Phase =
 export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [starting, setStarting] = useState(false);
+  const [disabling, setDisabling] = useState(false);
   const [enabled, setEnabled] = useState(initiallyEnabled);
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const [disableError, setDisableError] = useState<string | null>(null);
@@ -48,29 +49,42 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
   async function startEnrollment() {
     setStarting(true);
     setEnrollError(null);
-    const result = await enrollMfa();
-    setStarting(false);
-    if ("error" in result) {
-      setEnrollError(result.error);
-      return;
+    setDisableError(null);
+    try {
+      const result = await enrollMfa();
+      if ("error" in result) {
+        setEnrollError(result.error);
+        return;
+      }
+      setPhase({
+        kind: "enrolling",
+        factorId: result.factorId,
+        qrCode: result.qrCode,
+        secret: result.secret,
+      });
+    } catch {
+      setEnrollError("เริ่มเปิดใช้งาน 2FA ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setStarting(false);
     }
-    setPhase({
-      kind: "enrolling",
-      factorId: result.factorId,
-      qrCode: result.qrCode,
-      secret: result.secret,
-    });
   }
 
   async function handleDisable() {
-    const result = await disableMfa();
-    if (result.error) {
-      setDisableError(result.error);
-      return;
+    setDisabling(true);
+    try {
+      const result = await disableMfa();
+      if (result.error) {
+        setDisableError(result.error);
+        return;
+      }
+      setDisableError(null);
+      setEnabled(false);
+      setPhase({ kind: "idle" });
+    } catch {
+      setDisableError("ปิดใช้งาน 2FA ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setDisabling(false);
     }
-    setDisableError(null);
-    setEnabled(false);
-    setPhase({ kind: "idle" });
   }
 
   if (phase.kind === "success") {
@@ -141,8 +155,8 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
       </p>
       {enabled ? (
         <>
-          <Button onClick={handleDisable} variant="destructive">
-            ปิดใช้งาน 2FA
+          <Button onClick={handleDisable} disabled={disabling} variant="destructive">
+            {disabling ? "กำลังปิดใช้งาน…" : "ปิดใช้งาน 2FA"}
           </Button>
           {disableError && <p className="text-sm text-destructive font-medium">{disableError}</p>}
         </>

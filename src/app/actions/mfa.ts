@@ -21,6 +21,20 @@ export async function enrollMfa(): Promise<EnrollMfaResult> {
   }
 
   const supabase = await createClient();
+
+  // Clean up any unverified factor left over from an abandoned attempt (page reload, tab close,
+  // navigating away mid-enrollment) before starting a new one — otherwise these accumulate
+  // silently and eventually hit GoTrue's per-user factor cap, permanently blocking enrollment.
+  // listFactors()'s `.totp` convenience array only ever contains VERIFIED factors by design
+  // (that's how the SDK types it) — unverified ones only show up in `.all`, so that's what we
+  // scan here.
+  const { data: existingFactors } = await supabase.auth.mfa.listFactors();
+  for (const factor of existingFactors?.all ?? []) {
+    if (factor.factor_type === "totp" && factor.status === "unverified") {
+      await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    }
+  }
+
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: "totp",
     issuer: "KIDKUBPOS",
@@ -61,6 +75,9 @@ export async function confirmMfaEnrollment(
   const admin = createAdminClient();
   const backupCodes = generateBackupCodes();
   try {
+    // Replace, not append — a retry or a queued double-dispatch reaching this point twice must
+    // not leave an earlier, never-shown batch of valid codes lingering alongside the latest one.
+    await deleteAllBackupCodes(admin, profile.id);
     await storeBackupCodes(admin, profile.id, backupCodes);
   } catch (err) {
     console.error("confirmMfaEnrollment: storeBackupCodes failed:", err);
@@ -83,16 +100,19 @@ export async function disableMfa(): Promise<DisableMfaResult> {
   if (listError) {
     return { error: "ปิดใช้งาน 2FA ไม่สำเร็จ กรุณาลองใหม่" };
   }
-  const verifiedFactor = factors.totp.find((f) => f.status === "verified");
-  if (!verifiedFactor) {
+  const verifiedFactors = factors.totp.filter((f) => f.status === "verified");
+  if (verifiedFactors.length === 0) {
     return { error: "ยังไม่ได้เปิดใช้งาน 2FA" };
   }
 
-  const { error: unenrollError } = await supabase.auth.mfa.unenroll({
-    factorId: verifiedFactor.id,
-  });
-  if (unenrollError) {
-    return { error: "ปิดใช้งาน 2FA ไม่สำเร็จ กรุณาลองใหม่" };
+  // Unenroll every verified factor, not just one — e.g. two browser tabs each completing their
+  // own enrollment could leave more than one. Leaving any verified factor behind would keep the
+  // account gated at aal2 in src/proxy.ts even though the UI just reported 2FA as disabled.
+  for (const factor of verifiedFactors) {
+    const { error: unenrollError } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    if (unenrollError) {
+      return { error: "ปิดใช้งาน 2FA ไม่สำเร็จ กรุณาลองใหม่" };
+    }
   }
 
   const admin = createAdminClient();
@@ -148,10 +168,13 @@ export async function verifyMfaBackupCode(
   if (listError || !factors) {
     return { error: "กู้คืนไม่สำเร็จ กรุณาติดต่อผู้ดูแลระบบ" };
   }
-  const verifiedFactor = factors.factors.find((f) => f.status === "verified");
-  if (verifiedFactor) {
+  // Remove every verified factor, not just one — see disableMfa for why (e.g. two tabs each
+  // completing their own enrollment). Leaving any behind would keep the account gated at aal2
+  // even though the backup code just proved recovery and the UI reports 2FA as disabled.
+  for (const factor of factors.factors) {
+    if (factor.status !== "verified") continue;
     const { error: deleteError } = await admin.auth.admin.mfa.deleteFactor({
-      id: verifiedFactor.id,
+      id: factor.id,
       userId: profile.id,
     });
     if (deleteError) {
