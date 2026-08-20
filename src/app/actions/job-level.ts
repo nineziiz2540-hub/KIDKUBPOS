@@ -157,12 +157,6 @@ export async function resetOwnPinViaPassword(
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
   if (!signInData.user) {
-    if (admin) {
-      const result = await recordLoginFailure(admin, normalizedEmail);
-      if (result.lockedOut) {
-        return { error: `บัญชีถูกล็อกชั่วคราว ลองใหม่ในอีก ${result.minutesLeft} นาที` };
-      }
-    }
     return { error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" };
   }
 

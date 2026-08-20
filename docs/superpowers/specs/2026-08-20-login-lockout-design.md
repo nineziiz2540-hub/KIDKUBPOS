@@ -60,7 +60,8 @@ signIn / resetOwnPinViaPassword (server action)
          — no call to signInWithPassword at all; a locked account can't burn a real auth attempt
            or a CAPTCHA token for nothing
   → supabase.auth.signInWithPassword({ email, password, options: { captchaToken } })
-  → on failure (any error other than captcha_failed, which is unrelated to credential guessing):
+  → on failure (only when error.code === "invalid_credentials" — a genuine wrong email/password;
+     see note below on why this is an allowlist, not a denylist):
        recordFailure(email):
          attempts = (existing row's failed_attempts ?? 0) + 1
          if attempts >= 5:
@@ -74,11 +75,17 @@ signIn / resetOwnPinViaPassword (server action)
        proceed with existing success path (redirect, profile lookup, etc.)
 ```
 
-`captcha_failed` errors are excluded from the failure count — a rejected CAPTCHA says nothing
-about whether the submitted password was right or wrong, and counting it would let an attacker
-burn through a victim's lockout budget for free by deliberately failing CAPTCHA (a denial-of-
-service angle worth closing from the start, same spirit as the `over_email_send_rate_limit`
-exemption already applied in `requestPasswordReset`).
+**Allowlist, not denylist — updated during final review after a real gap was found.** The
+original design excluded only `captcha_failed` and counted everything else. Final review caught
+that `signInWithPassword` can also fail with `email_not_confirmed` (this app requires email
+confirmation on signup) or `over_request_rate_limit` (Supabase's own per-IP throttle) — neither is
+credential guessing, so a user who simply hasn't confirmed their email yet, retrying with their
+*correct* password, would have been locked out for 15 minutes for no real reason. The
+implementation now only calls `recordLoginFailure` when `error.code === "invalid_credentials"`
+(verified as a real member of `@supabase/auth-js`'s exported `ErrorCode` type) — every other error
+code, including `captcha_failed`, `email_not_confirmed`, and anything else, returns its normal
+message without touching the lockout counter. Same reasoning as the original `captcha_failed`
+exclusion, just applied consistently instead of ad hoc.
 
 ## Error handling
 
