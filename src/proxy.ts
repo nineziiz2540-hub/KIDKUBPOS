@@ -32,6 +32,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthed = user !== null;
   const isLoginPage = pathname === "/login";
+  const isMfaChallengePage = pathname === "/mfa-challenge";
   const isPublicAuthRoute =
     isLoginPage ||
     pathname === "/register" ||
@@ -41,6 +42,13 @@ export async function proxy(request: NextRequest) {
 
   if (!isAuthed && !isPublicAuthRoute) {
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (isAuthed && !isMfaChallengePage) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.currentLevel !== aal.nextLevel) {
+      return NextResponse.redirect(new URL("/mfa-challenge", request.url));
+    }
   }
 
   if (isAuthed && (isLoginPage || pathname === "/register")) {
