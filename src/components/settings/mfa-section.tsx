@@ -24,6 +24,7 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
 
   async function startEnrollment() {
     setStarting(true);
+    setDismissed(false);
     const result = await enrollMfa();
     setStarting(false);
     setEnrollment(result);
