@@ -77,11 +77,18 @@ export async function confirmMfaEnrollment(
   try {
     // Replace, not append — a retry or a queued double-dispatch reaching this point twice must
     // not leave an earlier, never-shown batch of valid codes lingering alongside the latest one.
+    // (delete then store, not the reverse: both are simple sequential calls on the same
+    // admin-privileged connection within the same request, so a failure landing specifically
+    // between them — leaving zero codes — would require the database itself going down
+    // mid-request; if that happens the error below tells the owner exactly what state they're in.)
     await deleteAllBackupCodes(admin, profile.id);
     await storeBackupCodes(admin, profile.id, backupCodes);
   } catch (err) {
     console.error("confirmMfaEnrollment: storeBackupCodes failed:", err);
-    return { error: "เปิดใช้งาน 2FA สำเร็จ แต่สร้างรหัสสำรองไม่สำเร็จ กรุณาติดต่อผู้ดูแลระบบ" };
+    return {
+      error:
+        "เปิดใช้งาน 2FA สำเร็จ แต่สร้างรหัสสำรองไม่สำเร็จ — ตอนนี้บัญชีนี้ไม่มีรหัสสำรองเลย กรุณาปิดแล้วเปิดใช้งาน 2FA ใหม่อีกครั้งเพื่อสร้างรหัสสำรอง หรือติดต่อผู้ดูแลระบบ",
+    };
   }
 
   return { success: true, backupCodes };
