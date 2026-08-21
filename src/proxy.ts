@@ -45,9 +45,25 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthed && !isMfaChallengePage) {
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal && aal.currentLevel !== aal.nextLevel) {
-      return NextResponse.redirect(new URL("/mfa-challenge", request.url));
+    // Called with no argument, getAuthenticatorAssuranceLevel() computes nextLevel from
+    // getSession()'s cached session.user.factors — a snapshot frozen into the cookie at the time
+    // it was last written, not re-validated against the server. That's stale exactly when a
+    // factor is removed out from under an existing session by another code path (e.g. backup-code
+    // recovery, which uses the service-role admin client and has no way to rewrite this session's
+    // own cookie) — the middleware would otherwise keep computing "still needs aal2" forever from
+    // the old snapshot and redirect-loop between here and /mfa-challenge. Passing the access token
+    // explicitly takes the SDK's other code path, which calls getUser(jwt) internally — a real
+    // network-validated fetch of the current user record, with accurate, current factors.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session) {
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel(
+        session.access_token
+      );
+      if (aal && aal.currentLevel !== aal.nextLevel) {
+        return NextResponse.redirect(new URL("/mfa-challenge", request.url));
+      }
     }
   }
 
