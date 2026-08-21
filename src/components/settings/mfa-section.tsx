@@ -120,11 +120,7 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
         <p className="text-sm text-muted-foreground">
           เปิดแอป Authenticator (เช่น Google Authenticator) แล้วสแกน QR นี้
         </p>
-        <img
-          src={`data:image/svg+xml;utf-8,${phase.qrCode}`}
-          alt="TOTP QR code"
-          className="mx-auto"
-        />
+        <img src={phase.qrCode} alt="TOTP QR code" className="mx-auto" />
         <p className="text-xs text-muted-foreground text-center font-mono">{phase.secret}</p>
         <form action={confirmAction} className="space-y-3">
           <input type="hidden" name="factor_id" value={phase.factorId} />
