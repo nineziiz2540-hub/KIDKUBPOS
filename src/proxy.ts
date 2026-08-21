@@ -45,23 +45,25 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthed && !isMfaChallengePage) {
-    // Called with no argument, getAuthenticatorAssuranceLevel() computes nextLevel from
-    // getSession()'s cached session.user.factors — a snapshot frozen into the cookie at the time
-    // it was last written, not re-validated against the server. That's stale exactly when a
-    // factor is removed out from under an existing session by another code path (e.g. backup-code
-    // recovery, which uses the service-role admin client and has no way to rewrite this session's
-    // own cookie) — the middleware would otherwise keep computing "still needs aal2" forever from
-    // the old snapshot and redirect-loop between here and /mfa-challenge. Passing the access token
-    // explicitly takes the SDK's other code path, which calls getUser(jwt) internally — a real
-    // network-validated fetch of the current user record, with accurate, current factors.
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (session) {
-      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel(
-        session.access_token
-      );
-      if (aal && aal.currentLevel !== aal.nextLevel) {
+    // getAuthenticatorAssuranceLevel() (in either its no-arg or jwt-arg form) ultimately needs the
+    // same two facts we can already derive locally: whether a verified factor exists, and what AAL
+    // the current token already proves. `user` above came from getUser(), which network-validates
+    // and returns CURRENT factors — never the getSession()-cached, possibly-stale-if-a-factor-was-
+    // just-removed-via-the-admin-client snapshot that caused a real redirect loop between here and
+    // /mfa-challenge after backup-code recovery (see git history). Deriving both facts from data we
+    // already fetched avoids a second GET /user per authenticated request while staying just as
+    // fresh: the token itself was already proven valid by the getUser() call above, so decoding its
+    // aal claim without a second signature check is safe.
+    const hasVerifiedFactor = user.factors?.some((f) => f.status === "verified") ?? false;
+    if (hasVerifiedFactor) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const payload = session?.access_token.split(".")[1];
+      const currentAal = payload
+        ? (JSON.parse(Buffer.from(payload, "base64url").toString()).aal as string | undefined)
+        : undefined;
+      if (currentAal !== "aal2") {
         return NextResponse.redirect(new URL("/mfa-challenge", request.url));
       }
     }
