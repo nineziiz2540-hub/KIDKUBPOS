@@ -123,7 +123,16 @@ export async function disableMfa(): Promise<DisableMfaResult> {
   }
 
   const admin = createAdminClient();
-  await deleteAllBackupCodes(admin, profile.id);
+  try {
+    // Non-blocking: the security-relevant step (removing every verified factor) already
+    // succeeded above. A leftover backup-code row is only ever reachable via /mfa-challenge,
+    // which requires a live verified factor to trigger — with none left, it's inert, not a
+    // live credential (same reasoning as Task 2's review). Log and move on rather than
+    // reporting "disable failed" for a step that doesn't affect the disabled state.
+    await deleteAllBackupCodes(admin, profile.id);
+  } catch (err) {
+    console.error("disableMfa: deleteAllBackupCodes failed (non-blocking):", err);
+  }
 
   return {};
 }
@@ -190,7 +199,14 @@ export async function verifyMfaBackupCode(
     }
   }
 
-  await deleteAllBackupCodes(admin, profile.id);
+  try {
+    // Non-blocking for the same reason as disableMfa: every verified factor is already gone
+    // (loop above), so a leftover backup-code row is inert — only reachable via /mfa-challenge,
+    // which requires a live verified factor. Don't block the recovery redirect on it.
+    await deleteAllBackupCodes(admin, profile.id);
+  } catch (err) {
+    console.error("verifyMfaBackupCode: deleteAllBackupCodes failed (non-blocking):", err);
+  }
 
-  redirect("/");
+  redirect("/?mfa_recovered=1");
 }

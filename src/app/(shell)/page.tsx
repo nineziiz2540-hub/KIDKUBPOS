@@ -20,6 +20,7 @@ import { PricingCalculator } from "@/components/dashboard/pricing-calculator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LowStockWidget } from "@/components/dashboard/low-stock-widget";
 import { AnalyticsSection } from "@/components/dashboard/analytics-section";
+import { MfaRecoveredToastTrigger } from "@/components/auth/mfa-recovered-toast-trigger";
 
 function TrendBadge({
   today,
@@ -86,16 +87,19 @@ function StatCards({ stats }: { stats: DashboardStats }) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string; mfa_recovered?: string }>;
 }) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
+
+  const { range: rawRange, from: rawFrom, to: rawTo, mfa_recovered } = await searchParams;
 
   const canViewStats = profile.role === "owner" || profile.role === "manager";
 
   if (!canViewStats) {
     return (
       <div className="space-y-2">
+        {mfa_recovered === "1" && <MfaRecoveredToastTrigger />}
         <h1 className="text-2xl font-bold text-sidebar">
           สวัสดี, {profile.full_name ?? "—"}
         </h1>
@@ -106,7 +110,6 @@ export default async function DashboardPage({
     );
   }
 
-  const { range: rawRange, from: rawFrom, to: rawTo } = await searchParams;
   const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
   const hasValidCustomDates =
     typeof rawFrom === "string" &&
@@ -185,6 +188,7 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-6">
+      {mfa_recovered === "1" && <MfaRecoveredToastTrigger />}
       <div>
         <h1 className="text-2xl font-bold text-sidebar">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-0.5">ภาพรวมของร้าน</p>

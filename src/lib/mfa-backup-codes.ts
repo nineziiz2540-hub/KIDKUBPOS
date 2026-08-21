@@ -71,6 +71,6 @@ export async function deleteAllBackupCodes(
 ): Promise<void> {
   const { error } = await admin.from("mfa_backup_codes").delete().eq("profile_id", profileId);
   if (error) {
-    console.error("deleteAllBackupCodes: delete failed (non-blocking):", error);
+    throw new Error(`deleteAllBackupCodes: delete failed: ${error.message}`);
   }
 }
