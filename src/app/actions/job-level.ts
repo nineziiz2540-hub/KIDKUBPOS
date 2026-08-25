@@ -210,12 +210,12 @@ export async function switchToMember(
   const admin = createAdminClient();
   const { data: target } = await admin
     .from("profiles")
-    .select("id, pin_hash, pin_failed_attempts, pin_locked_until")
+    .select("id, pin_hash, pin_failed_attempts, pin_locked_until, deactivated_at")
     .eq("id", memberId)
     .eq("tenant_id", callerProfile.tenant_id)
     .single();
 
-  if (!target || !target.pin_hash) {
+  if (!target || !target.pin_hash || target.deactivated_at !== null) {
     return { error: "ไม่พบข้อมูลพนักงาน" };
   }
   if (target.pin_locked_until && new Date(target.pin_locked_until) > new Date()) {

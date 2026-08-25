@@ -6,6 +6,7 @@ import { updateMemberRole } from "@/app/actions/settings";
 import { RoleSelectForm } from "@/components/settings/role-select-form";
 import { TeamMemberForm } from "@/components/settings/team-member-form";
 import { ResetPinForm } from "@/components/settings/reset-pin-form";
+import { DeactivateButton, ReactivateButton } from "@/components/settings/deactivate-team-member-form";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
@@ -46,12 +47,16 @@ export default async function TeamPage() {
               </p>
               <p className="text-xs text-muted-foreground">
                 {ROLE_LABELS[member.role] ?? member.role}
+                {member.deactivated_at &&
+                  ` · ปิดใช้งานแล้วเมื่อ ${new Date(member.deactivated_at).toLocaleDateString("th-TH")}`}
               </p>
             </div>
             {member.id === profile.id ? (
               <span className="text-xs text-muted-foreground italic px-2 py-1">
                 คุณ
               </span>
+            ) : member.deactivated_at ? (
+              <ReactivateButton memberId={member.id} />
             ) : (
               <div className="flex items-center gap-2">
                 <RoleSelectForm
@@ -60,6 +65,7 @@ export default async function TeamPage() {
                   currentRole={member.role}
                 />
                 <ResetPinForm memberId={member.id} />
+                <DeactivateButton memberId={member.id} />
               </div>
             )}
           </div>

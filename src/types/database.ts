@@ -632,6 +632,7 @@ export type Database = {
         Row: {
           auth_managed: boolean
           created_at: string
+          deactivated_at: string | null
           full_name: string | null
           has_backup_password: boolean
           id: string
@@ -646,6 +647,7 @@ export type Database = {
         Insert: {
           auth_managed?: boolean
           created_at?: string
+          deactivated_at?: string | null
           full_name?: string | null
           has_backup_password?: boolean
           id: string
@@ -660,6 +662,7 @@ export type Database = {
         Update: {
           auth_managed?: boolean
           created_at?: string
+          deactivated_at?: string | null
           full_name?: string | null
           has_backup_password?: boolean
           id?: string

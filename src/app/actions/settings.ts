@@ -272,3 +272,76 @@ export async function resetTeamMemberPin(
   revalidatePath("/settings/team");
   return { success: true };
 }
+
+export async function deactivateTeamMember(
+  prevState: TeamMemberState,
+  formData: FormData
+): Promise<TeamMemberState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const memberId = formData.get("member_id");
+  if (typeof memberId !== "string") {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+  if (memberId === profile.id) {
+    return { error: "ไม่สามารถปิดใช้งานบัญชีตัวเองได้" };
+  }
+
+  const admin = createAdminClient();
+
+  // Ban first, DB flag second: if the ban call fails, we must not mark them deactivated in the
+  // DB, since that would show "deactivated" in the UI without the actual immediate-cutoff having
+  // happened at all — a false sense of security.
+  const { error: banError } = await admin.auth.admin.updateUserById(memberId, {
+    ban_duration: "876000h",
+  });
+  if (banError) return { error: "ปิดใช้งานไม่สำเร็จ" };
+
+  const { error } = await admin
+    .from("profiles")
+    .update({ deactivated_at: new Date().toISOString() })
+    .eq("id", memberId)
+    .eq("tenant_id", profile.tenant_id);
+  if (error) return { error: "ปิดใช้งานไม่สำเร็จ" };
+
+  revalidatePath("/settings/team");
+  return { success: true };
+}
+
+export async function reactivateTeamMember(
+  prevState: TeamMemberState,
+  formData: FormData
+): Promise<TeamMemberState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const memberId = formData.get("member_id");
+  if (typeof memberId !== "string") {
+    return { error: "ข้อมูลไม่ถูกต้อง" };
+  }
+
+  const admin = createAdminClient();
+
+  // Lift the ban first, DB flag second — mirrors deactivate's ordering discipline. If lifting
+  // the ban fails, do not clear deactivated_at, since that would show "active" in the UI while
+  // the account is still actually banned at the GoTrue level.
+  const { error: unbanError } = await admin.auth.admin.updateUserById(memberId, {
+    ban_duration: "none",
+  });
+  if (unbanError) return { error: "เปิดใช้งานไม่สำเร็จ" };
+
+  const { error } = await admin
+    .from("profiles")
+    .update({ deactivated_at: null })
+    .eq("id", memberId)
+    .eq("tenant_id", profile.tenant_id);
+  if (error) return { error: "เปิดใช้งานไม่สำเร็จ" };
+
+  revalidatePath("/settings/team");
+  return { success: true };
+}

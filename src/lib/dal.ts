@@ -17,6 +17,7 @@ export type ProfileWithTenant = {
   pin_failed_attempts: number;
   pin_locked_until: string | null;
   has_backup_password: boolean;
+  deactivated_at: string | null;
   created_at: string;
   updated_at: string;
   tenants: {
@@ -47,7 +48,9 @@ export const getProfile = cache(async (): Promise<ProfileWithTenant | null> => {
     .eq("id", user.id)
     .single();
 
-  return data as ProfileWithTenant | null;
+  if (!data || (data as ProfileWithTenant).deactivated_at !== null) return null;
+
+  return data as ProfileWithTenant;
 });
 
 export type DashboardStats = {
@@ -154,6 +157,7 @@ export type TeamMember = {
   full_name: string | null;
   role: Role;
   created_at: string;
+  deactivated_at: string | null;
 };
 
 export type Customer = {
@@ -183,7 +187,7 @@ export async function getTeamMembers(tenantId: string): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, role, created_at")
+    .select("id, full_name, role, created_at, deactivated_at")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: true });
   return (data ?? []) as TeamMember[];
@@ -199,7 +203,8 @@ export async function getTeamMembersByRole(
     .from("profiles")
     .select("id, full_name")
     .eq("tenant_id", tenantId)
-    .eq("role", role);
+    .eq("role", role)
+    .is("deactivated_at", null);
   if (excludeId) {
     query = query.neq("id", excludeId);
   }
