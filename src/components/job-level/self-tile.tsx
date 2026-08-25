@@ -9,7 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
-export function OwnerTile({ hasPinSet }: { hasPinSet: boolean }) {
+const ROLE_LABELS = {
+  owner: "OWNER",
+  manager: "MANAGER",
+  staff: "STAFF",
+} as const;
+
+export function SelfTile({
+  role,
+  hasPinSet,
+}: {
+  role: "owner" | "manager" | "staff";
+  hasPinSet: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   if (!expanded) {
@@ -19,15 +31,19 @@ export function OwnerTile({ hasPinSet }: { hasPinSet: boolean }) {
         onClick={() => setExpanded(true)}
         className="w-full rounded-lg border bg-white p-6 text-center hover:shadow-md transition-shadow"
       >
-        <p className="text-lg font-semibold text-sidebar">OWNER</p>
+        <p className="text-lg font-semibold text-sidebar">{ROLE_LABELS[role]}</p>
       </button>
     );
   }
 
-  return hasPinSet ? <VerifyOwnerPin /> : <SetOwnerPin />;
+  return hasPinSet ? (
+    <VerifySelfPin canResetViaPassword={role === "owner"} />
+  ) : (
+    <SetSelfPin />
+  );
 }
 
-function SetOwnerPin() {
+function SetSelfPin() {
   const [state, action, pending] = useActionState<PinState, FormData>(setOwnPin, undefined);
   return (
     <Card>
@@ -67,7 +83,7 @@ function SetOwnerPin() {
   );
 }
 
-function VerifyOwnerPin() {
+function VerifySelfPin({ canResetViaPassword }: { canResetViaPassword: boolean }) {
   const [state, action, pending] = useActionState<PinState, FormData>(verifyOwnPin, undefined);
   const [formRef, setFormRef] = useState<HTMLFormElement | null>(null);
   const [forgotMode, setForgotMode] = useState(false);
@@ -97,13 +113,15 @@ function VerifyOwnerPin() {
               formRef.requestSubmit();
             }}
           />
-          <button
-            type="button"
-            onClick={() => setForgotMode(true)}
-            className="text-sm text-accent hover:underline"
-          >
-            ลืม PIN?
-          </button>
+          {canResetViaPassword && (
+            <button
+              type="button"
+              onClick={() => setForgotMode(true)}
+              className="text-sm text-accent hover:underline"
+            >
+              ลืม PIN?
+            </button>
+          )}
         </form>
       </CardContent>
     </Card>

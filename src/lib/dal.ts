@@ -191,15 +191,19 @@ export async function getTeamMembers(tenantId: string): Promise<TeamMember[]> {
 
 export async function getTeamMembersByRole(
   tenantId: string,
-  role: "manager" | "staff"
+  role: Role,
+  excludeId?: string
 ): Promise<Pick<TeamMember, "id" | "full_name">[]> {
   const supabase = createAdminClient();
-  const { data } = await supabase
+  let query = supabase
     .from("profiles")
     .select("id, full_name")
     .eq("tenant_id", tenantId)
-    .eq("role", role)
-    .order("full_name", { ascending: true });
+    .eq("role", role);
+  if (excludeId) {
+    query = query.neq("id", excludeId);
+  }
+  const { data } = await query.order("full_name", { ascending: true });
   return (data ?? []) as Pick<TeamMember, "id" | "full_name">[];
 }
 

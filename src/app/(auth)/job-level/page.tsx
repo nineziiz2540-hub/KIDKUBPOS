@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getProfile, getTeamMembersByRole } from "@/lib/dal";
-import { OwnerTile } from "@/components/job-level/owner-tile";
+import { SelfTile } from "@/components/job-level/self-tile";
 import { RoleTile } from "@/components/job-level/role-tile";
 
 export default async function JobLevelPage() {
@@ -10,9 +10,10 @@ export default async function JobLevelPage() {
     redirect("/onboarding/set-password");
   }
 
-  const [managers, staff] = await Promise.all([
-    getTeamMembersByRole(profile.tenant_id, "manager"),
-    getTeamMembersByRole(profile.tenant_id, "staff"),
+  const [owners, managers, staff] = await Promise.all([
+    getTeamMembersByRole(profile.tenant_id, "owner", profile.id),
+    getTeamMembersByRole(profile.tenant_id, "manager", profile.id),
+    getTeamMembersByRole(profile.tenant_id, "staff", profile.id),
   ]);
 
   return (
@@ -21,7 +22,8 @@ export default async function JobLevelPage() {
         <h1 className="text-2xl font-bold text-sidebar">KIDKUB JOB LEVEL</h1>
         <p className="text-sm text-muted-foreground">เลือกตำแหน่งของคุณเพื่อเข้าใช้งาน</p>
       </div>
-      <OwnerTile hasPinSet={profile.pin_hash !== null} />
+      <SelfTile role={profile.role} hasPinSet={profile.pin_hash !== null} />
+      {profile.role !== "owner" && <RoleTile label="OWNER" members={owners} />}
       <RoleTile label="MANAGER" members={managers} />
       <RoleTile label="STAFF" members={staff} />
     </div>
