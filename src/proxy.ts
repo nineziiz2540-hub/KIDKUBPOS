@@ -44,7 +44,22 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (isAuthed && !isMfaChallengePage) {
+  // The underlying Supabase session is shared by the whole device/terminal — only the Owner has
+  // real login credentials; Manager/Staff have no password of their own and get into their own
+  // identity purely via a PIN (see switchToMember in job-level.ts), which swaps this same session
+  // to their own auth.uid(). Gating on "is the raw session's account MFA-enrolled" (the old
+  // condition) meant the 2FA wall appeared on the very first request after Owner's password
+  // login — before anyone had even reached the job-level tile picker — permanently locking out
+  // Manager/Staff any time the Owner's own 2FA hadn't been completed yet, even though they were
+  // never trying to act as Owner. `worker_verified` is only ever set to `user.id` once someone has
+  // PIN-confirmed they're operating as the currently-authenticated identity (verifyOwnPin/
+  // setOwnPin for Owner confirming themselves, switchToMember for Manager/Staff confirming
+  // themselves post session-swap) — so gating on that instead means the wall only appears once
+  // someone has actually confirmed they're acting as the Owner specifically.
+  const workerVerified = request.cookies.get("worker_verified")?.value;
+  const isConfirmedAsCurrentUser = workerVerified === user?.id;
+
+  if (isAuthed && !isMfaChallengePage && isConfirmedAsCurrentUser) {
     // getAuthenticatorAssuranceLevel() (in either its no-arg or jwt-arg form) ultimately needs the
     // same two facts we can already derive locally: whether a verified factor exists, and what AAL
     // the current token already proves. `user` above came from getUser(), which network-validates
