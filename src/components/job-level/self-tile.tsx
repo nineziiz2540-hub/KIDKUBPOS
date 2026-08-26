@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useEffect, useRef, useState } from "react";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
+import type { Role } from "@/lib/dal";
 import { setOwnPin, verifyOwnPin, resetOwnPinViaPassword, type PinState } from "@/app/actions/job-level";
 import { TurnstileWidget } from "@/components/auth/turnstile-widget";
 import { PinPad } from "@/components/ui/pin-pad";
@@ -9,33 +10,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
-const ROLE_LABELS = {
+const ROLE_LABELS: Record<Role, string> = {
   owner: "OWNER",
   manager: "MANAGER",
   staff: "STAFF",
-} as const;
+};
 
-export function SelfTile({
-  role,
-  hasPinSet,
-}: {
-  role: "owner" | "manager" | "staff";
-  hasPinSet: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
+export function SelfTileTrigger({ role, onOpen }: { role: Role; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full rounded-lg border bg-white p-6 text-center hover:shadow-md transition-shadow"
+    >
+      <p className="text-lg font-semibold text-sidebar">{ROLE_LABELS[role]}</p>
+    </button>
+  );
+}
 
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="w-full rounded-lg border bg-white p-6 text-center hover:shadow-md transition-shadow"
-      >
-        <p className="text-lg font-semibold text-sidebar">{ROLE_LABELS[role]}</p>
-      </button>
-    );
-  }
-
+export function SelfPinContent({ role, hasPinSet }: { role: Role; hasPinSet: boolean }) {
   return hasPinSet ? (
     <VerifySelfPin canResetViaPassword={role === "owner"} />
   ) : (

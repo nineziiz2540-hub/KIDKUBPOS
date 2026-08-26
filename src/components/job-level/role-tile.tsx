@@ -7,17 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 export function RoleTile({
   label,
   members,
+  onSelect,
 }: {
   label: string;
   members: { id: string; full_name: string | null }[];
+  onSelect: (memberId: string, memberLabel: string) => void;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [formRef, setFormRef] = useState<HTMLFormElement | null>(null);
-  const [state, action, pending] = useActionState<PinState, FormData>(
-    switchToMember,
-    undefined
-  );
-
   if (members.length === 0) {
     return (
       <div className="w-full rounded-lg border bg-white/50 p-6 text-center opacity-50">
@@ -29,31 +24,36 @@ export function RoleTile({
     );
   }
 
-  if (!selected) {
-    return (
-      <div className="w-full rounded-lg border bg-white p-4 space-y-2">
-        <p className="text-lg font-semibold text-sidebar text-center">{label}</p>
-        <div className="grid grid-cols-2 gap-2">
-          {members.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => setSelected(m.id)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-3 text-center text-sm font-medium text-sidebar hover:bg-muted/40 hover:border-sidebar/40 active:scale-[0.98] transition-all"
-            >
-              {m.full_name ?? "—"}
-            </button>
-          ))}
-        </div>
+  return (
+    <div className="w-full rounded-lg border bg-white p-4 space-y-2">
+      <p className="text-lg font-semibold text-sidebar text-center">{label}</p>
+      <div className="grid grid-cols-2 gap-2">
+        {members.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => onSelect(m.id, m.full_name ?? "—")}
+            className="w-full rounded-lg border border-border bg-background px-3 py-3 text-center text-sm font-medium text-sidebar hover:bg-muted/40 hover:border-sidebar/40 active:scale-[0.98] transition-all"
+          >
+            {m.full_name ?? "—"}
+          </button>
+        ))}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
+export function MemberPinForm({ memberId }: { memberId: string }) {
+  const [formRef, setFormRef] = useState<HTMLFormElement | null>(null);
+  const [state, action, pending] = useActionState<PinState, FormData>(
+    switchToMember,
+    undefined
+  );
   return (
     <Card>
       <CardContent className="pt-6">
         <form ref={setFormRef} action={action} className="flex flex-col items-center gap-4">
-          <input type="hidden" name="member_id" value={selected} />
+          <input type="hidden" name="member_id" value={memberId} />
           <input type="hidden" name="pin" />
           {state?.error !== undefined && (
             <p className="text-sm text-destructive font-medium">{state.error}</p>
