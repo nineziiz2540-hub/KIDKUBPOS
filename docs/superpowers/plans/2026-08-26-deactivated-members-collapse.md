@@ -41,7 +41,7 @@ changes.
 
 ---
 
-### Task 1: Collapsible `DeactivatedMembersSection` + wire into the team page
+### Task 1: Collapsible `DeactivatedMembersSection` + wire into the team page ✅ done
 
 **Files:**
 - Create: `src/components/settings/deactivated-members-section.tsx`

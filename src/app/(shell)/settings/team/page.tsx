@@ -6,7 +6,8 @@ import { updateMemberRole } from "@/app/actions/settings";
 import { RoleSelectForm } from "@/components/settings/role-select-form";
 import { TeamMemberForm } from "@/components/settings/team-member-form";
 import { ResetPinForm } from "@/components/settings/reset-pin-form";
-import { DeactivateButton, ReactivateButton } from "@/components/settings/deactivate-team-member-form";
+import { DeactivateButton } from "@/components/settings/deactivate-team-member-form";
+import { DeactivatedMembersSection } from "@/components/settings/deactivated-members-section";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
@@ -20,6 +21,8 @@ export default async function TeamPage() {
   if (profile.role !== "owner") redirect("/");
 
   const members = await getTeamMembers(profile.tenant_id);
+  const activeMembers = members.filter((m) => m.deactivated_at === null);
+  const deactivatedMembers = members.filter((m) => m.deactivated_at !== null);
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -33,13 +36,13 @@ export default async function TeamPage() {
         <div>
           <h1 className="text-2xl font-bold text-sidebar">จัดการทีม</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {members.length} คนในร้าน
+            {activeMembers.length} คนในร้าน
           </p>
         </div>
       </div>
 
       <div className="rounded-lg border bg-white divide-y divide-border">
-        {members.map((member) => (
+        {activeMembers.map((member) => (
           <div key={member.id} className="flex items-center gap-4 px-4 py-3">
             <div className="flex-1 min-w-0">
               <p className="font-medium text-sidebar text-sm truncate">
@@ -47,16 +50,12 @@ export default async function TeamPage() {
               </p>
               <p className="text-xs text-muted-foreground">
                 {ROLE_LABELS[member.role] ?? member.role}
-                {member.deactivated_at &&
-                  ` · ปิดใช้งานแล้วเมื่อ ${new Date(member.deactivated_at).toLocaleDateString("th-TH")}`}
               </p>
             </div>
             {member.id === profile.id ? (
               <span className="text-xs text-muted-foreground italic px-2 py-1">
                 คุณ
               </span>
-            ) : member.deactivated_at ? (
-              <ReactivateButton memberId={member.id} />
             ) : (
               <div className="flex items-center gap-2">
                 <RoleSelectForm
@@ -70,12 +69,16 @@ export default async function TeamPage() {
             )}
           </div>
         ))}
-        {members.length === 0 && (
+        {activeMembers.length === 0 && (
           <p className="px-4 py-12 text-center text-muted-foreground text-sm">
             ยังไม่มีพนักงาน
           </p>
         )}
       </div>
+
+      {deactivatedMembers.length > 0 && (
+        <DeactivatedMembersSection members={deactivatedMembers} />
+      )}
 
       <TeamMemberForm />
     </div>
