@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { X } from "lucide-react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { Role } from "@/lib/dal";
 import { SelfTileTrigger, SelfPinContent } from "@/components/job-level/self-tile";
@@ -46,11 +47,31 @@ export function JobLevelPicker({
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/50 z-40" />
-          <Dialog.Popup className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <Dialog.Popup
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={(e) => {
+              // The popup itself fills the screen (needed to center its content), so a click
+              // anywhere in that empty space is technically "inside" it from base-ui's
+              // perspective and never counts as an outside press — this is the fix for that:
+              // only close when the click lands on the popup element itself, not a descendant.
+              if (e.target === e.currentTarget) setActive(null);
+            }}
+          >
             <div className="w-full max-w-sm space-y-2">
-              <Dialog.Title className="text-center text-sm font-medium text-white">
-                {active?.type === "self" ? ROLE_LABELS[selfRole] : active?.label}
-              </Dialog.Title>
+              <div className="flex items-center justify-between px-1">
+                <span className="w-7" aria-hidden="true" />
+                <Dialog.Title className="text-sm font-medium text-white">
+                  {active?.type === "self" ? ROLE_LABELS[selfRole] : active?.label}
+                </Dialog.Title>
+                <button
+                  type="button"
+                  onClick={() => setActive(null)}
+                  aria-label="ปิด"
+                  className="rounded-full p-1 text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
               {active?.type === "self" && (
                 <SelfPinContent role={selfRole} hasPinSet={hasPinSet} />
               )}
