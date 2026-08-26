@@ -33,16 +33,18 @@ export function RoleTile({
     return (
       <div className="w-full rounded-lg border bg-white p-4 space-y-2">
         <p className="text-lg font-semibold text-sidebar text-center">{label}</p>
-        {members.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setSelected(m.id)}
-            className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted/40 transition-colors"
-          >
-            {m.full_name ?? "—"}
-          </button>
-        ))}
+        <div className="grid grid-cols-2 gap-2">
+          {members.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setSelected(m.id)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-3 text-center text-sm font-medium text-sidebar hover:bg-muted/40 hover:border-sidebar/40 active:scale-[0.98] transition-all"
+            >
+              {m.full_name ?? "—"}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
