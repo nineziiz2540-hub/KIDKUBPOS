@@ -1,5 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
+import { Copy } from "lucide-react";
 import {
   confirmMfaEnrollment,
   disableMfa,
@@ -9,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToastManager } from "@/components/ui/toast";
 
 // Single source of truth for which screen renders. Earlier revisions derived this from three
 // independently-mutated pieces of state (a stale useActionState result + a local "enrollment"
@@ -29,6 +31,16 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
   const [enabled, setEnabled] = useState(initiallyEnabled);
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const [disableError, setDisableError] = useState<string | null>(null);
+  const toastManager = useToastManager();
+
+  async function copyAllBackupCodes(codes: string[]) {
+    try {
+      await navigator.clipboard.writeText(codes.join("\n"));
+      toastManager.add({ title: "คัดลอกรหัสสำรองแล้ว", type: "success" });
+    } catch {
+      toastManager.add({ title: "คัดลอกไม่สำเร็จ กรุณาลองใหม่", type: "error" });
+    }
+  }
   const [confirmState, confirmAction, confirmPending] = useActionState<MfaEnrollState, FormData>(
     confirmMfaEnrollment,
     undefined
@@ -101,11 +113,20 @@ export function MfaSection({ initiallyEnabled }: { initiallyEnabled: boolean }) 
           ))}
         </div>
         <Button
+          type="button"
+          variant="outline"
+          onClick={() => copyAllBackupCodes(phase.backupCodes)}
+          className="w-full"
+        >
+          <Copy size={16} />
+          คัดลอกรหัสทั้งหมด
+        </Button>
+        <Button
           onClick={() => {
             setPhase({ kind: "idle" });
             setEnabled(true);
           }}
-          className="bg-accent hover:bg-accent/90 text-white"
+          className="w-full bg-accent hover:bg-accent/90 text-white"
         >
           เสร็จสิ้น
         </Button>
