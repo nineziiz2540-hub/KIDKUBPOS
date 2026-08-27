@@ -10,6 +10,7 @@ import {
   Settings,
   Clock,
   Users,
+  Calculator,
   type LucideIcon,
 } from "lucide-react";
 import { LogoutButton } from "./logout-button";
@@ -33,6 +34,7 @@ const allNavItems: NavItem[] = [
   { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
   { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
   { href: "/customers", label: "Customers", icon: Users, minRole: "manager" },
+  { href: "/pricing-calculator", label: "คำนวณราคาขาย", icon: Calculator, minRole: "manager" },
   { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
 ];
 
