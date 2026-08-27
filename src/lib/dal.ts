@@ -3,6 +3,13 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/app";
+import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
+
+// Re-exported so existing server-side callers can keep importing this
+// constant from dal.ts. Client components must import it from
+// "@/lib/dashboard-labels" directly, NOT from here — this file has
+// `import "server-only"` above and cannot be imported by "use client" code.
+export { UNCATEGORIZED_LABEL };
 
 export type Role = "owner" | "manager" | "staff";
 
@@ -121,6 +128,17 @@ export function classifyUnit(categoryName: string | null): SoldUnit {
   return "ขวด";
 }
 
+/**
+ * Converts an inclusive Bangkok-local ["YYYY-MM-DD", "YYYY-MM-DD"] date range
+ * into the [start, end) UTC instant range used by `.gte()/.lt()` queries.
+ */
+function bangkokRange(startDate: string, endDate: string): { rangeStart: Date; rangeEnd: Date } {
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  return { rangeStart, rangeEnd };
+}
+
 export type TopProduct = {
   product_name: string;
   total_qty: number;
@@ -135,9 +153,7 @@ export async function getTopProducts(
   limit = 5
 ): Promise<TopProduct[]> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data: orderRows } = (await supabase
     .from("orders")
@@ -490,9 +506,7 @@ export async function getSalesByCategory(
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<{ category: string; total: number }[]> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data: orders } = await supabase
     .from("orders")
@@ -517,7 +531,7 @@ export async function getSalesByCategory(
     category_name: string | null;
     subtotal: number;
   }[]) {
-    const cat = item.category_name ?? "ไม่มีหมวดหมู่";
+    const cat = item.category_name ?? UNCATEGORIZED_LABEL;
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + Number(item.subtotal));
   }
 
@@ -542,9 +556,7 @@ export async function getSalesByDay(
 ): Promise<SalesByDay[]> {
   const supabase = await createClient();
   const offsetMs = 7 * 60 * 60 * 1000;
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000); // exclusive
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data } = await supabase
     .from("orders")
@@ -614,9 +626,7 @@ export async function getHourlyPattern(
 ): Promise<HourlyPattern[]> {
   const supabase = await createClient();
   const offsetMs = 7 * 60 * 60 * 1000;
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data } = await supabase
     .from("orders")
@@ -647,9 +657,7 @@ export async function getSalesSummary(
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<SalesSummary> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data } = await supabase
     .from("orders")
@@ -678,6 +686,39 @@ export type CostProfitSummary = {
   hasUnrecipedItems: boolean;
 };
 
+/**
+ * Batch-computes each product's unit cost (sum of recipe line costs) for a
+ * set of product ids in a single query. `missing` holds the ids that had no
+ * recipe rows at all — callers decide how to treat that (e.g. flag it, or
+ * treat it as ฿0 cost) rather than this helper deciding for them.
+ */
+async function unitCostByProductId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  productIds: string[]
+): Promise<{ costs: Map<string, number>; missing: Set<string> }> {
+  const costs = new Map<string, number>();
+  if (productIds.length === 0) return { costs, missing: new Set() };
+
+  const { data: recipeRows } = await supabase
+    .from("product_recipes")
+    .select("product_id, quantity_used, raw_materials(cost_per_unit)")
+    .in("product_id", productIds);
+
+  type RecipeRow = {
+    product_id: string;
+    quantity_used: number;
+    raw_materials: { cost_per_unit: number } | null;
+  };
+  for (const r of (recipeRows ?? []) as RecipeRow[]) {
+    if (!r.raw_materials) continue;
+    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
+    costs.set(r.product_id, (costs.get(r.product_id) ?? 0) + lineCost);
+  }
+
+  const missing = new Set(productIds.filter((id) => !costs.has(id)));
+  return { costs, missing };
+}
+
 export async function getCostProfit(
   tenantId: string,
   startDate: string, // "YYYY-MM-DD" Bangkok
@@ -685,9 +726,7 @@ export async function getCostProfit(
   daysInPeriod: number
 ): Promise<CostProfitSummary> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data: tenantRow } = await supabase
     .from("tenants")
@@ -736,36 +775,15 @@ export async function getCostProfit(
   }
   const productIds = [...qtyByProduct.keys()];
 
-  const { data: recipeRows } =
-    productIds.length > 0
-      ? await supabase
-          .from("product_recipes")
-          .select("product_id, quantity_used, raw_materials(cost_per_unit)")
-          .in("product_id", productIds)
-      : { data: [] as unknown[] };
-
-  type RecipeRow = {
-    product_id: string;
-    quantity_used: number;
-    raw_materials: { cost_per_unit: number } | null;
-  };
-  const costPerProduct = new Map<string, number>();
-  for (const r of (recipeRows ?? []) as RecipeRow[]) {
-    if (!r.raw_materials) continue;
-    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
-    costPerProduct.set(r.product_id, (costPerProduct.get(r.product_id) ?? 0) + lineCost);
-  }
+  const { costs: costPerProduct, missing } = await unitCostByProductId(supabase, productIds);
 
   let cogs = 0;
-  let hasUnrecipedItems = false;
   for (const [productId, qty] of qtyByProduct) {
     const unitCost = costPerProduct.get(productId);
-    if (unitCost === undefined) {
-      hasUnrecipedItems = true;
-      continue;
-    }
+    if (unitCost === undefined) continue;
     cogs += unitCost * qty;
   }
+  const hasUnrecipedItems = missing.size > 0;
 
   const totalCost = cogs + fixedCostShare;
 
@@ -787,9 +805,7 @@ export async function getPaymentMethodBreakdown(
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<{ cash: number; transfer: number }> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data } = await supabase
     .from("orders")
@@ -819,9 +835,7 @@ export async function getSalesQuantitySummary(
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<CategoryQty[]> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data: orders } = await supabase
     .from("orders")
@@ -843,14 +857,14 @@ export async function getSalesQuantitySummary(
 
   const byCategory = new Map<string, number>();
   for (const item of (items ?? []) as { category_name: string | null; quantity: number }[]) {
-    const cat = item.category_name ?? "ไม่มีหมวดหมู่";
+    const cat = item.category_name ?? UNCATEGORIZED_LABEL;
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + item.quantity);
   }
 
   return [...byCategory.entries()]
     .map(([category, qty]) => ({
       category,
-      unit: classifyUnit(category === "ไม่มีหมวดหมู่" ? null : category),
+      unit: classifyUnit(category),
       qty,
     }))
     .sort((a, b) => b.qty - a.qty);
@@ -874,9 +888,7 @@ export async function getMenuProfitBreakdown(
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<MenuProfitRow[]> {
   const supabase = await createClient();
-  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
-  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
-  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+  const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
   const { data: orders } = await supabase
     .from("orders")
@@ -927,29 +939,11 @@ export async function getMenuProfitBreakdown(
     .map((v) => v.productId)
     .filter((id): id is string => id !== null);
 
-  const { data: recipeRows } =
-    productIds.length > 0
-      ? await supabase
-          .from("product_recipes")
-          .select("product_id, quantity_used, raw_materials(cost_per_unit)")
-          .in("product_id", productIds)
-      : { data: [] as unknown[] };
-
-  type RecipeRow = {
-    product_id: string;
-    quantity_used: number;
-    raw_materials: { cost_per_unit: number } | null;
-  };
-  const unitCostByProductId = new Map<string, number>();
-  for (const r of (recipeRows ?? []) as RecipeRow[]) {
-    if (!r.raw_materials) continue;
-    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
-    unitCostByProductId.set(r.product_id, (unitCostByProductId.get(r.product_id) ?? 0) + lineCost);
-  }
+  const { costs: unitCostMap } = await unitCostByProductId(supabase, productIds);
 
   return [...byProduct.entries()]
     .map(([productName, v]) => {
-      const unitCost = v.productId ? unitCostByProductId.get(v.productId) ?? 0 : 0;
+      const unitCost = v.productId ? unitCostMap.get(v.productId) ?? 0 : 0;
       const cost = unitCost * v.qty;
       const profit = v.revenue - cost;
       return {

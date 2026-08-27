@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SummaryCards } from "./summary-cards";
@@ -32,8 +33,11 @@ type Props = {
   summary: SalesSummary;
   dailyData: SalesByDay[] | null;
   monthlyData: SalesByMonth[] | null;
-  peakHours: HourlyPattern[] | null;
+  peakHours: HourlyPattern[];
   categoryData: { category: string; total: number }[];
+  /** Rendered between the summary cards and the sales trend chart — e.g. the
+   * cost/profit card and per-menu profit table, per the Part 2 widget order. */
+  children?: ReactNode;
 };
 
 export function AnalyticsSection({
@@ -43,6 +47,7 @@ export function AnalyticsSection({
   monthlyData,
   peakHours,
   categoryData,
+  children,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -96,6 +101,8 @@ export function AnalyticsSection({
       {/* Summary Cards */}
       <SummaryCards summary={summary} range={range} />
 
+      {children}
+
       {/* Sales Trend */}
       <Card>
         <CardHeader>
@@ -113,14 +120,12 @@ export function AnalyticsSection({
         </CardContent>
       </Card>
 
-      {/* Peak Hours — week/month/year only */}
-      {peakHours !== null && (
-        <Card>
-          <CardContent className="pt-4">
-            <PeakHoursChart data={peakHours} />
-          </CardContent>
-        </Card>
-      )}
+      {/* Peak Hours */}
+      <Card>
+        <CardContent className="pt-4">
+          <PeakHoursChart data={peakHours} />
+        </CardContent>
+      </Card>
 
       {/* Category Performance */}
       <Card>

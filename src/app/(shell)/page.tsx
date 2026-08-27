@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   getProfile,
   getDashboardStats,
@@ -18,6 +17,8 @@ import {
   getMenuProfitBreakdown,
 } from "@/lib/dal";
 import { CostProfitCard } from "@/components/dashboard/cost-profit-card";
+import { TrendBadge } from "@/components/dashboard/trend-badge";
+import { RANGE_LABELS } from "@/components/dashboard/summary-cards";
 import { PaymentMethodCard } from "@/components/dashboard/payment-method-card";
 import { SalesQuantitySummary } from "@/components/dashboard/sales-quantity-summary";
 import { MenuProfitTable } from "@/components/dashboard/menu-profit-table";
@@ -28,29 +29,6 @@ import { LowStockWidget } from "@/components/dashboard/low-stock-widget";
 import { AnalyticsSection } from "@/components/dashboard/analytics-section";
 import { MfaRecoveredToastTrigger } from "@/components/auth/mfa-recovered-toast-trigger";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-function TrendBadgeInline({ current, previous }: { current: number; previous: number }) {
-  if (current > previous)
-    return (
-      <span className="flex items-center gap-0.5 text-xs font-medium text-green-600">
-        <TrendingUp size={12} />
-        ดีกว่าเมื่อวาน
-      </span>
-    );
-  if (current < previous)
-    return (
-      <span className="flex items-center gap-0.5 text-xs font-medium text-destructive">
-        <TrendingDown size={12} />
-        น้อยกว่าเมื่อวาน
-      </span>
-    );
-  return (
-    <span className="flex items-center gap-0.5 text-xs font-medium text-muted-foreground">
-      <Minus size={12} />
-      เท่าเมื่อวาน
-    </span>
-  );
-}
 
 function StatCards({
   todaySales,
@@ -71,7 +49,7 @@ function StatCards({
         </CardHeader>
         <CardContent className="space-y-1">
           <p className="text-2xl font-bold text-sidebar tabular-nums">฿{todaySales.toFixed(2)}</p>
-          <TrendBadgeInline current={todaySales} previous={yesterdaySales} />
+          <TrendBadge current={todaySales} previous={yesterdaySales} higherIsBetter={true} />
         </CardContent>
       </Card>
       <Card>
@@ -80,7 +58,7 @@ function StatCards({
         </CardHeader>
         <CardContent className="space-y-1">
           <p className="text-2xl font-bold text-sidebar tabular-nums">{todayOrders}</p>
-          <TrendBadgeInline current={todayOrders} previous={yesterdayOrders} />
+          <TrendBadge current={todayOrders} previous={yesterdayOrders} higherIsBetter={true} />
         </CardContent>
       </Card>
     </div>
@@ -122,6 +100,7 @@ export default async function DashboardPage({
       : rawRange === "custom" && hasValidCustomDates
         ? "custom"
         : "week";
+  const periodLabel = RANGE_LABELS[range] ?? "ช่วงนี้";
 
   // Bangkok date strings ("YYYY-MM-DD")
   const offsetMs = 7 * 60 * 60 * 1000;
@@ -234,7 +213,7 @@ export default async function DashboardPage({
         yesterdayOrders={stats.yesterdayOrders}
       />
 
-      <CostProfitCard current={todayCostProfit} previous={yesterdayCostProfit} />
+      <CostProfitCard current={todayCostProfit} previous={yesterdayCostProfit} periodLabel="วันนี้" />
 
       <PaymentMethodCard cash={paymentBreakdown.cash} transfer={paymentBreakdown.transfer} />
 
@@ -275,12 +254,11 @@ export default async function DashboardPage({
           monthlyData={monthlyData}
           peakHours={peakHours}
           categoryData={periodCategoryData}
-        />
+        >
+          <CostProfitCard current={periodCostProfit} periodLabel={periodLabel} />
+          <MenuProfitTable rows={menuProfitRows} />
+        </AnalyticsSection>
       </Suspense>
-
-      <CostProfitCard current={periodCostProfit} />
-
-      <MenuProfitTable rows={menuProfitRows} />
 
       <div>
         <h2 className="text-base font-semibold text-sidebar mb-3">สินค้าขายดี TOP 5</h2>

@@ -8,6 +8,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
 
 const CATEGORY_PALETTE = [
   "#8b5e3c", // coffee brown
@@ -20,7 +21,6 @@ const CATEGORY_PALETTE = [
   "#14b8a6", // teal
 ];
 const UNCATEGORIZED_COLOR = "#4b5563"; // reserved dark gray, not part of the rotation
-const UNCATEGORIZED_LABEL = "ไม่มีหมวดหมู่";
 
 function colorForCategory(name: string): string {
   if (name === UNCATEGORIZED_LABEL) return UNCATEGORIZED_COLOR;
