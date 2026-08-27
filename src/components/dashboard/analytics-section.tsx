@@ -14,13 +14,12 @@ import type {
   HourlyPattern,
 } from "@/lib/dal";
 
-type Range = "day" | "week" | "month" | "year" | "custom";
+type Range = "week" | "month" | "year" | "custom";
 
 const RANGE_TABS: { value: Range; label: string }[] = [
-  { value: "day", label: "วันนี้" },
-  { value: "week", label: "7 วัน" },
-  { value: "month", label: "30 วัน" },
-  { value: "year", label: "ปีนี้" },
+  { value: "week", label: "รายสัปดาห์" },
+  { value: "month", label: "รายเดือน" },
+  { value: "year", label: "รายปี" },
 ];
 
 function formatShortDate(dateStr: string): string {
@@ -31,7 +30,6 @@ function formatShortDate(dateStr: string): string {
 type Props = {
   range: Range;
   summary: SalesSummary;
-  hourlyData: { hour: number; total: number }[] | null;
   dailyData: SalesByDay[] | null;
   monthlyData: SalesByMonth[] | null;
   peakHours: HourlyPattern[] | null;
@@ -41,7 +39,6 @@ type Props = {
 export function AnalyticsSection({
   range,
   summary,
-  hourlyData,
   dailyData,
   monthlyData,
   peakHours,
@@ -107,9 +104,6 @@ export function AnalyticsSection({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {range === "day" && hourlyData !== null && (
-            <SalesTrendChart range="day" data={hourlyData} />
-          )}
           {(range === "week" || range === "month" || range === "custom") && dailyData !== null && (
             <SalesTrendChart range={range} data={dailyData} />
           )}

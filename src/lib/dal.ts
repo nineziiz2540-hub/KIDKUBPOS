@@ -442,47 +442,22 @@ export async function getSalesByHour(
 
 export async function getSalesByCategory(
   tenantId: string,
-  range: "day" | "week" | "month" | "year" | "custom",
-  customRange?: { start: string; end: string } // "YYYY-MM-DD" Bangkok, required when range === "custom"
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<{ category: string; total: number }[]> {
   const supabase = await createClient();
-  const offsetMs = 7 * 60 * 60 * 1000;
-  const now = new Date();
-  const bangkokNow = new Date(now.getTime() + offsetMs);
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
 
-  let rangeStart: Date;
-  let rangeEndExclusive: Date | null = null;
-  if (range === "custom" && customRange) {
-    rangeStart = new Date(`${customRange.start}T00:00:00+07:00`);
-    rangeEndExclusive = new Date(`${customRange.end}T00:00:00+07:00`);
-    rangeEndExclusive.setTime(rangeEndExclusive.getTime() + 24 * 60 * 60 * 1000);
-  } else if (range === "day") {
-    const midnight = Date.UTC(
-      bangkokNow.getUTCFullYear(),
-      bangkokNow.getUTCMonth(),
-      bangkokNow.getUTCDate()
-    );
-    rangeStart = new Date(midnight - offsetMs);
-  } else if (range === "week") {
-    rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  } else if (range === "month") {
-    rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  } else {
-    // year — ตั้งแต่ 1 ม.ค. ของปีนี้ตาม Bangkok time
-    rangeStart = new Date(`${bangkokNow.getUTCFullYear()}-01-01T00:00:00+07:00`);
-  }
-
-  let query = supabase
+  const { data: orders } = await supabase
     .from("orders")
     .select("id")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
     .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString());
-  if (rangeEndExclusive) {
-    query = query.lt("created_at", rangeEndExclusive.toISOString());
-  }
-  const { data: orders } = await query;
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
 
   if (!orders || orders.length === 0) return [];
 

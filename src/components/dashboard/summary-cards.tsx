@@ -2,9 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SalesSummary } from "@/lib/dal";
 
 const RANGE_LABELS: Record<string, string> = {
-  day: "วันนี้",
-  week: "7 วันล่าสุด",
-  month: "30 วันล่าสุด",
+  week: "สัปดาห์นี้",
+  month: "เดือนนี้",
   year: "ปีนี้",
 };
 
