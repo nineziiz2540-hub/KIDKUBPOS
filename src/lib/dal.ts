@@ -105,24 +105,48 @@ export async function getDashboardStats(tenantId: string): Promise<DashboardStat
   };
 }
 
+export type SoldUnit = "แก้ว" | "ชิ้น" | "ขวด";
+
+const DRINK_KEYWORDS = [
+  "coffee", "กาแฟ", "matcha", "มัทฉะ", "tea", "ชา",
+  "non-coffee", "non coffee", "noncoffee",
+];
+const BAKERY_KEYWORDS = ["bakery", "เบเกอรี่", "ขนม", "cake", "เค้ก"];
+
+export function classifyUnit(categoryName: string | null): SoldUnit {
+  if (!categoryName) return "ขวด";
+  const lower = categoryName.toLowerCase();
+  if (DRINK_KEYWORDS.some((k) => lower.includes(k))) return "แก้ว";
+  if (BAKERY_KEYWORDS.some((k) => lower.includes(k))) return "ชิ้น";
+  return "ขวด";
+}
+
 export type TopProduct = {
   product_name: string;
   total_qty: number;
   total_sales: number;
+  unit: SoldUnit;
 };
 
 export async function getTopProducts(
   tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string,   // "YYYY-MM-DD" Bangkok (inclusive)
   limit = 5
 ): Promise<TopProduct[]> {
   const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
 
   const { data: orderRows } = (await supabase
     .from("orders")
     .select("id")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
-    .neq("status", "refunded")) as { data: { id: string }[] | null };
+    .neq("status", "refunded")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString())) as { data: { id: string }[] | null };
 
   if (!orderRows || orderRows.length === 0) return [];
 
@@ -130,24 +154,44 @@ export async function getTopProducts(
 
   const { data: items } = (await supabase
     .from("order_items")
-    .select("product_name, quantity, subtotal")
+    .select("product_name, category_name, quantity, subtotal")
     .in("order_id", orderIds)) as {
-    data: { product_name: string; quantity: number; subtotal: number }[] | null;
+    data:
+      | {
+          product_name: string;
+          category_name: string | null;
+          quantity: number;
+          subtotal: number;
+        }[]
+      | null;
   };
 
   if (!items) return [];
 
-  const map = new Map<string, { total_qty: number; total_sales: number }>();
+  const map = new Map<
+    string,
+    { total_qty: number; total_sales: number; category_name: string | null }
+  >();
   for (const row of items) {
-    const prev = map.get(row.product_name) ?? { total_qty: 0, total_sales: 0 };
+    const prev = map.get(row.product_name) ?? {
+      total_qty: 0,
+      total_sales: 0,
+      category_name: row.category_name,
+    };
     map.set(row.product_name, {
       total_qty: prev.total_qty + row.quantity,
       total_sales: prev.total_sales + Number(row.subtotal),
+      category_name: prev.category_name ?? row.category_name,
     });
   }
 
   return [...map.entries()]
-    .map(([product_name, s]) => ({ product_name, ...s }))
+    .map(([product_name, s]) => ({
+      product_name,
+      total_qty: s.total_qty,
+      total_sales: s.total_sales,
+      unit: classifyUnit(s.category_name),
+    }))
     .sort((a, b) => b.total_qty - a.total_qty)
     .slice(0, limit);
 }
