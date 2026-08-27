@@ -38,7 +38,6 @@ type OrderDetail = {
 const PAYMENT_LABELS: Record<string, string> = {
   cash: "เงินสด",
   transfer: "โอน",
-  card: "บัตร",
 };
 
 type Props = {

@@ -5,7 +5,6 @@ import { getProfile, getCustomerById, getCustomerOrders } from "@/lib/dal";
 const PAYMENT_LABELS: Record<string, string> = {
   cash: "เงินสด",
   transfer: "โอน",
-  card: "บัตร",
 };
 
 export default async function CustomerDetailPage({
