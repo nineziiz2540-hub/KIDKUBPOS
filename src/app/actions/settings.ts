@@ -292,6 +292,17 @@ export async function deactivateTeamMember(
 
   const admin = createAdminClient();
 
+  // Confirm memberId actually belongs to the caller's own tenant BEFORE touching GoTrue —
+  // admin.auth.admin.updateUserById has no tenant awareness at all, so without this check an
+  // Owner could ban any user id in the entire project, not just their own team.
+  const { data: target } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("id", memberId)
+    .eq("tenant_id", profile.tenant_id)
+    .maybeSingle();
+  if (!target) return { error: "ไม่พบข้อมูลพนักงาน" };
+
   // Ban first, DB flag second: if the ban call fails, we must not mark them deactivated in the
   // DB, since that would show "deactivated" in the UI without the actual immediate-cutoff having
   // happened at all — a false sense of security.
@@ -326,6 +337,16 @@ export async function reactivateTeamMember(
   }
 
   const admin = createAdminClient();
+
+  // Same tenant-ownership check as deactivateTeamMember — updateUserById has no tenant
+  // awareness, so without this an Owner could unban any user id in the entire project.
+  const { data: target } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("id", memberId)
+    .eq("tenant_id", profile.tenant_id)
+    .maybeSingle();
+  if (!target) return { error: "ไม่พบข้อมูลพนักงาน" };
 
   // Lift the ban first, DB flag second — mirrors deactivate's ordering discipline. If lifting
   // the ban fails, do not clear deactivated_at, since that would show "active" in the UI while
