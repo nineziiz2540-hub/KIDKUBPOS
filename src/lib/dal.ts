@@ -809,6 +809,53 @@ export async function getPaymentMethodBreakdown(
   };
 }
 
+// ─── Sales Quantity Summary ─────────────────────────────────────────────────
+
+export type CategoryQty = { category: string; unit: SoldUnit; qty: number };
+
+export async function getSalesQuantitySummary(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<CategoryQty[]> {
+  const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .neq("status", "refunded")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = (orders as { id: string }[]).map((o) => o.id);
+
+  const { data: items } = await supabase
+    .from("order_items")
+    .select("category_name, quantity")
+    .in("order_id", orderIds);
+
+  const byCategory = new Map<string, number>();
+  for (const item of (items ?? []) as { category_name: string | null; quantity: number }[]) {
+    const cat = item.category_name ?? "ไม่มีหมวดหมู่";
+    byCategory.set(cat, (byCategory.get(cat) ?? 0) + item.quantity);
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, qty]) => ({
+      category,
+      unit: classifyUnit(category === "ไม่มีหมวดหมู่" ? null : category),
+      qty,
+    }))
+    .sort((a, b) => b.qty - a.qty);
+}
+
 // ─── Calculator Helpers ───────────────────────────────────────────────────────
 
 export type CalcProduct = { id: string; name: string };
