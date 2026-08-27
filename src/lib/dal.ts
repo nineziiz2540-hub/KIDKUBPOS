@@ -856,6 +856,115 @@ export async function getSalesQuantitySummary(
     .sort((a, b) => b.qty - a.qty);
 }
 
+// ─── Per-Menu Profit ─────────────────────────────────────────────────────────
+
+export type MenuProfitRow = {
+  productName: string;
+  qty: number;
+  unit: SoldUnit;
+  revenue: number;
+  cost: number;
+  profit: number;
+  gpPercent: number;
+};
+
+export async function getMenuProfitBreakdown(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<MenuProfitRow[]> {
+  const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .neq("status", "refunded")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  if (!orders || orders.length === 0) return [];
+
+  const orderIds = (orders as { id: string }[]).map((o) => o.id);
+
+  const { data: items } = await supabase
+    .from("order_items")
+    .select("product_id, product_name, category_name, quantity, subtotal")
+    .in("order_id", orderIds);
+
+  type ItemRow = {
+    product_id: string | null;
+    product_name: string;
+    category_name: string | null;
+    quantity: number;
+    subtotal: number;
+  };
+
+  const byProduct = new Map<
+    string,
+    { productId: string | null; category_name: string | null; qty: number; revenue: number }
+  >();
+  for (const row of (items ?? []) as ItemRow[]) {
+    const prev = byProduct.get(row.product_name) ?? {
+      productId: row.product_id,
+      category_name: row.category_name,
+      qty: 0,
+      revenue: 0,
+    };
+    byProduct.set(row.product_name, {
+      productId: prev.productId ?? row.product_id,
+      category_name: prev.category_name ?? row.category_name,
+      qty: prev.qty + row.quantity,
+      revenue: prev.revenue + Number(row.subtotal),
+    });
+  }
+
+  const productIds = [...byProduct.values()]
+    .map((v) => v.productId)
+    .filter((id): id is string => id !== null);
+
+  const { data: recipeRows } =
+    productIds.length > 0
+      ? await supabase
+          .from("product_recipes")
+          .select("product_id, quantity_used, raw_materials(cost_per_unit)")
+          .in("product_id", productIds)
+      : { data: [] as unknown[] };
+
+  type RecipeRow = {
+    product_id: string;
+    quantity_used: number;
+    raw_materials: { cost_per_unit: number } | null;
+  };
+  const unitCostByProductId = new Map<string, number>();
+  for (const r of (recipeRows ?? []) as RecipeRow[]) {
+    if (!r.raw_materials) continue;
+    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
+    unitCostByProductId.set(r.product_id, (unitCostByProductId.get(r.product_id) ?? 0) + lineCost);
+  }
+
+  return [...byProduct.entries()]
+    .map(([productName, v]) => {
+      const unitCost = v.productId ? unitCostByProductId.get(v.productId) ?? 0 : 0;
+      const cost = unitCost * v.qty;
+      const profit = v.revenue - cost;
+      return {
+        productName,
+        qty: v.qty,
+        unit: classifyUnit(v.category_name),
+        revenue: v.revenue,
+        cost,
+        profit,
+        gpPercent: v.revenue > 0 ? (profit / v.revenue) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.qty - a.qty);
+}
+
 // ─── Calculator Helpers ───────────────────────────────────────────────────────
 
 export type CalcProduct = { id: string; name: string };
