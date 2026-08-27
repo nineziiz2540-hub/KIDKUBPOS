@@ -779,6 +779,36 @@ export async function getCostProfit(
   };
 }
 
+// ─── Payment Method Breakdown ───────────────────────────────────────────────────
+
+export async function getPaymentMethodBreakdown(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
+): Promise<{ cash: number; transfer: number }> {
+  const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data } = await supabase
+    .from("orders")
+    .select("total, payment_method")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .neq("status", "refunded")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  const rows = (data ?? []) as { total: number; payment_method: string }[];
+  return {
+    cash: rows.filter((r) => r.payment_method === "cash").reduce((sum, r) => sum + Number(r.total), 0),
+    transfer: rows
+      .filter((r) => r.payment_method === "transfer")
+      .reduce((sum, r) => sum + Number(r.total), 0),
+  };
+}
+
 // ─── Calculator Helpers ───────────────────────────────────────────────────────
 
 export type CalcProduct = { id: string; name: string };
