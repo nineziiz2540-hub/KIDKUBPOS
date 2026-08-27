@@ -667,6 +667,118 @@ export async function getSalesSummary(
   };
 }
 
+// ─── Cost & Profit ────────────────────────────────────────────────────────────
+
+export type CostProfitSummary = {
+  revenue: number;
+  cogs: number;
+  fixedCostShare: number;
+  totalCost: number;
+  profit: number;
+  hasUnrecipedItems: boolean;
+};
+
+export async function getCostProfit(
+  tenantId: string,
+  startDate: string, // "YYYY-MM-DD" Bangkok
+  endDate: string,   // "YYYY-MM-DD" Bangkok (inclusive)
+  daysInPeriod: number
+): Promise<CostProfitSummary> {
+  const supabase = await createClient();
+  const rangeStart = new Date(`${startDate}T00:00:00+07:00`);
+  const rangeEnd = new Date(`${endDate}T00:00:00+07:00`);
+  rangeEnd.setTime(rangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data: tenantRow } = await supabase
+    .from("tenants")
+    .select("fixed_cost_monthly")
+    .eq("id", tenantId)
+    .single();
+  const fixedCostMonthly = Number(
+    (tenantRow as { fixed_cost_monthly: number } | null)?.fixed_cost_monthly ?? 0
+  );
+  const fixedCostShare = (fixedCostMonthly / 30) * daysInPeriod;
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id, total")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelled")
+    .neq("status", "refunded")
+    .gte("created_at", rangeStart.toISOString())
+    .lt("created_at", rangeEnd.toISOString());
+
+  const orderRows = (orders ?? []) as { id: string; total: number }[];
+  const revenue = orderRows.reduce((sum, r) => sum + Number(r.total), 0);
+
+  if (orderRows.length === 0) {
+    return {
+      revenue: 0,
+      cogs: 0,
+      fixedCostShare,
+      totalCost: fixedCostShare,
+      profit: -fixedCostShare,
+      hasUnrecipedItems: false,
+    };
+  }
+
+  const orderIds = orderRows.map((o) => o.id);
+
+  const { data: items } = await supabase
+    .from("order_items")
+    .select("product_id, quantity")
+    .in("order_id", orderIds);
+
+  const qtyByProduct = new Map<string, number>();
+  for (const item of (items ?? []) as { product_id: string | null; quantity: number }[]) {
+    if (!item.product_id) continue;
+    qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + item.quantity);
+  }
+  const productIds = [...qtyByProduct.keys()];
+
+  const { data: recipeRows } =
+    productIds.length > 0
+      ? await supabase
+          .from("product_recipes")
+          .select("product_id, quantity_used, raw_materials(cost_per_unit)")
+          .in("product_id", productIds)
+      : { data: [] as unknown[] };
+
+  type RecipeRow = {
+    product_id: string;
+    quantity_used: number;
+    raw_materials: { cost_per_unit: number } | null;
+  };
+  const costPerProduct = new Map<string, number>();
+  for (const r of (recipeRows ?? []) as RecipeRow[]) {
+    if (!r.raw_materials) continue;
+    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
+    costPerProduct.set(r.product_id, (costPerProduct.get(r.product_id) ?? 0) + lineCost);
+  }
+
+  let cogs = 0;
+  let hasUnrecipedItems = false;
+  for (const [productId, qty] of qtyByProduct) {
+    const unitCost = costPerProduct.get(productId);
+    if (unitCost === undefined) {
+      hasUnrecipedItems = true;
+      continue;
+    }
+    cogs += unitCost * qty;
+  }
+
+  const totalCost = cogs + fixedCostShare;
+
+  return {
+    revenue,
+    cogs,
+    fixedCostShare,
+    totalCost,
+    profit: revenue - totalCost,
+    hasUnrecipedItems,
+  };
+}
+
 // ─── Calculator Helpers ───────────────────────────────────────────────────────
 
 export type CalcProduct = { id: string; name: string };
