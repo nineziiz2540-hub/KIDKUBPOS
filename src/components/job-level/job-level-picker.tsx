@@ -3,14 +3,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { Role } from "@/lib/dal";
-import { SelfTileTrigger, SelfPinContent } from "@/components/job-level/self-tile";
+import { SelfTileTrigger, SelfPinContent, ROLE_LABELS } from "@/components/job-level/self-tile";
 import { RoleTile, MemberPinForm } from "@/components/job-level/role-tile";
-
-const ROLE_LABELS: Record<Role, string> = {
-  owner: "OWNER",
-  manager: "MANAGER",
-  staff: "STAFF",
-};
 
 type Member = { id: string; full_name: string | null };
 

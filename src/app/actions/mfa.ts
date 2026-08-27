@@ -31,7 +31,10 @@ export async function enrollMfa(): Promise<EnrollMfaResult> {
   const { data: existingFactors } = await supabase.auth.mfa.listFactors();
   for (const factor of existingFactors?.all ?? []) {
     if (factor.factor_type === "totp" && factor.status === "unverified") {
-      await supabase.auth.mfa.unenroll({ factorId: factor.id });
+      const { error: cleanupError } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+      if (cleanupError) {
+        console.error("enrollMfa: stale factor cleanup failed:", cleanupError);
+      }
     }
   }
 

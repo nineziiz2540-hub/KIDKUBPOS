@@ -10,7 +10,9 @@ export default async function JobLevelPage() {
   }
 
   const [owners, managers, staff] = await Promise.all([
-    getTeamMembersByRole(profile.tenant_id, "owner", profile.id),
+    profile.role !== "owner"
+      ? getTeamMembersByRole(profile.tenant_id, "owner", profile.id)
+      : Promise.resolve([]),
     getTeamMembersByRole(profile.tenant_id, "manager", profile.id),
     getTeamMembersByRole(profile.tenant_id, "staff", profile.id),
   ]);
