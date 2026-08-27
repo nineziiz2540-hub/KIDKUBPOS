@@ -1,13 +1,12 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 
-type FilterValue = "all" | "cash" | "transfer" | "card" | "cancelled" | "refunded";
+type FilterValue = "all" | "cash" | "transfer" | "cancelled" | "refunded";
 
 const FILTERS: { value: FilterValue; label: string }[] = [
   { value: "all", label: "ทั้งหมด" },
   { value: "cash", label: "เงินสด" },
   { value: "transfer", label: "โอน" },
-  { value: "card", label: "บัตร" },
   { value: "cancelled", label: "ยกเลิก" },
   { value: "refunded", label: "คืนเงิน" },
 ];

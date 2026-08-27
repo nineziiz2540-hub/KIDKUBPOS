@@ -8,15 +8,14 @@ import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/ui/pin-pad";
 import { findOrCreateCustomer } from "@/app/actions/customers";
 
-type PaymentMethod = "cash" | "transfer" | "card";
+type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   cash: "เงินสด",
   transfer: "โอน",
-  card: "บัตร",
 };
-const PAYMENT_METHODS: PaymentMethod[] = ["cash", "transfer", "card"];
+const PAYMENT_METHODS: PaymentMethod[] = ["cash", "transfer"];
 
 type Props = {
   cartItems: CartItem[];

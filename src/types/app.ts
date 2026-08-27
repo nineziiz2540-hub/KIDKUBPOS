@@ -20,7 +20,7 @@ export type CartItem = {
 
 export type CreateOrderInput = {
   items: CartItem[];
-  paymentMethod: "cash" | "transfer" | "card";
+  paymentMethod: "cash" | "transfer";
   orderType: "dine_in" | "take_away";
   tableNumber?: string;
   customerId?: string;

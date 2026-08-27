@@ -5,7 +5,7 @@ import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { OrdersFilter } from "@/components/orders/orders-filter";
 
-type FilterValue = "all" | "cash" | "transfer" | "card" | "cancelled" | "refunded";
+type FilterValue = "all" | "cash" | "transfer" | "cancelled" | "refunded";
 
 type OrderRow = {
   id: string;

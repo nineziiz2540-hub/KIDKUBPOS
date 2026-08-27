@@ -702,7 +702,6 @@ export type ShiftSummary = {
   totalCash: number;
   totalCashRefunded: number;
   totalTransfer: number;
-  totalCard: number;
   orderCount: number;
   expectedCash: number;
 };
@@ -750,9 +749,6 @@ export async function getShiftSummary(
   const totalTransfer = rows
     .filter((r) => r.payment_method === "transfer")
     .reduce((sum, r) => sum + Number(r.total), 0);
-  const totalCard = rows
-    .filter((r) => r.payment_method === "card")
-    .reduce((sum, r) => sum + Number(r.total), 0);
 
   const { data: refundRows } = await supabase
     .from("orders")
@@ -782,7 +778,6 @@ export async function getShiftSummary(
     totalCash,
     totalCashRefunded,
     totalTransfer,
-    totalCard,
     orderCount: rows.length,
     expectedCash: openingCash + totalCash,
   };

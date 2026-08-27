@@ -39,7 +39,7 @@ export function PosScreen({
   const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
   const [tableNumber, setTableNumber] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "card">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [discountType, setDiscountType] = useState<DiscountType | null>(null);
   const [discountValue, setDiscountValue] = useState("");

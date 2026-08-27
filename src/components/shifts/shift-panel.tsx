@@ -108,12 +108,6 @@ export function ShiftPanel({ activeShift, summary }: Props) {
           </p>
         </div>
         <div className="rounded-md bg-muted p-3">
-          <p className="text-xs text-muted-foreground">บัตร</p>
-          <p className="font-semibold text-sidebar tabular-nums">
-            ฿{summary?.totalCard.toFixed(2) ?? "0.00"}
-          </p>
-        </div>
-        <div className="rounded-md bg-muted p-3">
           <p className="text-xs text-muted-foreground">จำนวนออเดอร์</p>
           <p className="font-semibold text-sidebar tabular-nums">
             {summary?.orderCount ?? 0}

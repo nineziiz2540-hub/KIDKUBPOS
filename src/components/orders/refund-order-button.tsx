@@ -8,12 +8,11 @@ import { Label } from "@/components/ui/label";
 
 const MAX_PIN_ATTEMPTS = 5;
 
-type RefundMethod = "cash" | "transfer" | "card";
+type RefundMethod = "cash" | "transfer";
 
 const REFUND_METHODS: { value: RefundMethod; label: string }[] = [
   { value: "cash", label: "เงินสด" },
   { value: "transfer", label: "โอน" },
-  { value: "card", label: "บัตร" },
 ];
 
 export function RefundOrderButton({ orderId }: { orderId: string }) {

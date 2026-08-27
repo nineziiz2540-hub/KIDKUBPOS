@@ -318,11 +318,7 @@ export async function refundOrder(
   ) {
     return { error: "ข้อมูลไม่ถูกต้อง" };
   }
-  if (
-    refundMethod !== "cash" &&
-    refundMethod !== "transfer" &&
-    refundMethod !== "card"
-  ) {
+  if (refundMethod !== "cash" && refundMethod !== "transfer") {
     return { error: "กรุณาเลือกวิธีคืนเงิน" };
   }
   if (reason.trim() === "") {
