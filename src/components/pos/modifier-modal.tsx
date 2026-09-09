@@ -85,7 +85,12 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 bg-black/50 z-40" />
-        <Dialog.Popup className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <Dialog.Popup
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+        >
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md max-h-[90vh] flex flex-col">
             {/* Header */}
             <div className="px-5 pt-5 pb-3 border-b shrink-0">
