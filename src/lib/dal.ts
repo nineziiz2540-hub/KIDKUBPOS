@@ -139,6 +139,67 @@ function bangkokRange(startDate: string, endDate: string): { rangeStart: Date; r
   return { rangeStart, rangeEnd };
 }
 
+type OrderItemRangeRow = {
+  product_id: string | null;
+  product_name: string;
+  category_name: string | null;
+  quantity: number;
+  subtotal: number;
+};
+
+const ORDER_ITEMS_PAGE_SIZE = 1000;
+
+/**
+ * Fetches every order_items row for a tenant within a Bangkok-local date
+ * range in one query, joining directly to `orders` (`orders!inner(...)`)
+ * instead of first fetching order ids and re-querying with `.in()`. That
+ * two-step shape silently drops orders past PostgREST's default row cap
+ * before order_items is even queried — a real risk once a tenant has more
+ * orders in a period than the cap (e.g. a busy café's yearly view). Joining
+ * directly removes that intermediate truncation point, and paginating with
+ * `.range()` here removes the remaining one so this never silently drops
+ * rows regardless of order volume.
+ */
+async function getOrderItemsInRange(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<OrderItemRangeRow[]> {
+  type RawRow = OrderItemRangeRow & { orders: unknown };
+  const rows: OrderItemRangeRow[] = [];
+
+  for (let from = 0; ; from += ORDER_ITEMS_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("order_items")
+      .select(
+        "product_id, product_name, category_name, quantity, subtotal, orders!inner(tenant_id, status, created_at)"
+      )
+      .eq("orders.tenant_id", tenantId)
+      .neq("orders.status", "cancelled")
+      .neq("orders.status", "refunded")
+      .gte("orders.created_at", rangeStart.toISOString())
+      .lt("orders.created_at", rangeEnd.toISOString())
+      .range(from, from + ORDER_ITEMS_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data ?? []) as unknown as RawRow[];
+    for (const row of page) {
+      rows.push({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        category_name: row.category_name,
+        quantity: row.quantity,
+        subtotal: row.subtotal,
+      });
+    }
+    if (page.length < ORDER_ITEMS_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
 export type TopProduct = {
   product_name: string;
   total_qty: number;
@@ -155,34 +216,9 @@ export async function getTopProducts(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data: orderRows } = (await supabase
-    .from("orders")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString())) as { data: { id: string }[] | null };
+  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
-  if (!orderRows || orderRows.length === 0) return [];
-
-  const orderIds = orderRows.map((r) => r.id);
-
-  const { data: items } = (await supabase
-    .from("order_items")
-    .select("product_name, category_name, quantity, subtotal")
-    .in("order_id", orderIds)) as {
-    data:
-      | {
-          product_name: string;
-          category_name: string | null;
-          quantity: number;
-          subtotal: number;
-        }[]
-      | null;
-  };
-
-  if (!items) return [];
+  if (items.length === 0) return [];
 
   const map = new Map<
     string,
@@ -508,29 +544,10 @@ export async function getSalesByCategory(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
-
-  if (!orders || orders.length === 0) return [];
-
-  const orderIds = (orders as { id: string }[]).map((o) => o.id);
-
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("category_name, subtotal")
-    .in("order_id", orderIds);
+  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const byCategory = new Map<string, number>();
-  for (const item of (items ?? []) as {
-    category_name: string | null;
-    subtotal: number;
-  }[]) {
+  for (const item of items) {
     const cat = item.category_name ?? UNCATEGORIZED_LABEL;
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + Number(item.subtotal));
   }
@@ -740,14 +757,14 @@ export async function getCostProfit(
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, total")
+    .select("total")
     .eq("tenant_id", tenantId)
     .neq("status", "cancelled")
     .neq("status", "refunded")
     .gte("created_at", rangeStart.toISOString())
     .lt("created_at", rangeEnd.toISOString());
 
-  const orderRows = (orders ?? []) as { id: string; total: number }[];
+  const orderRows = (orders ?? []) as { total: number }[];
   const revenue = orderRows.reduce((sum, r) => sum + Number(r.total), 0);
 
   if (orderRows.length === 0) {
@@ -761,15 +778,10 @@ export async function getCostProfit(
     };
   }
 
-  const orderIds = orderRows.map((o) => o.id);
-
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, quantity")
-    .in("order_id", orderIds);
+  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const qtyByProduct = new Map<string, number>();
-  for (const item of (items ?? []) as { product_id: string | null; quantity: number }[]) {
+  for (const item of items) {
     if (!item.product_id) continue;
     qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + item.quantity);
   }
@@ -837,26 +849,10 @@ export async function getSalesQuantitySummary(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
-
-  if (!orders || orders.length === 0) return [];
-
-  const orderIds = (orders as { id: string }[]).map((o) => o.id);
-
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("category_name, quantity")
-    .in("order_id", orderIds);
+  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const byCategory = new Map<string, number>();
-  for (const item of (items ?? []) as { category_name: string | null; quantity: number }[]) {
+  for (const item of items) {
     const cat = item.category_name ?? UNCATEGORIZED_LABEL;
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + item.quantity);
   }
@@ -890,37 +886,13 @@ export async function getMenuProfitBreakdown(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
-
-  if (!orders || orders.length === 0) return [];
-
-  const orderIds = (orders as { id: string }[]).map((o) => o.id);
-
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, product_name, category_name, quantity, subtotal")
-    .in("order_id", orderIds);
-
-  type ItemRow = {
-    product_id: string | null;
-    product_name: string;
-    category_name: string | null;
-    quantity: number;
-    subtotal: number;
-  };
+  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const byProduct = new Map<
     string,
     { productId: string | null; category_name: string | null; qty: number; revenue: number }
   >();
-  for (const row of (items ?? []) as ItemRow[]) {
+  for (const row of items) {
     const prev = byProduct.get(row.product_name) ?? {
       productId: row.product_id,
       category_name: row.category_name,
