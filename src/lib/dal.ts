@@ -82,27 +82,10 @@ export async function getDashboardStats(tenantId: string): Promise<DashboardStat
 
   const supabase = await createClient();
 
-  const [{ data: todayRows }, { data: yesterdayRows }] = await Promise.all([
-    supabase
-      .from("orders")
-      .select("total")
-      .eq("tenant_id", tenantId)
-      .neq("status", "cancelled")
-      .neq("status", "refunded")
-      .gte("created_at", todayStart.toISOString())
-      .lt("created_at", tomorrowStart.toISOString()),
-    supabase
-      .from("orders")
-      .select("total")
-      .eq("tenant_id", tenantId)
-      .neq("status", "cancelled")
-      .neq("status", "refunded")
-      .gte("created_at", yesterdayStart.toISOString())
-      .lt("created_at", todayStart.toISOString()),
+  const [today, yesterday] = await Promise.all([
+    getOrdersInRange(supabase, tenantId, todayStart, tomorrowStart),
+    getOrdersInRange(supabase, tenantId, yesterdayStart, todayStart),
   ]);
-
-  const today = (todayRows ?? []) as { total: number }[];
-  const yesterday = (yesterdayRows ?? []) as { total: number }[];
 
   return {
     todaySales: today.reduce((sum, r) => sum + Number(r.total), 0),
@@ -147,7 +130,7 @@ type OrderItemRangeRow = {
   subtotal: number;
 };
 
-const ORDER_ITEMS_PAGE_SIZE = 1000;
+const DB_PAGE_SIZE = 1000;
 
 /**
  * Fetches every order_items row for a tenant within a Bangkok-local date
@@ -169,7 +152,7 @@ async function getOrderItemsInRange(
   type RawRow = OrderItemRangeRow & { orders: unknown };
   const rows: OrderItemRangeRow[] = [];
 
-  for (let from = 0; ; from += ORDER_ITEMS_PAGE_SIZE) {
+  for (let from = 0; ; from += DB_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("order_items")
       .select(
@@ -180,7 +163,7 @@ async function getOrderItemsInRange(
       .neq("orders.status", "refunded")
       .gte("orders.created_at", rangeStart.toISOString())
       .lt("orders.created_at", rangeEnd.toISOString())
-      .range(from, from + ORDER_ITEMS_PAGE_SIZE - 1);
+      .range(from, from + DB_PAGE_SIZE - 1);
 
     if (error) throw error;
 
@@ -194,7 +177,47 @@ async function getOrderItemsInRange(
         subtotal: row.subtotal,
       });
     }
-    if (page.length < ORDER_ITEMS_PAGE_SIZE) break;
+    if (page.length < DB_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+type OrderRangeRow = { created_at: string; total: number; payment_method: string };
+
+/**
+ * Fetches every `orders` row for a tenant within a date range, paginating
+ * with `.range()` until every matching row is collected — a plain
+ * `.select()` here is capped at PostgREST's default row limit with no error
+ * surfaced, the same silent-truncation risk `getOrderItemsInRange` fixes for
+ * order_items. Selects the small superset of columns (`created_at`, `total`,
+ * `payment_method`) every caller in this file needs so they can all share
+ * one paginated fetch instead of duplicating the loop.
+ */
+async function getOrdersInRange(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<OrderRangeRow[]> {
+  const rows: OrderRangeRow[] = [];
+
+  for (let from = 0; ; from += DB_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("created_at, total, payment_method")
+      .eq("tenant_id", tenantId)
+      .neq("status", "cancelled")
+      .neq("status", "refunded")
+      .gte("created_at", rangeStart.toISOString())
+      .lt("created_at", rangeEnd.toISOString())
+      .range(from, from + DB_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data ?? []) as unknown as OrderRangeRow[];
+    rows.push(...page);
+    if (page.length < DB_PAGE_SIZE) break;
   }
 
   return rows;
@@ -513,17 +536,10 @@ export async function getSalesByHour(
   const dayStart = new Date(`${date}T00:00:00+07:00`);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("created_at, total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", dayStart.toISOString())
-    .lt("created_at", dayEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, dayStart, dayEnd);
 
   const byHour = new Map<number, number>();
-  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+  for (const row of orders) {
     const bkkHour = new Date(
       new Date(row.created_at).getTime() + offsetMs
     ).getUTCHours();
@@ -575,17 +591,10 @@ export async function getSalesByDay(
   const offsetMs = 7 * 60 * 60 * 1000;
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("created_at, total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const byDate = new Map<string, number>();
-  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+  for (const row of orders) {
     const d = new Date(new Date(row.created_at).getTime() + offsetMs);
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
     byDate.set(key, (byDate.get(key) ?? 0) + Number(row.total));
@@ -613,17 +622,10 @@ export async function getSalesByMonth(
   const yearStart = new Date(`${year}-01-01T00:00:00+07:00`);
   const yearEnd = new Date(`${year + 1}-01-01T00:00:00+07:00`);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("created_at, total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", yearStart.toISOString())
-    .lt("created_at", yearEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, yearStart, yearEnd);
 
   const byMonth = new Map<number, number>();
-  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+  for (const row of orders) {
     const m = new Date(new Date(row.created_at).getTime() + offsetMs).getUTCMonth() + 1;
     byMonth.set(m, (byMonth.get(m) ?? 0) + Number(row.total));
   }
@@ -645,17 +647,10 @@ export async function getHourlyPattern(
   const offsetMs = 7 * 60 * 60 * 1000;
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("created_at, total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, rangeStart, rangeEnd);
 
   const byHour = new Map<number, number>();
-  for (const row of (data ?? []) as { created_at: string; total: number }[]) {
+  for (const row of orders) {
     const h = new Date(new Date(row.created_at).getTime() + offsetMs).getUTCHours();
     byHour.set(h, (byHour.get(h) ?? 0) + Number(row.total));
   }
@@ -676,19 +671,11 @@ export async function getSalesSummary(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, rangeStart, rangeEnd);
 
-  const rows = (data ?? []) as { total: number }[];
   return {
-    totalSales: rows.reduce((sum, r) => sum + Number(r.total), 0),
-    totalOrders: rows.length,
+    totalSales: orders.reduce((sum, r) => sum + Number(r.total), 0),
+    totalOrders: orders.length,
   };
 }
 
@@ -755,16 +742,7 @@ export async function getCostProfit(
   );
   const fixedCostShare = (fixedCostMonthly / 30) * daysInPeriod;
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("total")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
-
-  const orderRows = (orders ?? []) as { total: number }[];
+  const orderRows = await getOrdersInRange(supabase, tenantId, rangeStart, rangeEnd);
   const revenue = orderRows.reduce((sum, r) => sum + Number(r.total), 0);
 
   if (orderRows.length === 0) {
@@ -819,19 +797,11 @@ export async function getPaymentMethodBreakdown(
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const { data } = await supabase
-    .from("orders")
-    .select("total, payment_method")
-    .eq("tenant_id", tenantId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded")
-    .gte("created_at", rangeStart.toISOString())
-    .lt("created_at", rangeEnd.toISOString());
+  const orders = await getOrdersInRange(supabase, tenantId, rangeStart, rangeEnd);
 
-  const rows = (data ?? []) as { total: number; payment_method: string }[];
   return {
-    cash: rows.filter((r) => r.payment_method === "cash").reduce((sum, r) => sum + Number(r.total), 0),
-    transfer: rows
+    cash: orders.filter((r) => r.payment_method === "cash").reduce((sum, r) => sum + Number(r.total), 0),
+    transfer: orders
       .filter((r) => r.payment_method === "transfer")
       .reduce((sum, r) => sum + Number(r.total), 0),
   };
