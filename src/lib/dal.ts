@@ -243,26 +243,29 @@ export async function getTopProducts(
 
   if (items.length === 0) return [];
 
+  // Group by product_id, not product_name: two distinct products can share a
+  // name (a rename, or two products entered with the same name), and
+  // grouping by name would silently merge their sales into one row.
+  // product_id falls back to product_name only for the anomalous case where
+  // an order_items row has no product_id (e.g. its product was deleted).
   const map = new Map<
     string,
-    { total_qty: number; total_sales: number; category_name: string | null }
+    { product_name: string; total_qty: number; total_sales: number; category_name: string | null }
   >();
   for (const row of items) {
-    const prev = map.get(row.product_name) ?? {
-      total_qty: 0,
-      total_sales: 0,
-      category_name: row.category_name,
-    };
-    map.set(row.product_name, {
+    const key = row.product_id ?? row.product_name;
+    const prev = map.get(key) ?? { total_qty: 0, total_sales: 0 };
+    map.set(key, {
+      product_name: row.product_name,
       total_qty: prev.total_qty + row.quantity,
       total_sales: prev.total_sales + Number(row.subtotal),
-      category_name: prev.category_name ?? row.category_name,
+      category_name: row.category_name,
     });
   }
 
-  return [...map.entries()]
-    .map(([product_name, s]) => ({
-      product_name,
+  return [...map.values()]
+    .map((s) => ({
+      product_name: s.product_name,
       total_qty: s.total_qty,
       total_sales: s.total_sales,
       unit: classifyUnit(s.category_name),
@@ -858,20 +861,24 @@ export async function getMenuProfitBreakdown(
 
   const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
 
+  // Group by product_id, not product_name — see getTopProducts for why.
   const byProduct = new Map<
     string,
-    { productId: string | null; category_name: string | null; qty: number; revenue: number }
+    {
+      productId: string | null;
+      productName: string;
+      category_name: string | null;
+      qty: number;
+      revenue: number;
+    }
   >();
   for (const row of items) {
-    const prev = byProduct.get(row.product_name) ?? {
+    const key = row.product_id ?? row.product_name;
+    const prev = byProduct.get(key) ?? { qty: 0, revenue: 0 };
+    byProduct.set(key, {
       productId: row.product_id,
+      productName: row.product_name,
       category_name: row.category_name,
-      qty: 0,
-      revenue: 0,
-    };
-    byProduct.set(row.product_name, {
-      productId: prev.productId ?? row.product_id,
-      category_name: prev.category_name ?? row.category_name,
       qty: prev.qty + row.quantity,
       revenue: prev.revenue + Number(row.subtotal),
     });
@@ -883,13 +890,13 @@ export async function getMenuProfitBreakdown(
 
   const { costs: unitCostMap } = await unitCostByProductId(supabase, productIds);
 
-  return [...byProduct.entries()]
-    .map(([productName, v]) => {
+  return [...byProduct.values()]
+    .map((v) => {
       const unitCost = v.productId ? unitCostMap.get(v.productId) ?? 0 : 0;
       const cost = unitCost * v.qty;
       const profit = v.revenue - cost;
       return {
-        productName,
+        productName: v.productName,
         qty: v.qty,
         unit: classifyUnit(v.category_name),
         revenue: v.revenue,
