@@ -1,41 +1,18 @@
-import Link from "next/link";
-import {
-  LayoutDashboard,
-  CreditCard,
-  ShoppingBag,
-  Package,
-  Tag,
-  FlaskConical,
-  Sliders,
-  Settings,
-  Clock,
-  Users,
-  Calculator,
-  type LucideIcon,
-} from "lucide-react";
-import { LogoutButton } from "./logout-button";
-import { SwitchWorkerButton } from "./switch-worker-button";
 import { getProfile, type Role } from "@/lib/dal";
+import { SidebarShell, type NavItem } from "./sidebar-shell";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  minRole: Role;
-};
-
-const allNavItems: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, minRole: "staff" },
-  { href: "/pos", label: "POS", icon: CreditCard, minRole: "staff" },
-  { href: "/orders", label: "Orders", icon: ShoppingBag, minRole: "staff" },
-  { href: "/shifts", label: "Shifts", icon: Clock, minRole: "staff" },
-  { href: "/products", label: "Products", icon: Package, minRole: "manager" },
-  { href: "/categories", label: "Categories", icon: Tag, minRole: "manager" },
-  { href: "/inventory", label: "Inventory", icon: FlaskConical, minRole: "manager" },
-  { href: "/modifiers", label: "Modifiers", icon: Sliders, minRole: "manager" },
-  { href: "/customers", label: "Customers", icon: Users, minRole: "manager" },
-  { href: "/pricing-calculator", label: "คำนวณราคาขาย", icon: Calculator, minRole: "manager" },
-  { href: "/settings", label: "Settings", icon: Settings, minRole: "owner" },
+const allNavItems: (NavItem & { minRole: Role })[] = [
+  { href: "/", label: "Dashboard", icon: "LayoutDashboard", minRole: "staff" },
+  { href: "/pos", label: "POS", icon: "CreditCard", minRole: "staff" },
+  { href: "/orders", label: "Orders", icon: "ShoppingBag", minRole: "staff" },
+  { href: "/shifts", label: "Shifts", icon: "Clock", minRole: "staff" },
+  { href: "/products", label: "Products", icon: "Package", minRole: "manager" },
+  { href: "/categories", label: "Categories", icon: "Tag", minRole: "manager" },
+  { href: "/inventory", label: "Inventory", icon: "FlaskConical", minRole: "manager" },
+  { href: "/modifiers", label: "Modifiers", icon: "Sliders", minRole: "manager" },
+  { href: "/customers", label: "Customers", icon: "Users", minRole: "manager" },
+  { href: "/pricing-calculator", label: "คำนวณราคาขาย", icon: "Calculator", minRole: "manager" },
+  { href: "/settings", label: "Settings", icon: "Settings", minRole: "owner" },
 ];
 
 function getRoleLevel(role: Role): number {
@@ -61,35 +38,10 @@ export async function Sidebar() {
   );
 
   return (
-    <aside className="hidden md:flex flex-col w-16 lg:w-56 h-full shrink-0 bg-sidebar border-r border-white/10">
-      <div className="flex items-center justify-center lg:justify-start h-14 px-4 border-b border-white/10 shrink-0">
-        <span className="text-accent font-bold text-xl hidden lg:inline">
-          KIDKUBPOS
-        </span>
-        <span className="text-accent font-bold text-lg lg:hidden">K</span>
-      </div>
-      <nav className="flex-1 py-4 flex flex-col gap-1 px-2 overflow-y-auto">
-        {visibleItems.map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className="flex items-center gap-3 h-10 px-2 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <Icon size={20} className="shrink-0" />
-            <span className="hidden lg:inline text-sm font-medium">{label}</span>
-          </Link>
-        ))}
-      </nav>
-      <div className="border-t border-white/10 px-2 py-3">
-        <div className="hidden lg:block px-2 pb-2">
-          <p className="text-xs text-white/50 truncate">
-            {profile?.full_name ?? "—"}
-          </p>
-          <p className="text-xs text-accent font-medium capitalize">{role}</p>
-        </div>
-        <SwitchWorkerButton />
-        <LogoutButton />
-      </div>
-    </aside>
+    <SidebarShell
+      items={visibleItems}
+      userName={profile?.full_name ?? null}
+      role={role}
+    />
   );
 }

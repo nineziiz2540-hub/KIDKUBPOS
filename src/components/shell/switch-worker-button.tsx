@@ -2,7 +2,9 @@
 import { switchWorker } from "@/app/actions/job-level";
 import { Repeat } from "lucide-react";
 
-export function SwitchWorkerButton() {
+type Props = { expanded?: boolean };
+
+export function SwitchWorkerButton({ expanded = false }: Props) {
   return (
     <form action={switchWorker}>
       <button
@@ -11,7 +13,7 @@ export function SwitchWorkerButton() {
         aria-label="สลับผู้ใช้งาน"
       >
         <Repeat size={20} className="shrink-0" />
-        <span className="hidden lg:inline text-sm font-medium">สลับผู้ใช้งาน</span>
+        {expanded && <span className="text-sm font-medium">สลับผู้ใช้งาน</span>}
       </button>
     </form>
   );

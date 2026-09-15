@@ -53,7 +53,7 @@ export function ProductGrid({
 
   function tabCls(active: boolean) {
     return (
-      "px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors " +
+      "px-4 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors " +
       (active
         ? "bg-accent text-white"
         : "bg-white border border-border text-muted-foreground hover:border-accent hover:text-accent")
@@ -110,7 +110,7 @@ export function ProductGrid({
 
       {/* Product grid */}
       <div className="flex-1 overflow-y-auto">
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
           {filtered.map((product) => (
             <button
               key={product.id}

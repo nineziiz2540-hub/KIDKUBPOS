@@ -2,7 +2,9 @@
 import { signOut } from "@/app/actions/auth";
 import { LogOut } from "lucide-react";
 
-export function LogoutButton() {
+type Props = { expanded?: boolean };
+
+export function LogoutButton({ expanded = false }: Props) {
   return (
     <form action={signOut}>
       <button
@@ -11,7 +13,7 @@ export function LogoutButton() {
         aria-label="ออกจากระบบ"
       >
         <LogOut size={20} className="shrink-0" />
-        <span className="hidden lg:inline text-sm font-medium">ออกจากระบบ</span>
+        {expanded && <span className="text-sm font-medium">ออกจากระบบ</span>}
       </button>
     </form>
   );
