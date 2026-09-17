@@ -111,7 +111,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                       {modifier.name}
                     </span>
                     {modifier.isRequired && (
-                      <span className="text-xs bg-red-50 text-red-600 border border-red-200 px-1.5 py-0.5 rounded-full">
+                      <span className="text-xs bg-destructive/10 text-destructive border border-destructive/20 px-1.5 py-0.5 rounded-full">
                         จำเป็น
                       </span>
                     )}

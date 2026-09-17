@@ -56,7 +56,7 @@ export function ShiftPanel({ activeShift, summary }: Props) {
               ปิดกะล่าสุด — ส่วนต่าง:{" "}
               <span
                 className={
-                  result.variance >= 0 ? "text-green-600" : "text-destructive"
+                  result.variance >= 0 ? "text-success" : "text-destructive"
                 }
               >
                 {result.variance > 0 ? "+" : ""}

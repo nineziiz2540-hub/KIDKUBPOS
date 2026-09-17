@@ -125,7 +125,7 @@ export function RecipeTab({ productId, rawMaterials, initialRows }: Props) {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && (
-        <p className="text-sm text-green-600">บันทึกสูตรเรียบร้อยแล้ว</p>
+        <p className="text-sm text-success">บันทึกสูตรเรียบร้อยแล้ว</p>
       )}
 
       <Button

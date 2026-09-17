@@ -34,7 +34,7 @@ function ProfitTableRows({ rows }: { rows: MenuProfitRow[] }) {
             >
               ฿{r.profit.toFixed(2)}
             </td>
-            <td className="py-2 text-right tabular-nums text-green-600 font-medium">
+            <td className="py-2 text-right tabular-nums text-success font-medium">
               {r.gpPercent.toFixed(1)}%
             </td>
           </tr>

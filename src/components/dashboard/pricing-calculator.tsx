@@ -186,7 +186,7 @@ export function PricingCalculator({
                 ฿{result.netProfitShop.toFixed(2)}
               </span>
               <span className="text-muted-foreground">GP หน้าร้าน</span>
-              <span className="font-semibold text-green-600 tabular-nums text-right">
+              <span className="font-semibold text-success tabular-nums text-right">
                 {result.gpShop.toFixed(1)}%
               </span>
             </div>

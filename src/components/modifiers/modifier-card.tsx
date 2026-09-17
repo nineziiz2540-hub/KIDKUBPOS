@@ -21,7 +21,7 @@ export function ModifierCard({ modifier }: Props) {
               <Badge variant="destructive" className="text-xs">บังคับ</Badge>
             )}
             {modifier.isMultiSelect && (
-              <Badge className="text-xs bg-blue-100 text-blue-700">เลือกได้หลายตัว</Badge>
+              <Badge className="text-xs bg-info/10 text-info">เลือกได้หลายตัว</Badge>
             )}
           </div>
           <p className="text-xs text-muted-foreground">

@@ -83,7 +83,7 @@ export function ModifiersTab({
                     </Badge>
                   )}
                   {mod.isMultiSelect && (
-                    <Badge className="text-xs bg-blue-100 text-blue-700">
+                    <Badge className="text-xs bg-info/10 text-info">
                       หลายตัวเลือก
                     </Badge>
                   )}
@@ -98,7 +98,7 @@ export function ModifiersTab({
       )}
 
       {saved && (
-        <p className="text-sm text-green-600">บันทึกตัวเลือกเรียบร้อยแล้ว</p>
+        <p className="text-sm text-success">บันทึกตัวเลือกเรียบร้อยแล้ว</p>
       )}
 
       <Button

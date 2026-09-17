@@ -90,8 +90,8 @@ export default async function OrdersPage({ searchParams }: Props) {
                   order.status === "cancelled"
                     ? "border-destructive/30 bg-destructive/10 text-destructive"
                     : order.status === "refunded"
-                      ? "border-orange-300 bg-orange-50 text-orange-600"
-                      : "border-green-200 bg-green-50 text-green-700"
+                      ? "border-warning/30 bg-warning/10 text-warning"
+                      : "border-success/30 bg-success/10 text-success"
                 }`}
               >
                 {order.status === "cancelled"

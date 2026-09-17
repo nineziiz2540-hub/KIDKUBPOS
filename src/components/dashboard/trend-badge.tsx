@@ -19,7 +19,7 @@ export function TrendBadge({
   higherIsBetter: boolean;
 }) {
   if (current > previous) {
-    const colorClass = higherIsBetter ? "text-green-600" : "text-destructive";
+    const colorClass = higherIsBetter ? "text-success" : "text-destructive";
     return (
       <span className={`flex items-center gap-0.5 text-xs font-medium ${colorClass}`}>
         <TrendingUp size={12} />
@@ -28,7 +28,7 @@ export function TrendBadge({
     );
   }
   if (current < previous) {
-    const colorClass = higherIsBetter ? "text-destructive" : "text-green-600";
+    const colorClass = higherIsBetter ? "text-destructive" : "text-success";
     return (
       <span className={`flex items-center gap-0.5 text-xs font-medium ${colorClass}`}>
         <TrendingDown size={12} />

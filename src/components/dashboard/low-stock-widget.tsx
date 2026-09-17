@@ -8,7 +8,7 @@ export function LowStockWidget({ alerts }: { alerts: LowStockAlert[] }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <CheckCircle size={16} className="text-green-500" />
+            <CheckCircle size={16} className="text-success" />
             สต็อกวัตถุดิบ
           </CardTitle>
         </CardHeader>

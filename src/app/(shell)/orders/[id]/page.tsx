@@ -124,8 +124,8 @@ export default async function OrderDetailPage({ params }: Props) {
               order.status === "cancelled"
                 ? "text-destructive"
                 : order.status === "refunded"
-                  ? "text-orange-600"
-                  : "text-green-700"
+                  ? "text-warning"
+                  : "text-success"
             }`}
           >
             {order.status === "cancelled"

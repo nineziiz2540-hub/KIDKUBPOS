@@ -36,7 +36,7 @@ export function PromptPayForm({ action, defaultValue }: Props) {
         <p className="text-sm font-medium text-destructive">{state.error}</p>
       )}
       {state?.success && (
-        <p className="text-sm font-medium text-green-600">บันทึกเรียบร้อย</p>
+        <p className="text-sm font-medium text-success">บันทึกเรียบร้อย</p>
       )}
 
       <Button

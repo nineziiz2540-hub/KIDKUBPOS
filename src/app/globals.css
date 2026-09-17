@@ -10,9 +10,11 @@
   --color-sidebar: #0c1a3d;
   --color-surface: #eef3fc;
   --color-success: #00b87a;
-  --color-danger:  #f43f5e;
   --color-info:    #2563eb;
   --color-warning: #f59e0b;
+  /* No --color-danger: shadcn's --destructive already covers this and is
+     the token actually used throughout the app (69+ call sites) — keeping
+     both would recreate the duplicate-red split this consolidation removed. */
 
   /* Typography */
   --font-sans: var(--font-prompt);

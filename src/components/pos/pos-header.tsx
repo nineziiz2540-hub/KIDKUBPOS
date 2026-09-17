@@ -27,7 +27,7 @@ export function PosHeader({ userName, todayOrderCount, hasActiveShift }: Props) 
           className={
             "text-xs font-medium px-2.5 py-1 rounded-full transition-colors " +
             (hasActiveShift
-              ? "bg-green-100 text-green-700 hover:bg-green-200"
+              ? "bg-success/10 text-success hover:bg-success/20"
               : "bg-destructive/10 text-destructive hover:bg-destructive/20")
           }
         >
