@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
 import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
+import { priceCartItems } from "@/lib/order-pricing";
 import type { CreateOrderInput } from "@/types/app";
 
 export async function createOrder(
@@ -17,26 +18,14 @@ export async function createOrder(
 > {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
-  if (data.items.length === 0) return { error: "ไม่มีสินค้าในตะกร้า" };
 
   const supabase = await createClient();
 
-  // 1. Fetch category names for snapshot (one query for all products in cart)
-  const productIds = [...new Set(data.items.map((i) => i.productId))];
-  const { data: productRows } = await supabase
-    .from("products")
-    .select("id, categories(name)")
-    .in("id", productIds)
-    .eq("tenant_id", profile.tenant_id);
-
-  const categoryMap = new Map<string, string>();
-  for (const p of productRows ?? []) {
-    const cat = p.categories as { name: string } | null;
-    if (cat) categoryMap.set(p.id, cat.name);
-  }
-
-  // 2. Calculate subtotal from CartItem.totalPrice
-  const subtotal = data.items.reduce((sum, item) => sum + item.totalPrice, 0);
+  // 1-2. Re-price every line from the database — client prices are never trusted (see
+  // priceCartItems). Product/category/modifier names in the snapshot also come from the DB.
+  const priced = await priceCartItems(supabase, profile.tenant_id, data.items);
+  if ("error" in priced) return { error: priced.error };
+  const subtotal = priced.subtotal;
 
   // 3. Resolve and validate the discount, if any
   let discountType: "percent" | "amount" | null = null;
@@ -169,22 +158,15 @@ export async function createOrder(
   if (orderError || !order) return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
 
   // 8. Build order_items with snapshots
-  const orderItems = data.items.map((item) => ({
+  const orderItems = priced.lines.map((line) => ({
     order_id: order.id,
-    product_id: item.productId,
-    product_name: item.name,
-    unit_price: item.totalPrice / item.quantity,
-    quantity: item.quantity,
-    subtotal: item.totalPrice,
-    category_name: categoryMap.get(item.productId) ?? null,
-    modifiers_snapshot:
-      item.selectedModifiers.length > 0
-        ? item.selectedModifiers.map((m) => ({
-            group: m.modifierName,
-            option: m.optionName,
-            priceDelta: m.priceDelta,
-          }))
-        : null,
+    product_id: line.productId,
+    product_name: line.productName,
+    unit_price: line.unitPrice,
+    quantity: line.quantity,
+    subtotal: line.lineTotal,
+    category_name: line.categoryName,
+    modifiers_snapshot: line.modifiersSnapshot,
   }));
 
   const { error: itemsError } = await supabase
