@@ -87,6 +87,108 @@ export type Database = {
           },
         ]
       }
+      held_bill_events: {
+        Row: {
+          actor_id: string
+          created_at: string
+          detail: Json | null
+          event_type: string
+          held_bill_id: string
+          id: string
+          tenant_id: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          detail?: Json | null
+          event_type: string
+          held_bill_id: string
+          id?: string
+          tenant_id: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          detail?: Json | null
+          event_type?: string
+          held_bill_id?: string
+          id?: string
+          tenant_id?: string
+        }
+        Relationships: []
+      }
+      held_bills: {
+        Row: {
+          business_date: string
+          cancel_reason: string | null
+          cancelled_approved_by: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string
+          created_by: string
+          customer_id: string | null
+          customer_label: string | null
+          discount_reason: string | null
+          discount_type: string | null
+          discount_value: number | null
+          id: string
+          items: Json
+          order_type: string
+          queue_number: number
+          status: string
+          tenant_id: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          business_date: string
+          cancel_reason?: string | null
+          cancelled_approved_by?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          created_by: string
+          customer_id?: string | null
+          customer_label?: string | null
+          discount_reason?: string | null
+          discount_type?: string | null
+          discount_value?: number | null
+          id?: string
+          items: Json
+          order_type?: string
+          queue_number: number
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          business_date?: string
+          cancel_reason?: string | null
+          cancelled_approved_by?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string
+          created_by?: string
+          customer_id?: string | null
+          customer_label?: string | null
+          discount_reason?: string | null
+          discount_type?: string | null
+          discount_value?: number | null
+          id?: string
+          items?: Json
+          order_type?: string
+          queue_number?: number
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: []
+      }
       inventory_transactions: {
         Row: {
           created_at: string | null
@@ -338,6 +440,7 @@ export type Database = {
           discount_reason: string | null
           discount_type: string | null
           discount_value: number | null
+          held_bill_id: string | null
           id: string
           note: string | null
           order_number: string | null
@@ -373,6 +476,7 @@ export type Database = {
           discount_reason?: string | null
           discount_type?: string | null
           discount_value?: number | null
+          held_bill_id?: string | null
           id?: string
           note?: string | null
           order_number?: string | null
@@ -408,6 +512,7 @@ export type Database = {
           discount_reason?: string | null
           discount_type?: string | null
           discount_value?: number | null
+          held_bill_id?: string | null
           id?: string
           note?: string | null
           order_number?: string | null
