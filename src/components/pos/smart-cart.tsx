@@ -1,4 +1,5 @@
 "use client";
+import { formatPrice } from "@/lib/cash";
 import { useId, useState, useTransition } from "react";
 import type { CartItem } from "@/types/app";
 import type { DiscountType } from "@/lib/discount";
@@ -175,7 +176,7 @@ export function SmartCart({
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  ฿{(item.totalPrice / item.quantity).toFixed(0)} / ชิ้น
+                  ฿{formatPrice(item.totalPrice / item.quantity)} / ชิ้น
                 </p>
               </div>
               {/* Qty controls */}
@@ -201,7 +202,7 @@ export function SmartCart({
                 </button>
               </div>
               <p className="text-sm font-medium w-12 text-right text-sidebar tabular-nums mt-0.5">
-                ฿{item.totalPrice.toFixed(0)}
+                ฿{formatPrice(item.totalPrice)}
               </p>
               <button
                 type="button"
@@ -347,17 +348,17 @@ export function SmartCart({
             <>
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>ยอดก่อนลด</span>
-                <span className="tabular-nums">฿{subtotal.toFixed(0)}</span>
+                <span className="tabular-nums">฿{formatPrice(subtotal)}</span>
               </div>
               <div className="flex justify-between text-xs text-destructive">
                 <span>ส่วนลด</span>
-                <span className="tabular-nums">-฿{discountAmount.toFixed(0)}</span>
+                <span className="tabular-nums">-฿{formatPrice(discountAmount)}</span>
               </div>
             </>
           )}
           <div className="flex justify-between font-semibold text-sidebar text-base">
             <span>รวม</span>
-            <span className="tabular-nums">฿{total.toFixed(0)}</span>
+            <span className="tabular-nums">฿{formatPrice(total)}</span>
           </div>
         </div>
 
@@ -390,7 +391,7 @@ export function SmartCart({
           }
           className="w-full bg-accent hover:bg-accent/90 text-white"
         >
-          {pending ? "กำลังบันทึก…" : `ชำระ ฿${total.toFixed(0)}`}
+          {pending ? "กำลังบันทึก…" : `ชำระ ฿${formatPrice(total)}`}
         </Button>
       </div>
 

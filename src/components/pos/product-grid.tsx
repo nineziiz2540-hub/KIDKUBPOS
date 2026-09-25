@@ -1,4 +1,5 @@
 "use client";
+import { formatPrice } from "@/lib/cash";
 import { useState } from "react";
 import type { PosProduct, PosCategory } from "@/types/app";
 
@@ -139,7 +140,7 @@ export function ProductGrid({
                 </p>
                 <div className="flex items-center justify-between mt-1.5">
                   <p className="text-accent font-semibold text-sm">
-                    ฿{product.price.toFixed(0)}
+                    ฿{formatPrice(product.price)}
                   </p>
                   <span className="w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold shrink-0">
                     +

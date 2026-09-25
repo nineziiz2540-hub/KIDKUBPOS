@@ -13,6 +13,16 @@ export function toSatang(baht: number): number {
 }
 
 /**
+ * Display a baht amount without hiding satang: whole amounts stay short ("85"), anything with
+ * satang shows both decimals ("45.50"). Replaces toFixed(0), which rounded ฿45.50 up to "46"
+ * in the cart while the cash modal (correctly) asked for ฿45.50.
+ */
+export function formatPrice(baht: number): string {
+  const satang = toSatang(baht);
+  return (satang / 100).toFixed(satang % 100 === 0 ? 0 : 2);
+}
+
+/**
  * Change owed for `cashReceived` against `total`, in baht rounded to satang — or null when the
  * amount is missing, not a number, less than the total, or over MAX_CASH_RECEIVED.
  */

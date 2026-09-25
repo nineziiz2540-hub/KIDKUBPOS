@@ -11,7 +11,8 @@ import type { CreateOrderInput } from "@/types/app";
 export async function createOrder(
   data: CreateOrderInput
 ): Promise<
-  | { error: string }
+  // mayHaveSaved: the sale may already be recorded, so the UI must not offer a one-tap retry.
+  | { error: string; mayHaveSaved?: true }
   | { orderId: string; orderNumber: string; cashReceived: number | null; changeAmount: number | null }
 > {
   const profile = await getProfile();
@@ -189,7 +190,30 @@ export async function createOrder(
   const { error: itemsError } = await supabase
     .from("order_items")
     .insert(orderItems);
-  if (itemsError) return { error: "บันทึกรายการสินค้าไม่สำเร็จ" };
+  if (itemsError) {
+    // The order row above is already committed, so without this the failed sale would leave a
+    // bill with no items that still counts in revenue and the shift's expected cash — and the
+    // cash modal's retry would then record the same sale a second time. Roll it back by hand
+    // (via the admin client: tenant members have no DELETE path on orders). A single INSERT is
+    // all-or-nothing, so no order_items rows exist to clean up. Stock hasn't been deducted yet.
+    const { error: rollbackError } = await createAdminClient()
+      .from("orders")
+      .delete()
+      .eq("id", order.id)
+      .eq("tenant_id", profile.tenant_id);
+    if (rollbackError) {
+      console.error(
+        "[createOrder] order_items insert failed and orphan order rollback also failed:",
+        order.id,
+        rollbackError.message
+      );
+      return {
+        error: `บันทึกบิลไม่สมบูรณ์ (${orderNumber}) กรุณาแจ้งผู้จัดการ อย่ากดชำระซ้ำ`,
+        mayHaveSaved: true,
+      };
+    }
+    return { error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณากดยืนยันอีกครั้ง" };
+  }
 
   // 9. Deduct stock (best-effort — don't block on failure)
   const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {

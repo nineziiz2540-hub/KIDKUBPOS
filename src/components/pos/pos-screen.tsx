@@ -1,4 +1,5 @@
 "use client";
+import { formatPrice } from "@/lib/cash";
 import { useState, useTransition, useMemo, useRef } from "react";
 import { createOrder } from "@/app/actions/orders";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
@@ -179,7 +180,7 @@ export function PosScreen({
 
   function submitOrder(
     cashReceived: number | undefined,
-    onSettled?: (errorMessage: string | null) => void
+    onSettled?: (errorMessage: string | null, mayHaveSaved: boolean) => void
   ) {
     // Re-checked here, not just in handleCheckout: this is the single write path (also reached
     // via the QR/transfer confirm flow), so the approval invariant must hold regardless of how
@@ -208,7 +209,10 @@ export function PosScreen({
       } catch {
         // A dropped connection doesn't mean the sale failed — the server may have saved it
         // before the response was lost, so warn against blindly re-charging the customer.
-        result = { error: "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบหน้ารายการบิลก่อนกดชำระซ้ำ" };
+        result = {
+          error: "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบหน้ารายการบิลก่อนกดชำระซ้ำ",
+          mayHaveSaved: true,
+        };
       } finally {
         submittingRef.current = false;
       }
@@ -235,7 +239,10 @@ export function PosScreen({
         setCustomerId(null);
         resetDiscount();
       }
-      onSettled?.("error" in result ? result.error : null);
+      onSettled?.(
+        "error" in result ? result.error : null,
+        "error" in result && result.mayHaveSaved === true
+      );
     });
   }
 
@@ -257,11 +264,12 @@ export function PosScreen({
   }
 
   function handleCashConfirm(cashReceived: number) {
-    submitOrder(cashReceived, (errorMessage) => {
+    submitOrder(cashReceived, (errorMessage, mayHaveSaved) => {
       // On most failures the modal stays open showing the error, so the cashier can retry
-      // without re-typing the amount. A rejected discount PIN is the exception: it has to be
-      // re-entered in the cart's approval dialog, which this modal would otherwise cover.
-      if (errorMessage === null || errorMessage === "PIN ไม่ถูกต้อง") {
+      // without re-typing the amount. Exceptions: a rejected discount PIN has to be re-entered in
+      // the cart's approval dialog (which this modal would cover), and when the sale may already
+      // be saved, a ready-to-tap confirm button is exactly how a customer gets charged twice.
+      if (errorMessage === null || errorMessage === "PIN ไม่ถูกต้อง" || mayHaveSaved) {
         setShowCashModal(false);
       }
     });
@@ -334,7 +342,7 @@ export function PosScreen({
       >
         <span className="text-sm">
           <span className="font-semibold tabular-nums">{itemCount}</span> ชิ้น ·{" "}
-          <span className="font-bold tabular-nums">฿{total.toFixed(0)}</span>
+          <span className="font-bold tabular-nums">฿{formatPrice(total)}</span>
         </span>
         <span className="text-sm font-semibold text-accent">ดูตะกร้า</span>
       </button>

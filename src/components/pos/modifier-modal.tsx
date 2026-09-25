@@ -1,4 +1,5 @@
 "use client";
+import { formatPrice } from "@/lib/cash";
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { CartItem, ModifierWithOptions, PosProduct, SelectedModifier } from "@/types/app";
@@ -98,7 +99,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                 {product.name}
               </Dialog.Title>
               <p className="text-sm text-muted-foreground mt-0.5">
-                ฿{product.price.toFixed(0)}
+                ฿{formatPrice(product.price)}
               </p>
             </div>
 
@@ -161,7 +162,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                           {option.priceDelta !== 0 && (
                             <span className="text-sm text-muted-foreground tabular-nums">
                               {option.priceDelta > 0 ? "+" : ""}฿
-                              {option.priceDelta.toFixed(0)}
+                              {formatPrice(option.priceDelta)}
                             </span>
                           )}
                         </label>
@@ -187,7 +188,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                     : "bg-accent/40 cursor-not-allowed"
                 }`}
               >
-                เพิ่มในตะกร้า • ฿{displayPrice.toFixed(0)}
+                เพิ่มในตะกร้า • ฿{formatPrice(displayPrice)}
               </button>
             </div>
           </div>
