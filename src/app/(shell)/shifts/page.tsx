@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getProfile, getActiveShift, getShiftSummary } from "@/lib/dal";
+import { getProfile, getActiveShift, getShiftSummary, getOpenHeldBills } from "@/lib/dal";
 import { ShiftPanel } from "@/components/shifts/shift-panel";
 
 export default async function ShiftsPage() {
@@ -10,6 +10,7 @@ export default async function ShiftsPage() {
   const summary = activeShift
     ? await getShiftSummary(profile.tenant_id, activeShift.id)
     : null;
+  const openHeld = activeShift ? await getOpenHeldBills(profile.tenant_id) : [];
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -19,7 +20,16 @@ export default async function ShiftsPage() {
           เปิด/ปิดกะและตรวจสอบเงินสดในลิ้นชัก
         </p>
       </div>
-      <ShiftPanel activeShift={activeShift} summary={summary} />
+      <ShiftPanel
+        activeShift={activeShift}
+        summary={summary}
+        openHeld={openHeld.map((b) => ({
+          id: b.id,
+          queueNumber: b.queueNumber,
+          customerLabel: b.customerLabel,
+          total: b.total,
+        }))}
+      />
     </div>
   );
 }

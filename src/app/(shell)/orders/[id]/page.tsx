@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { getProfile } from "@/lib/dal";
+import { getProfile, getHeldBillHistory, type HeldBillEvent } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { VoidOrderButton } from "@/components/orders/void-order-button";
 import { RefundOrderButton } from "@/components/orders/refund-order-button";
@@ -20,6 +20,7 @@ type OrderDetail = {
   id: string;
   order_number: string | null;
   queue_number: number | null;
+  held_bill_id: string | null;
   payment_method: string;
   status: string;
   subtotal: number;
@@ -38,6 +39,14 @@ type OrderDetail = {
   refund_method: string | null;
   created_at: string;
   order_items: OrderItem[];
+};
+
+const HELD_EVENT_LABELS: Record<HeldBillEvent["eventType"], string> = {
+  held: "พักบิล",
+  updated: "แก้ไขบิลพัก",
+  items_reduced: "ลดรายการ",
+  paid: "ชำระเงิน",
+  cancelled: "ยกเลิก",
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -59,13 +68,17 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, queue_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)"
+      "id, order_number, queue_number, held_bill_id, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
     .single()) as { data: OrderDetail | null };
 
   if (!order) notFound();
+
+  const heldHistory = order.held_bill_id
+    ? await getHeldBillHistory(profile.tenant_id, order.held_bill_id)
+    : [];
 
   return (
     <div className="space-y-6 max-w-xl">
@@ -259,6 +272,37 @@ export default async function OrderDetailPage({ params }: Props) {
           </>
         )}
       </div>
+
+      {heldHistory.length > 0 && (
+        <div className="rounded-lg border bg-white px-4 py-4 space-y-3">
+          <h2 className="text-sm font-semibold text-sidebar">ประวัติบิลพัก</h2>
+          <ol className="space-y-2">
+            {heldHistory.map((event) => (
+              <li key={event.id} className="text-sm">
+                <p className="text-sidebar">
+                  <span className="font-medium">{HELD_EVENT_LABELS[event.eventType]}</span>
+                  {event.atPayment && " (ตอนชำระ)"}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {event.actorName ?? "—"} ·{" "}
+                    {new Date(event.createdAt).toLocaleTimeString("th-TH", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </p>
+                {event.reductions.map((r, i) => (
+                  <p key={i} className="text-destructive pl-3">
+                    {r.name}
+                    {r.options.length > 0 ? ` (${r.options.join(", ")})` : ""}
+                    {r.note ? ` 📝 ${r.note}` : ""}: {r.fromQty} → {r.toQty}
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       {order.status === "completed" && (
         <div className="space-y-2">

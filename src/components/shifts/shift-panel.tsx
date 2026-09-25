@@ -7,18 +7,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Shift, ShiftSummary } from "@/lib/dal";
 
+type OpenHeld = { id: string; queueNumber: number; customerLabel: string | null; total: number };
+
 type Props = {
   activeShift: Shift | null;
   summary: ShiftSummary | null;
+  /** Unpaid held bills — closing is still allowed, but only after an explicit second confirm. */
+  openHeld: OpenHeld[];
 };
 
-export function ShiftPanel({ activeShift, summary }: Props) {
+export function ShiftPanel({ activeShift, summary, openHeld }: Props) {
   const router = useRouter();
   const [openingCash, setOpeningCash] = useState("0");
   const [closingCash, setClosingCash] = useState("0");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ variance: number } | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [confirmWithHeld, setConfirmWithHeld] = useState(false);
+  const heldTotal = openHeld.reduce((sum, b) => sum + b.total, 0);
 
   function handleOpen() {
     setError(null);
@@ -34,6 +40,11 @@ export function ShiftPanel({ activeShift, summary }: Props) {
 
   function handleClose() {
     if (!activeShift) return;
+    if (openHeld.length > 0 && !confirmWithHeld) {
+      setConfirmWithHeld(true);
+      return;
+    }
+    setConfirmWithHeld(false);
     setError(null);
     startTransition(async () => {
       const res = await closeShift(activeShift.id, Number(closingCash));
@@ -139,14 +150,43 @@ export function ShiftPanel({ activeShift, summary }: Props) {
           onChange={(e) => setClosingCash(e.target.value)}
         />
       </div>
+      {openHeld.length > 0 && (
+        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm space-y-1">
+          <p className="font-semibold text-warning">
+            บิลค้างจ่าย {openHeld.length} บิล · ฿{heldTotal.toFixed(2)}
+          </p>
+          <p className="text-muted-foreground">
+            ยังไม่นับเป็นยอดขาย และไม่อยู่ในเงินสดที่ควรมีในลิ้นชัก
+          </p>
+          {confirmWithHeld && (
+            <ul className="pt-1 text-sidebar">
+              {openHeld.map((b) => (
+                <li key={b.id}>
+                  คิว {b.queueNumber}
+                  {b.customerLabel ? ` · ${b.customerLabel}` : ""} — ฿{b.total.toFixed(2)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+      {confirmWithHeld && (
+        <p className="text-sm font-medium text-sidebar">
+          ยืนยันปิดกะทั้งที่ยังมีบิลค้างจ่าย? บิลเหล่านี้จะยังค้างอยู่ในระบบ
+        </p>
+      )}
       <Button
         type="button"
         onClick={handleClose}
         disabled={isPending}
         className="bg-accent hover:bg-accent/90 text-white"
       >
-        {isPending ? "กำลังปิดกะ…" : "ปิดกะ"}
+        {isPending
+          ? "กำลังปิดกะ…"
+          : confirmWithHeld
+            ? "ยืนยันปิดกะ"
+            : "ปิดกะ"}
       </Button>
     </div>
   );
