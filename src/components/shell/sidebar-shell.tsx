@@ -2,8 +2,8 @@
 import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
-  ChevronLeft,
-  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   LayoutDashboard,
   CreditCard,
   ShoppingBag,
@@ -87,31 +87,39 @@ export function SidebarShell({ items, userName, role }: Props) {
 
   return (
     <aside
-      className={`hidden md:flex relative flex-col h-full shrink-0 bg-sidebar border-r border-white/10 transition-all duration-200 ${
+      className={`hidden md:flex flex-col h-full shrink-0 bg-sidebar border-r border-white/10 transition-all duration-200 ${
         expanded ? "w-56" : "w-16"
       }`}
     >
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={expanded ? "ย่อเมนู" : "ขยายเมนู"}
-        className="absolute -right-3 top-14 z-10 w-6 h-6 rounded-full bg-sidebar border border-white/20 text-white/70 hover:text-white hover:border-white/40 flex items-center justify-center transition-colors"
-      >
-        {expanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-      </button>
-
-      <div
-        className={`flex items-center h-14 px-4 border-b border-white/10 shrink-0 ${
-          expanded ? "justify-start" : "justify-center"
-        }`}
-      >
-        <span className={`text-accent font-bold text-xl ${expanded ? "inline" : "hidden"}`}>
-          KIDKUBPOS
-        </span>
-        <span className={`text-accent font-bold text-lg ${expanded ? "hidden" : "inline"}`}>
-          K
-        </span>
-      </div>
+      {/* The toggle lives inside the header row, styled like a nav item, rather than floating
+          on the sidebar's edge — expanded: logo + « on the right; collapsed: » in the same icon
+          column as the nav icons below it. */}
+      {expanded ? (
+        <div className="flex items-center justify-between h-14 pl-4 pr-2 border-b border-white/10 shrink-0">
+          <span className="text-accent font-bold text-xl">KIDKUBPOS</span>
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label="ย่อเมนู"
+            title="ย่อเมนู"
+            className="flex items-center justify-center w-8 h-8 rounded-md text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <ChevronsLeft size={18} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center h-14 px-2 border-b border-white/10 shrink-0">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label="ขยายเมนู"
+            title="ขยายเมนู"
+            className="flex items-center h-10 px-2 w-full rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <ChevronsRight size={20} className="shrink-0" />
+          </button>
+        </div>
+      )}
       <nav className="flex-1 py-4 flex flex-col gap-1 px-2 overflow-y-auto">
         {items.map(({ href, label, icon }) => {
           const Icon = ICONS[icon];
