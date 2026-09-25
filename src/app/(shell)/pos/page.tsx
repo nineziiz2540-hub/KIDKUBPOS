@@ -1,6 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getProfile, getModifiers, getActiveShift } from "@/lib/dal";
+import {
+  getProfile,
+  getModifiers,
+  getActiveShift,
+  getOpenHeldBills,
+  getCancelledHeldBillsToday,
+} from "@/lib/dal";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -89,7 +95,11 @@ export default async function PosPage() {
     .neq("status", "refunded")
     .gte("created_at", todayStart.toISOString());
 
-  const activeShift = await getActiveShift(profile.tenant_id);
+  const [activeShift, heldBills, cancelledHeldToday] = await Promise.all([
+    getActiveShift(profile.tenant_id),
+    getOpenHeldBills(profile.tenant_id),
+    getCancelledHeldBillsToday(profile.tenant_id),
+  ]);
 
   return (
     <PosScreen
@@ -100,6 +110,8 @@ export default async function PosPage() {
       userName={profile.full_name ?? "ผู้ใช้"}
       todayOrderCount={todayOrderCount ?? 0}
       activeShiftId={activeShift?.id ?? null}
+      heldBills={heldBills}
+      cancelledHeldToday={cancelledHeldToday}
     />
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
 import { useState, useTransition, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { createOrder } from "@/app/actions/orders";
+import { holdBill, updateHeldBill, type HeldBillInput } from "@/app/actions/held-bills";
+import type { CancelledHeldBill, HeldBillSummary } from "@/lib/dal";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type {
   CartItem,
@@ -15,6 +18,8 @@ import { ModifierModal } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
 import { QrPaymentModal } from "./qr-payment-modal";
 import { CashPaymentModal } from "./cash-payment-modal";
+import { HoldBillModal } from "./hold-bill-modal";
+import { HeldBillsPanel } from "./held-bills-panel";
 
 const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 
@@ -26,7 +31,12 @@ type Props = {
   userName: string;
   todayOrderCount: number;
   activeShiftId: string | null;
+  heldBills: HeldBillSummary[];
+  cancelledHeldToday: CancelledHeldBill[];
 };
+
+type ActiveHeld = { id: string; version: number; queueNumber: number; customerLabel: string | null };
+type Customer = { id: string; phone: string | null };
 
 export function PosScreen({
   products,
@@ -36,12 +46,15 @@ export function PosScreen({
   userName,
   todayOrderCount,
   activeShiftId,
+  heldBills,
+  cancelledHeldToday,
 }: Props) {
+  const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
-  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [discountType, setDiscountType] = useState<DiscountType | null>(null);
   const [discountValue, setDiscountValue] = useState("");
   const [discountReason, setDiscountReason] = useState("");
@@ -57,6 +70,16 @@ export function PosScreen({
   const [showQrModal, setShowQrModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
+  // Held bill currently loaded in the cart, and the items it had when loaded (for the dirty check).
+  const [activeHeld, setActiveHeld] = useState<ActiveHeld | null>(null);
+  const [loadedSnapshot, setLoadedSnapshot] = useState<string | null>(null);
+  const [lastHeld, setLastHeld] = useState<
+    { queueNumber: number; customerLabel: string | null; saved: boolean } | null
+  >(null);
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [showHeldPanel, setShowHeldPanel] = useState(false);
+  const [holdPending, startHold] = useTransition();
   const [checkoutPending, startCheckout] = useTransition();
   // Set synchronously on the first confirm tap, so a fast double-tap can't slip a second
   // createOrder in before checkoutPending re-renders the confirm button as disabled.
@@ -215,7 +238,10 @@ export function PosScreen({
     setLastOrderNumber(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
-    setCustomerId(null);
+    setLastHeld(null);
+    setCustomer(null);
+    setActiveHeld(null);
+    setLoadedSnapshot(null);
     resetDiscount();
   }
 
@@ -233,6 +259,7 @@ export function PosScreen({
     setLastOrderNumber(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
+    setLastHeld(null);
     startCheckout(async () => {
       let result: Awaited<ReturnType<typeof createOrder>>;
       try {
@@ -240,12 +267,14 @@ export function PosScreen({
           items: cartItems,
           paymentMethod,
           orderType,
-          customerId: customerId ?? undefined,
+          customerId: customer?.id ?? undefined,
           discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
           discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
           discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
           approverPin: approverPin ?? undefined,
           cashReceived,
+          heldBillId: activeHeld?.id,
+          heldBillVersion: activeHeld?.version,
         });
       } catch {
         // A dropped connection doesn't mean the sale failed — the server may have saved it
@@ -277,8 +306,13 @@ export function PosScreen({
             : null
         );
         setCartItems([]);
-            setCustomerId(null);
+        setCustomer(null);
         resetDiscount();
+        if (activeHeld) {
+          setActiveHeld(null);
+          setLoadedSnapshot(null);
+          router.refresh();
+        }
       }
       onSettled?.(
         "error" in result ? result.error : null,
@@ -316,6 +350,127 @@ export function PosScreen({
     });
   }
 
+  const heldDirty = activeHeld !== null && loadedSnapshot !== JSON.stringify(cartItems);
+  // Opening another held bill would drop these items: a new unsaved order, or unsaved edits.
+  const cartBusy = activeHeld ? heldDirty : cartItems.length > 0;
+
+  function heldInput(customerLabel: string): HeldBillInput {
+    return {
+      items: cartItems,
+      orderType,
+      customerId: customer?.id ?? null,
+      customerLabel,
+      discountType: discountType !== null && discountAmount > 0 ? discountType : null,
+      discountValue: discountType !== null && discountAmount > 0 ? parsedDiscountValue : null,
+      discountReason,
+    };
+  }
+
+  function resetAfterPark(queueNumber: number, customerLabel: string | null, saved: boolean) {
+    setCartItems([]);
+    setCustomer(null);
+    resetDiscount();
+    setActiveHeld(null);
+    setLoadedSnapshot(null);
+    setError(null);
+    setLastOrderNumber(null);
+    setLastQueueNumber(null);
+    setLastCashTender(null);
+    setLastHeld({ queueNumber, customerLabel, saved });
+    router.refresh();
+  }
+
+  /** Saves (resumed bill) or holds (new cart) the current cart; resolves true on success so a
+   *  resume can be chained after it. */
+  function parkCurrent(customerLabel: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setHoldError(null);
+      startHold(async () => {
+        try {
+          if (activeHeld) {
+            const res = await updateHeldBill(
+              activeHeld.id,
+              activeHeld.version,
+              heldInput(activeHeld.customerLabel ?? "")
+            );
+            if ("error" in res) {
+              setError(res.error);
+              resolve(false);
+              return;
+            }
+            resetAfterPark(activeHeld.queueNumber, activeHeld.customerLabel, true);
+          } else {
+            const res = await holdBill(heldInput(customerLabel));
+            if ("error" in res) {
+              setHoldError(res.error);
+              setError(res.error);
+              resolve(false);
+              return;
+            }
+            setShowHoldModal(false);
+            const label = customerLabel.trim();
+            resetAfterPark(res.queueNumber, label === "" ? null : label, false);
+          }
+          resolve(true);
+        } catch {
+          const message = "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบรายการบิลพักก่อนลองอีกครั้ง";
+          setHoldError(message);
+          setError(message);
+          resolve(false);
+        }
+      });
+    });
+  }
+
+  function handleHold() {
+    if (cartItems.length === 0) return;
+    setError(null);
+    if (activeHeld) {
+      void parkCurrent("");
+    } else {
+      setHoldError(null);
+      setShowMobileCart(false);
+      setShowHoldModal(true);
+    }
+  }
+
+  function resumeHeld(bill: HeldBillSummary) {
+    setCartItems(bill.items);
+    setOrderType(bill.orderType);
+    setCustomer(bill.customerId ? { id: bill.customerId, phone: bill.customerPhone } : null);
+    // The discount comes back without its approval — an over-threshold one is re-approved here.
+    resetDiscount();
+    if (bill.discountType !== null && bill.discountValue !== null) {
+      setDiscountType(bill.discountType);
+      setDiscountValue(String(bill.discountValue));
+      setDiscountReason(bill.discountReason ?? "");
+    }
+    setActiveHeld({
+      id: bill.id,
+      version: bill.version,
+      queueNumber: bill.queueNumber,
+      customerLabel: bill.customerLabel,
+    });
+    setLoadedSnapshot(JSON.stringify(bill.items));
+    setError(null);
+    setLastOrderNumber(null);
+    setLastQueueNumber(null);
+    setLastCashTender(null);
+    setLastHeld(null);
+    setShowHeldPanel(false);
+  }
+
+  async function parkThenResume(bill: HeldBillSummary) {
+    setShowHeldPanel(false);
+    const ok = await parkCurrent("");
+    if (ok) resumeHeld(bill);
+  }
+
+  function handleHeldCancelled(billId: string) {
+    if (activeHeld?.id === billId) clearCart();
+    router.refresh();
+  }
+
   const pendingProductModifiers: ModifierWithOptions[] = pendingProduct
     ? (productModifierMap.get(pendingProduct.id) ?? [])
         .map((modId) => allModifiers.find((m) => m.id === modId))
@@ -331,6 +486,11 @@ export function PosScreen({
         userName={userName}
         todayOrderCount={todayOrderCount}
         hasActiveShift={activeShiftId !== null}
+        heldCount={heldBills.length}
+        onOpenHeld={() => {
+          setShowMobileCart(false);
+          setShowHeldPanel(true);
+        }}
       />
       <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0 mt-2">
         <div className="flex-1 min-w-0 pb-20 md:pb-0">
@@ -352,8 +512,8 @@ export function PosScreen({
             onOrderTypeChange={setOrderType}
             paymentMethod={paymentMethod}
             onPaymentChange={setPaymentMethod}
-            customerId={customerId}
-            onCustomerIdChange={setCustomerId}
+            customer={customer}
+            onCustomerChange={setCustomer}
             discountType={discountType}
             discountValue={discountValue}
             onApplyDiscount={applyDiscount}
@@ -373,6 +533,12 @@ export function PosScreen({
             lastQueueNumber={lastQueueNumber}
             lastCashTender={lastCashTender}
             onCheckout={handleCheckout}
+            activeHeld={activeHeld}
+            heldDirty={heldDirty}
+            onCloseHeld={clearCart}
+            onHold={handleHold}
+            holdPending={holdPending}
+            lastHeld={lastHeld}
           />
         </div>
       </div>
@@ -414,8 +580,8 @@ export function PosScreen({
                 onOrderTypeChange={setOrderType}
                 paymentMethod={paymentMethod}
                 onPaymentChange={setPaymentMethod}
-                customerId={customerId}
-                onCustomerIdChange={setCustomerId}
+                customer={customer}
+                onCustomerChange={setCustomer}
                 discountType={discountType}
                 discountValue={discountValue}
                 onApplyDiscount={applyDiscount}
@@ -435,6 +601,12 @@ export function PosScreen({
                 lastQueueNumber={lastQueueNumber}
                 lastCashTender={lastCashTender}
                 onCheckout={handleCheckout}
+                activeHeld={activeHeld}
+                heldDirty={heldDirty}
+                onCloseHeld={clearCart}
+                onHold={handleHold}
+                holdPending={holdPending}
+                lastHeld={lastHeld}
               />
             </div>
           </div>
@@ -453,6 +625,29 @@ export function PosScreen({
           total={total}
           onConfirm={handleQrConfirm}
           onCancel={() => setShowQrModal(false)}
+        />
+      )}
+      {showHoldModal && (
+        <HoldBillModal
+          total={total}
+          itemCount={itemCount}
+          pending={holdPending}
+          error={holdError}
+          onConfirm={(label) => void parkCurrent(label)}
+          onCancel={() => setShowHoldModal(false)}
+        />
+      )}
+      {showHeldPanel && (
+        <HeldBillsPanel
+          bills={heldBills}
+          cancelledToday={cancelledHeldToday}
+          activeHeldId={activeHeld?.id ?? null}
+          cartBusy={cartBusy}
+          busyCartAction={activeHeld ? "save" : "hold"}
+          onResume={resumeHeld}
+          onParkCurrentThenResume={(bill) => void parkThenResume(bill)}
+          onCancelled={handleHeldCancelled}
+          onClose={() => setShowHeldPanel(false)}
         />
       )}
       {showCashModal && (

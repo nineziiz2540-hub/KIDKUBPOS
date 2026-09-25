@@ -33,8 +33,8 @@ type Props = {
   onOrderTypeChange: (type: OrderType) => void;
   paymentMethod: PaymentMethod;
   onPaymentChange: (method: PaymentMethod) => void;
-  customerId: string | null;
-  onCustomerIdChange: (id: string | null) => void;
+  customer: { id: string; phone: string | null } | null;
+  onCustomerChange: (customer: { id: string; phone: string | null } | null) => void;
   discountType: DiscountType | null;
   discountValue: string;
   onApplyDiscount: (
@@ -59,6 +59,14 @@ type Props = {
   lastQueueNumber: number | null;
   lastCashTender: { received: number; change: number } | null;
   onCheckout: () => void;
+  /** Set while a held bill is loaded in the cart. */
+  activeHeld: { queueNumber: number; customerLabel: string | null } | null;
+  /** The loaded held bill has unsaved changes. */
+  heldDirty: boolean;
+  onCloseHeld: () => void;
+  onHold: () => void;
+  holdPending: boolean;
+  lastHeld: { queueNumber: number; customerLabel: string | null; saved: boolean } | null;
 };
 
 export function SmartCart({
@@ -71,8 +79,8 @@ export function SmartCart({
   onOrderTypeChange,
   paymentMethod,
   onPaymentChange,
-  customerId,
-  onCustomerIdChange,
+  customer,
+  onCustomerChange,
   discountType,
   discountValue,
   onApplyDiscount,
@@ -92,9 +100,15 @@ export function SmartCart({
   lastQueueNumber,
   lastCashTender,
   onCheckout,
+  activeHeld,
+  heldDirty,
+  onCloseHeld,
+  onHold,
+  holdPending,
+  lastHeld,
 }: Props) {
   const reasonId = useId();
-  const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
+  const [confirmCloseHeld, setConfirmCloseHeld] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
@@ -102,8 +116,7 @@ export function SmartCart({
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   function handleClearCustomer() {
-    setLinkedPhone(null);
-    onCustomerIdChange(null);
+    onCustomerChange(null);
   }
 
   // Sized for fingers on the counter iPad: 48px tall (Apple's minimum is 44) with 16px text.
@@ -118,7 +131,25 @@ export function SmartCart({
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl border">
-      {/* Header */}
+      {/* Header — while a held bill is loaded it becomes that bill's banner */}
+      {activeHeld ? (
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b shrink-0 bg-accent/10 rounded-t-xl">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-accent">บิลพัก{heldDirty ? " · มีการแก้ไข" : ""}</p>
+            <p className="text-lg font-bold text-sidebar truncate">
+              คิว {activeHeld.queueNumber}
+              {activeHeld.customerLabel ? ` · ${activeHeld.customerLabel}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => (heldDirty ? setConfirmCloseHeld(true) : onCloseHeld())}
+            className="h-9 px-3 shrink-0 rounded-lg border border-input bg-white text-sm font-semibold text-sidebar hover:bg-muted"
+          >
+            ปิดบิล
+          </button>
+        </div>
+      ) : (
       <div className="flex items-center justify-between px-4 py-2.5 border-b shrink-0">
         <h2 className="text-lg font-bold text-sidebar">
           ตะกร้า
@@ -139,11 +170,23 @@ export function SmartCart({
           </button>
         )}
       </div>
+      )}
 
       {/* Cart items */}
       <div className="flex-1 overflow-y-auto divide-y divide-border">
         {cartItems.length === 0 ? (
           <div className="py-10 text-center">
+            {lastHeld && (
+              <div className="mx-auto mb-3 w-fit rounded-lg bg-accent/10 px-5 py-3">
+                <p className="text-sm font-medium text-accent">
+                  {lastHeld.saved ? "บันทึกบิลพักแล้ว" : "พักบิลแล้ว"}
+                </p>
+                <p className="text-3xl font-bold text-accent tabular-nums">คิว {lastHeld.queueNumber}</p>
+                {lastHeld.customerLabel && (
+                  <p className="text-base font-medium text-sidebar">{lastHeld.customerLabel}</p>
+                )}
+              </div>
+            )}
             {lastOrderNumber && lastQueueNumber !== null && (
               <div className="mb-2">
                 <p className="text-sm font-medium text-muted-foreground">คิว</p>
@@ -254,11 +297,11 @@ export function SmartCart({
 
         {/* Member + discount */}
         <div className="flex gap-2">
-          {customerId && linkedPhone ? (
+          {customer ? (
             <div className="flex-1 min-w-0 flex items-center h-11 rounded-lg border border-accent/40 bg-accent/5 pl-3 pr-1">
               <UserRound size={18} className="text-accent shrink-0" />
               <span className="flex-1 min-w-0 truncate ml-2 text-base font-medium text-sidebar tabular-nums">
-                {linkedPhone}
+                {customer.phone ?? "สมาชิก"}
               </span>
               <button
                 type="button"
@@ -362,20 +405,61 @@ export function SmartCart({
           <p className="text-sm text-destructive font-medium">{error}</p>
         )}
 
-        <Button
-          type="button"
-          onClick={onCheckout}
-          disabled={
-            cartItems.length === 0 ||
-            pending ||
-            discountExceedsSubtotal ||
-            (requiresApproval && !hasApproverPin)
-          }
-          className="w-full h-14 rounded-xl bg-accent hover:bg-accent/90 text-white text-xl font-bold"
-        >
-          {pending ? "กำลังบันทึก…" : `ชำระ ฿${formatPrice(total)}`}
-        </Button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onHold}
+            disabled={cartItems.length === 0 || pending || holdPending || discountExceedsSubtotal}
+            className="w-[38%] h-14 shrink-0 rounded-xl border-2 border-accent bg-white text-accent text-base font-bold leading-tight hover:bg-accent/10 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            {holdPending ? "กำลังบันทึก…" : activeHeld ? "บันทึกบิลพัก" : "พักบิล"}
+          </button>
+          <Button
+            type="button"
+            onClick={onCheckout}
+            disabled={
+              cartItems.length === 0 ||
+              pending ||
+              holdPending ||
+              discountExceedsSubtotal ||
+              (requiresApproval && !hasApproverPin)
+            }
+            className="flex-1 h-14 rounded-xl bg-accent hover:bg-accent/90 text-white text-xl font-bold"
+          >
+            {pending ? "กำลังบันทึก…" : `ชำระ ฿${formatPrice(total)}`}
+          </Button>
+        </div>
       </div>
+
+      {confirmCloseHeld && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4 text-center">
+            <h2 className="text-lg font-bold text-sidebar">ปิดบิลโดยไม่บันทึก?</h2>
+            <p className="text-base text-muted-foreground">
+              การแก้ไขล่าสุดจะหายไป บิลพักจะยังเป็นแบบเดิม
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => setConfirmCloseHeld(false)}
+                className="flex-1 h-12 bg-white border border-input text-sidebar text-base hover:bg-muted"
+              >
+                กลับไปแก้ไข
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setConfirmCloseHeld(false);
+                  onCloseHeld();
+                }}
+                className="flex-1 h-12 bg-destructive hover:bg-destructive/90 text-white text-base"
+              >
+                ปิดโดยไม่บันทึก
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clear-cart confirmation: the bigger, red button is also easier to hit by accident */}
       {confirmClear && (
@@ -448,8 +532,7 @@ export function SmartCart({
       {showMemberModal && (
         <MemberModal
           onLinked={(id, phone) => {
-            onCustomerIdChange(id);
-            setLinkedPhone(phone);
+            onCustomerChange({ id, phone });
             setShowMemberModal(false);
           }}
           onCancel={() => setShowMemberModal(false)}
