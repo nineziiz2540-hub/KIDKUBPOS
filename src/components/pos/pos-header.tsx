@@ -25,7 +25,7 @@ export function PosHeader({ userName, todayOrderCount, hasActiveShift }: Props) 
         <Link
           href="/shifts"
           className={
-            "text-xs font-medium px-2.5 py-1 rounded-full transition-colors " +
+            "text-sm font-semibold px-3 py-1.5 rounded-full transition-colors " +
             (hasActiveShift
               ? "bg-success/10 text-success hover:bg-success/20"
               : "bg-destructive/10 text-destructive hover:bg-destructive/20")

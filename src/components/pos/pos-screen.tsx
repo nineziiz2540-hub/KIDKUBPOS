@@ -281,8 +281,11 @@ export function PosScreen({
         .filter((m): m is ModifierWithOptions => m !== undefined)
     : [];
 
+  // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
+  // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
+  // dvh tracks Safari's toolbar showing/hiding.
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
+    <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
       <PosHeader
         userName={userName}
         todayOrderCount={todayOrderCount}
@@ -297,7 +300,7 @@ export function PosScreen({
             onProductClick={handleProductClick}
           />
         </div>
-        <div className="hidden md:block md:w-72 md:shrink-0">
+        <div className="hidden md:block md:w-80 lg:w-[22rem] md:shrink-0">
           <SmartCart
             cartItems={cartItems}
             onUpdateQty={updateQty}

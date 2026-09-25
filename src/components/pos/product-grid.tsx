@@ -54,7 +54,7 @@ export function ProductGrid({
 
   function tabCls(active: boolean) {
     return (
-      "px-4 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors " +
+      "h-12 px-5 rounded-full text-base font-semibold whitespace-nowrap transition-colors " +
       (active
         ? "bg-accent text-white"
         : "bg-white border border-border text-muted-foreground hover:border-accent hover:text-accent")
@@ -134,26 +134,26 @@ export function ProductGrid({
                   </span>
                 )}
               </div>
-              <div className="p-2.5">
-                <p className="font-medium text-sidebar text-sm leading-tight line-clamp-2">
+              <div className="p-3">
+                <p className="font-semibold text-sidebar text-base leading-snug line-clamp-2">
                   {product.name}
                 </p>
-                <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-accent font-semibold text-sm">
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-accent font-bold text-lg tabular-nums">
                     ฿{formatPrice(product.price)}
                   </p>
-                  <span className="w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold shrink-0">
+                  <span className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-lg font-bold shrink-0">
                     +
                   </span>
                 </div>
                 {productsWithModifiers.has(product.id) && (
-                  <p className="text-xs text-muted-foreground mt-0.5">ปรับได้</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">ปรับได้</p>
                 )}
               </div>
             </button>
           ))}
           {filtered.length === 0 && (
-            <p className="col-span-full text-center py-16 text-muted-foreground text-sm">
+            <p className="col-span-full text-center py-16 text-muted-foreground text-base">
               ไม่มีสินค้า
             </p>
           )}

@@ -1,13 +1,14 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
-import { useId, useState, useTransition } from "react";
+import { useId, useState } from "react";
+import { Percent, Trash2, UserRound, X } from "lucide-react";
 import type { CartItem } from "@/types/app";
 import type { DiscountType } from "@/lib/discount";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/ui/pin-pad";
-import { findOrCreateCustomer } from "@/app/actions/customers";
+import { MemberModal } from "./member-modal";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -17,6 +18,9 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   transfer: "โอน",
 };
 const PAYMENT_METHODS: PaymentMethod[] = ["cash", "transfer"];
+
+const SECONDARY_CLS =
+  "flex-1 flex items-center justify-center gap-2 h-11 rounded-lg border border-input bg-white text-base font-medium text-sidebar hover:border-accent hover:text-accent disabled:opacity-40 disabled:pointer-events-none transition-colors";
 
 type Props = {
   cartItems: CartItem[];
@@ -86,54 +90,45 @@ export function SmartCart({
   onCheckout,
 }: Props) {
   const reasonId = useId();
-  const [phone, setPhone] = useState("");
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
-  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
-  const [searchPending, startSearch] = useTransition();
-
-  function handleLinkCustomer() {
-    const trimmed = phone.trim();
-    if (!trimmed) return;
-    setCustomerSearchError(null);
-    startSearch(async () => {
-      // Use phone as fallback name so findOrCreateCustomer always has a non-empty name
-      const result = await findOrCreateCustomer({ phone: trimmed, name: trimmed });
-      if ("error" in result) {
-        setCustomerSearchError(result.error);
-      } else {
-        onCustomerIdChange(result.customerId);
-        setLinkedPhone(trimmed);
-      }
-    });
-  }
+  const [showMemberModal, setShowMemberModal] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   function handleClearCustomer() {
-    setPhone("");
     setLinkedPhone(null);
-    setCustomerSearchError(null);
     onCustomerIdChange(null);
   }
 
-  function orderTypeCls(active: boolean) {
+  // Sized for fingers on the counter iPad: 48px tall (Apple's minimum is 44) with 16px text.
+  function choiceCls(active: boolean) {
     return (
-      "flex-1 rounded-md border py-1.5 text-xs font-medium transition-colors " +
+      "flex-1 h-12 rounded-lg border text-base font-semibold transition-colors " +
       (active
         ? "border-accent bg-accent text-white"
-        : "border-input text-muted-foreground hover:border-accent hover:text-accent")
+        : "border-input bg-white text-sidebar hover:border-accent hover:text-accent")
     );
   }
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl border">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-        <h2 className="font-semibold text-sidebar">ตะกร้า</h2>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b shrink-0">
+        <h2 className="text-lg font-bold text-sidebar">
+          ตะกร้า
+          {itemCount > 0 && (
+            <span className="ml-2 text-sm font-medium text-muted-foreground">
+              {itemCount} ชิ้น
+            </span>
+          )}
+        </h2>
         {cartItems.length > 0 && (
           <button
             type="button"
-            onClick={onClear}
-            className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+            onClick={() => setConfirmClear(true)}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-destructive/10 text-destructive text-sm font-semibold hover:bg-destructive/20 transition-colors"
           >
+            <Trash2 size={16} />
             ล้างทั้งหมด
           </button>
         )}
@@ -144,73 +139,72 @@ export function SmartCart({
         {cartItems.length === 0 ? (
           <div className="py-10 text-center">
             {lastOrderNumber && (
-              <p className="text-sm font-semibold text-sidebar mb-1">
+              <p className="text-base font-semibold text-sidebar mb-2">
                 ออเดอร์ {lastOrderNumber} สำเร็จ ✓
               </p>
             )}
             {lastOrderNumber && lastCashTender && (
-              <div className="mx-auto mb-3 w-fit rounded-lg bg-success/10 px-4 py-2 text-success">
-                <p className="text-xs tabular-nums">
+              <div className="mx-auto mb-3 w-fit rounded-lg bg-success/10 px-5 py-2.5 text-success">
+                <p className="text-sm tabular-nums">
                   รับเงิน ฿{lastCashTender.received.toFixed(2)}
                 </p>
-                <p className="text-xl font-bold tabular-nums">
+                <p className="text-2xl font-bold tabular-nums">
                   ทอน ฿{lastCashTender.change.toFixed(2)}
                 </p>
               </div>
             )}
-            <p className="text-muted-foreground text-sm">คลิกสินค้าเพื่อเพิ่ม</p>
+            <p className="text-muted-foreground text-base">แตะเมนูเพื่อเพิ่มลงตะกร้า</p>
           </div>
         ) : (
           cartItems.map((item) => (
-            <div
-              key={item.cartItemKey}
-              className="flex items-start gap-2 px-3 py-2.5"
-            >
+            <div key={item.cartItemKey} className="flex items-center gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-sidebar truncate">
+                <p className="text-base font-semibold text-sidebar leading-snug line-clamp-2">
                   {item.name}
                 </p>
                 {item.selectedModifiers.length > 0 && (
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  <p className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">
                     {item.selectedModifiers.map((m) => m.optionName).join(", ")}
                   </p>
                 )}
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground tabular-nums mt-0.5">
                   ฿{formatPrice(item.totalPrice / item.quantity)} / ชิ้น
                 </p>
               </div>
-              {/* Qty controls */}
-              <div className="flex items-center gap-1 mt-0.5">
-                <button
-                  type="button"
-                  onClick={() => onUpdateQty(item.cartItemKey, item.quantity - 1)}
-                  className="w-6 h-6 rounded border text-sm flex items-center justify-center hover:bg-muted transition-colors"
-                  aria-label="ลดจำนวน"
-                >
-                  −
-                </button>
-                <span className="w-5 text-center text-sm tabular-nums">
-                  {item.quantity}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onUpdateQty(item.cartItemKey, item.quantity + 1)}
-                  className="w-6 h-6 rounded border text-sm flex items-center justify-center hover:bg-muted transition-colors"
-                  aria-label="เพิ่มจำนวน"
-                >
-                  +
-                </button>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <p className="text-base font-bold text-sidebar tabular-nums">
+                  ฿{formatPrice(item.totalPrice)}
+                </p>
+                {/* Qty controls */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateQty(item.cartItemKey, item.quantity - 1)}
+                    className="w-10 h-10 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
+                    aria-label="ลดจำนวน"
+                  >
+                    −
+                  </button>
+                  <span className="w-8 text-center text-lg font-semibold tabular-nums">
+                    {item.quantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateQty(item.cartItemKey, item.quantity + 1)}
+                    className="w-10 h-10 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
+                    aria-label="เพิ่มจำนวน"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-              <p className="text-sm font-medium w-12 text-right text-sidebar tabular-nums mt-0.5">
-                ฿{formatPrice(item.totalPrice)}
-              </p>
               <button
                 type="button"
                 onClick={() => onRemove(item.cartItemKey)}
-                className="text-muted-foreground hover:text-destructive transition-colors text-xs w-4 mt-0.5"
+                className="w-10 h-10 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
                 aria-label="ลบสินค้า"
               >
-                ✕
+                <Trash2 size={18} />
               </button>
             </div>
           ))
@@ -218,107 +212,87 @@ export function SmartCart({
       </div>
 
       {/* Footer */}
-      <div className="border-t px-4 py-3 space-y-3 shrink-0">
-        {/* Customer */}
-        {customerId && linkedPhone ? (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-sidebar font-medium truncate">
-              ลูกค้า: {linkedPhone}
-            </span>
-            <button
-              type="button"
-              onClick={handleClearCustomer}
-              className="text-xs text-muted-foreground hover:text-destructive shrink-0 ml-2"
-            >
-              ล้าง
-            </button>
-          </div>
-        ) : (
-          <div className="flex gap-1.5">
-            <Input
-              type="tel"
-              placeholder="เบอร์ลูกค้า (ไม่บังคับ)"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleLinkCustomer();
-              }}
-              className="h-7 text-xs"
-            />
-            <button
-              type="button"
-              onClick={handleLinkCustomer}
-              disabled={!phone.trim() || searchPending}
-              className="px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted disabled:opacity-40 shrink-0 transition-colors"
-            >
-              {searchPending ? "…" : "บันทึก"}
-            </button>
-          </div>
-        )}
-        {customerSearchError && (
-          <p className="text-xs text-destructive">{customerSearchError}</p>
-        )}
-
-        {/* Order type */}
+      <div className="border-t px-4 py-3 space-y-2.5 shrink-0">
+        {/* Order type + table */}
         <div className="flex gap-2">
           {(["dine_in", "take_away"] as const).map((type) => (
             <button
               key={type}
               type="button"
               onClick={() => onOrderTypeChange(type)}
-              className={orderTypeCls(orderType === type)}
+              className={choiceCls(orderType === type)}
             >
               {type === "dine_in" ? "ทานที่ร้าน" : "Take Away"}
             </button>
           ))}
+          {orderType === "dine_in" && (
+            <Input
+              type="text"
+              inputMode="numeric"
+              placeholder="โต๊ะ"
+              aria-label="หมายเลขโต๊ะ"
+              value={tableNumber}
+              onChange={(e) => onTableNumberChange(e.target.value)}
+              className="h-12 w-20 shrink-0 text-center text-base md:text-base"
+            />
+          )}
         </div>
 
-        {/* Table number */}
-        {orderType === "dine_in" && (
-          <Input
-            type="text"
-            placeholder="หมายเลขโต๊ะ (ไม่บังคับ)"
-            value={tableNumber}
-            onChange={(e) => onTableNumberChange(e.target.value)}
-            className="h-7 text-xs"
-          />
-        )}
-
-        {/* Discount */}
-        {discountType === null ? (
-          cartItems.length > 0 && (
+        {/* Member + discount */}
+        <div className="flex gap-2">
+          {customerId && linkedPhone ? (
+            <div className="flex-1 min-w-0 flex items-center h-11 rounded-lg border border-accent/40 bg-accent/5 pl-3 pr-1">
+              <UserRound size={18} className="text-accent shrink-0" />
+              <span className="flex-1 min-w-0 truncate ml-2 text-base font-medium text-sidebar tabular-nums">
+                {linkedPhone}
+              </span>
+              <button
+                type="button"
+                onClick={handleClearCustomer}
+                aria-label="ยกเลิกสมาชิก"
+                className="w-9 h-9 shrink-0 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex items-center justify-center"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowMemberModal(true)}
+              className={SECONDARY_CLS}
+            >
+              <UserRound size={18} />
+              สมาชิก
+            </button>
+          )}
+          {discountType === null && (
             <button
               type="button"
               onClick={() => onDiscountTypeChange("percent")}
-              className="text-xs text-accent font-medium hover:underline"
+              disabled={cartItems.length === 0}
+              className={SECONDARY_CLS}
             >
-              + เพิ่มส่วนลด
+              <Percent size={18} />
+              ส่วนลด
             </button>
-          )
-        ) : (
+          )}
+        </div>
+
+        {/* Discount editor */}
+        {discountType !== null && (
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">ส่วนลด</span>
-              <button
-                type="button"
-                onClick={onCancelDiscount}
-                className="text-xs text-muted-foreground hover:text-destructive"
-              >
-                ลบส่วนลด
-              </button>
-            </div>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => onDiscountTypeChange("percent")}
-                className={orderTypeCls(discountType === "percent")}
+                className={choiceCls(discountType === "percent") + " max-w-14"}
               >
                 %
               </button>
               <button
                 type="button"
                 onClick={() => onDiscountTypeChange("amount")}
-                className={orderTypeCls(discountType === "amount")}
+                className={choiceCls(discountType === "amount") + " max-w-14"}
               >
                 ฿
               </button>
@@ -329,11 +303,19 @@ export function SmartCart({
                 value={discountValue}
                 onChange={(e) => onDiscountValueChange(e.target.value)}
                 placeholder={discountType === "percent" ? "% ส่วนลด" : "บาท"}
-                className="h-7 text-xs flex-1"
+                className="h-12 text-base md:text-base flex-1"
               />
+              <button
+                type="button"
+                onClick={onCancelDiscount}
+                aria-label="ลบส่วนลด"
+                className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20"
+              >
+                <X size={20} />
+              </button>
             </div>
             {discountExceedsSubtotal && (
-              <p className="text-xs text-destructive">
+              <p className="text-sm text-destructive">
                 {discountType === "percent"
                   ? "ส่วนลดต้องไม่เกิน 100%"
                   : "ส่วนลดมากกว่ายอดรวม"}
@@ -343,22 +325,22 @@ export function SmartCart({
         )}
 
         {/* Total */}
-        <div className="space-y-1">
+        <div>
           {discountType !== null && discountAmount > 0 && (
             <>
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="flex justify-between text-sm text-muted-foreground">
                 <span>ยอดก่อนลด</span>
                 <span className="tabular-nums">฿{formatPrice(subtotal)}</span>
               </div>
-              <div className="flex justify-between text-xs text-destructive">
+              <div className="flex justify-between text-sm text-destructive">
                 <span>ส่วนลด</span>
                 <span className="tabular-nums">-฿{formatPrice(discountAmount)}</span>
               </div>
             </>
           )}
-          <div className="flex justify-between font-semibold text-sidebar text-base">
-            <span>รวม</span>
-            <span className="tabular-nums">฿{formatPrice(total)}</span>
+          <div className="flex items-baseline justify-between text-sidebar">
+            <span className="text-lg font-semibold">รวม</span>
+            <span className="text-3xl font-bold tabular-nums">฿{formatPrice(total)}</span>
           </div>
         </div>
 
@@ -369,7 +351,7 @@ export function SmartCart({
               key={method}
               type="button"
               onClick={() => onPaymentChange(method)}
-              className={orderTypeCls(paymentMethod === method)}
+              className={choiceCls(paymentMethod === method)}
             >
               {PAYMENT_LABELS[method]}
             </button>
@@ -389,11 +371,59 @@ export function SmartCart({
             discountExceedsSubtotal ||
             (requiresApproval && !hasApproverPin)
           }
-          className="w-full bg-accent hover:bg-accent/90 text-white"
+          className="w-full h-14 rounded-xl bg-accent hover:bg-accent/90 text-white text-xl font-bold"
         >
           {pending ? "กำลังบันทึก…" : `ชำระ ฿${formatPrice(total)}`}
         </Button>
       </div>
+
+      {/* Clear-cart confirmation: the bigger, red button is also easier to hit by accident */}
+      {confirmClear && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmClear(false);
+          }}
+        >
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4 text-center">
+            <h2 className="text-lg font-bold text-sidebar">ล้างตะกร้าทั้งหมด?</h2>
+            <p className="text-base text-muted-foreground">
+              สินค้า {itemCount} ชิ้นในตะกร้าจะถูกลบออก
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => setConfirmClear(false)}
+                className="flex-1 h-12 bg-white border border-input text-sidebar text-base hover:bg-muted"
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setConfirmClear(false);
+                  handleClearCustomer();
+                  onClear();
+                }}
+                className="flex-1 h-12 bg-destructive hover:bg-destructive/90 text-white text-base"
+              >
+                ล้างทั้งหมด
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMemberModal && (
+        <MemberModal
+          onLinked={(id, phone) => {
+            onCustomerIdChange(id);
+            setLinkedPhone(phone);
+            setShowMemberModal(false);
+          }}
+          onCancel={() => setShowMemberModal(false)}
+        />
+      )}
 
       {/* Discount approval modal */}
       {requiresApproval && !hasApproverPin && !discountExceedsSubtotal && (

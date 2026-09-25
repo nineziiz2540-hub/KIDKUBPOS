@@ -92,13 +92,13 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
             if (e.target === e.currentTarget) onClose();
           }}
         >
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-lg max-h-[90dvh] flex flex-col">
             {/* Header */}
             <div className="px-5 pt-5 pb-3 border-b shrink-0">
               <Dialog.Title className="font-bold text-sidebar text-lg leading-tight">
                 {product.name}
               </Dialog.Title>
-              <p className="text-sm text-muted-foreground mt-0.5">
+              <p className="text-base text-muted-foreground mt-0.5">
                 ฿{formatPrice(product.price)}
               </p>
             </div>
@@ -108,28 +108,28 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
               {modifiers.map((modifier) => (
                 <div key={modifier.id}>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="font-semibold text-sm text-sidebar">
+                    <span className="font-semibold text-base text-sidebar">
                       {modifier.name}
                     </span>
                     {modifier.isRequired && (
-                      <span className="text-xs bg-destructive/10 text-destructive border border-destructive/20 px-1.5 py-0.5 rounded-full">
+                      <span className="text-sm bg-destructive/10 text-destructive border border-destructive/20 px-2 py-0.5 rounded-full">
                         จำเป็น
                       </span>
                     )}
                     {modifier.isMultiSelect && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm text-muted-foreground">
                         (เลือกได้หลายอย่าง)
                       </span>
                     )}
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {modifier.options.map((option) => {
                       const isSelected =
                         selections.get(modifier.id)?.has(option.id) ?? false;
                       return (
                         <label
                           key={option.id}
-                          className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors border ${
+                          className={`flex items-center gap-3 min-h-12 px-3 py-2.5 rounded-lg cursor-pointer transition-colors border ${
                             isSelected
                               ? "border-accent bg-accent/5"
                               : "border-border hover:bg-muted/50"
@@ -146,7 +146,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                           />
                           {/* Custom indicator */}
                           <span
-                            className={`w-4 h-4 shrink-0 border-2 flex items-center justify-center transition-colors ${
+                            className={`w-5 h-5 shrink-0 border-2 flex items-center justify-center transition-colors ${
                               modifier.isMultiSelect ? "rounded" : "rounded-full"
                             } ${
                               isSelected
@@ -155,12 +155,12 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                             }`}
                           >
                             {isSelected && (
-                              <span className="w-2 h-2 bg-white rounded-sm" />
+                              <span className="w-2.5 h-2.5 bg-white rounded-sm" />
                             )}
                           </span>
-                          <span className="flex-1 text-sm">{option.name}</span>
+                          <span className="flex-1 text-base leading-snug">{option.name}</span>
                           {option.priceDelta !== 0 && (
-                            <span className="text-sm text-muted-foreground tabular-nums">
+                            <span className="text-base text-muted-foreground tabular-nums">
                               {option.priceDelta > 0 ? "+" : ""}฿
                               {formatPrice(option.priceDelta)}
                             </span>
@@ -175,14 +175,14 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
 
             {/* Footer */}
             <div className="px-5 py-4 border-t flex gap-3 shrink-0">
-              <Dialog.Close className="flex-1 inline-flex items-center justify-center rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted transition-colors">
+              <Dialog.Close className="flex-1 inline-flex items-center justify-center h-12 rounded-lg border border-border bg-background px-3 text-base font-medium hover:bg-muted transition-colors">
                 ยกเลิก
               </Dialog.Close>
               <button
                 type="button"
                 onClick={handleAdd}
                 disabled={!isValid}
-                className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold text-white transition-colors ${
+                className={`flex-1 h-12 rounded-lg px-3 text-base font-semibold text-white transition-colors ${
                   isValid
                     ? "bg-accent hover:bg-accent/90 active:scale-95"
                     : "bg-accent/40 cursor-not-allowed"

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Delete } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NumericKeypad } from "./numeric-keypad";
 import { computeChange, MAX_CASH_RECEIVED, suggestCashAmounts, toSatang } from "@/lib/cash";
 
 type Props = {
@@ -11,8 +11,6 @@ type Props = {
   onConfirm: (cashReceived: number) => void;
   onCancel: () => void;
 };
-
-const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"] as const;
 
 /** Appends one keypad key to the typed amount, rejecting anything that isn't a valid baht value. */
 function applyKey(current: string, key: string): string {
@@ -105,20 +103,11 @@ export function CashPaymentModal({ total, pending, error, onConfirm, onCancel }:
         </div>
 
         {/* Keypad */}
-        <div className="grid grid-cols-3 gap-2">
-          {KEYPAD.map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTyped((t) => applyKey(t, key))}
-              disabled={pending}
-              aria-label={key === "back" ? "ลบ" : key}
-              className="rounded-lg border border-input bg-white py-3 text-xl font-semibold text-sidebar tabular-nums hover:bg-muted active:bg-muted disabled:opacity-50 flex items-center justify-center"
-            >
-              {key === "back" ? <Delete size={22} /> : key}
-            </button>
-          ))}
-        </div>
+        <NumericKeypad
+          allowDecimal
+          disabled={pending}
+          onKey={(key) => setTyped((t) => applyKey(t, key))}
+        />
 
         {/* Change / shortfall */}
         <div
