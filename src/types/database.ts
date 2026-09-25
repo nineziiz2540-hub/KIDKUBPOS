@@ -271,6 +271,7 @@ export type Database = {
           created_at: string
           id: string
           modifiers_snapshot: Json | null
+          note: string | null
           order_id: string
           product_id: string
           product_name: string
@@ -283,6 +284,7 @@ export type Database = {
           created_at?: string
           id?: string
           modifiers_snapshot?: Json | null
+          note?: string | null
           order_id: string
           product_id: string
           product_name: string
@@ -295,6 +297,7 @@ export type Database = {
           created_at?: string
           id?: string
           modifiers_snapshot?: Json | null
+          note?: string | null
           order_id?: string
           product_id?: string
           product_name?: string
