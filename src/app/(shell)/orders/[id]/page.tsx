@@ -12,6 +12,8 @@ type OrderItem = {
   unit_price: number;
   quantity: number;
   subtotal: number;
+  modifiers_snapshot: { option: string }[] | null;
+  note: string | null;
 };
 
 type OrderDetail = {
@@ -56,7 +58,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -95,6 +97,14 @@ export default async function OrderDetailPage({ params }: Props) {
               <p className="font-medium text-sidebar text-sm">
                 {item.product_name}
               </p>
+              {item.modifiers_snapshot && item.modifiers_snapshot.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {item.modifiers_snapshot.map((m) => m.option).join(", ")}
+                </p>
+              )}
+              {item.note && (
+                <p className="text-xs text-accent font-medium">📝 {item.note}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 ฿{Number(item.unit_price).toFixed(2)} × {item.quantity}
               </p>

@@ -166,6 +166,24 @@ export function PosScreen({
     });
   }
 
+  // A direct-tap line is keyed by product.id so repeat taps merge into it. Once it carries a note
+  // it gets its own key, so the next plain tap starts a fresh, note-less line instead of silently
+  // adding un-noted cups to a noted one.
+  function setItemNote(key: string, rawNote: string) {
+    const trimmed = rawNote.trim();
+    const note = trimmed === "" ? null : trimmed;
+    setCartItems((prev) =>
+      prev.map((i) => {
+        if (i.cartItemKey !== key) return i;
+        const cartItemKey =
+          note !== null && i.cartItemKey === i.productId
+            ? `${i.productId}-${Date.now()}`
+            : i.cartItemKey;
+        return { ...i, note, cartItemKey };
+      })
+    );
+  }
+
   function handleAddFromModal(item: CartItem) {
     setCartItems((prev) => [...prev, item]);
     setPendingProduct(null);
@@ -328,6 +346,7 @@ export function PosScreen({
             cartItems={cartItems}
             onUpdateQty={updateQty}
             onRemove={removeItem}
+            onSetNote={setItemNote}
             onClear={clearCart}
             orderType={orderType}
             onOrderTypeChange={setOrderType}
@@ -390,6 +409,7 @@ export function PosScreen({
                 cartItems={cartItems}
                 onUpdateQty={updateQty}
                 onRemove={removeItem}
+                onSetNote={setItemNote}
                 onClear={clearCart}
                 orderType={orderType}
                 onOrderTypeChange={setOrderType}

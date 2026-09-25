@@ -3,6 +3,7 @@ import { formatPrice } from "@/lib/cash";
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { CartItem, ModifierWithOptions, PosProduct, SelectedModifier } from "@/types/app";
+import { NoteEditor } from "./note-editor";
 
 type Props = {
   product: PosProduct;
@@ -15,6 +16,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
   const [selections, setSelections] = useState<Map<string, Set<string>>>(
     () => new Map()
   );
+  const [note, setNote] = useState("");
 
   const isValid = modifiers
     .filter((m) => m.isRequired)
@@ -74,7 +76,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
       quantity: 1,
       selectedModifiers,
       totalPrice: unitPrice,
-      note: null,
+      note: note.trim() === "" ? null : note.trim(),
     });
   }
 
@@ -172,6 +174,13 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
                   </div>
                 </div>
               ))}
+
+              <div>
+                <p className="font-semibold text-base text-sidebar mb-2">
+                  หมายเหตุ <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
+                </p>
+                <NoteEditor value={note} onChange={setNote} />
+              </div>
             </div>
 
             {/* Footer */}

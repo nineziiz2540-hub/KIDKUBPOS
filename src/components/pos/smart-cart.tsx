@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/ui/pin-pad";
 import { MemberModal } from "./member-modal";
 import { DiscountModal } from "./discount-modal";
+import { NoteModal } from "./note-modal";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -27,6 +28,7 @@ type Props = {
   cartItems: CartItem[];
   onUpdateQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
+  onSetNote: (key: string, note: string) => void;
   onClear: () => void;
   orderType: OrderType;
   onOrderTypeChange: (type: OrderType) => void;
@@ -65,6 +67,7 @@ export function SmartCart({
   cartItems,
   onUpdateQty,
   onRemove,
+  onSetNote,
   onClear,
   orderType,
   onOrderTypeChange,
@@ -98,6 +101,7 @@ export function SmartCart({
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [noteKey, setNoteKey] = useState<string | null>(null);
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   function handleClearCustomer() {
@@ -163,7 +167,12 @@ export function SmartCart({
         ) : (
           cartItems.map((item) => (
             <div key={item.cartItemKey} className="flex items-center gap-3 px-4 py-3">
-              <div className="flex-1 min-w-0">
+              {/* Tapping the item text opens its note — the whole block is the target, not a tiny icon */}
+              <button
+                type="button"
+                onClick={() => setNoteKey(item.cartItemKey)}
+                className="flex-1 min-w-0 text-left rounded-md -mx-1 px-1 hover:bg-muted/60 active:bg-muted transition-colors"
+              >
                 <p className="text-base font-semibold text-sidebar leading-snug line-clamp-2">
                   {item.name}
                 </p>
@@ -172,10 +181,16 @@ export function SmartCart({
                     {item.selectedModifiers.map((m) => m.optionName).join(", ")}
                   </p>
                 )}
+                {item.note && (
+                  <p className="text-sm text-accent font-medium leading-snug mt-0.5 line-clamp-2">
+                    📝 {item.note}
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground tabular-nums mt-0.5">
                   ฿{formatPrice(item.totalPrice / item.quantity)} / ชิ้น
+                  {!item.note && <span className="text-accent/80"> · + หมายเหตุ</span>}
                 </p>
-              </div>
+              </button>
               <div className="flex flex-col items-end gap-1.5 shrink-0">
                 <p className="text-base font-bold text-sidebar tabular-nums">
                   ฿{formatPrice(item.totalPrice)}
@@ -404,6 +419,23 @@ export function SmartCart({
           </div>
         </div>
       )}
+
+      {noteKey !== null &&
+        (() => {
+          const item = cartItems.find((i) => i.cartItemKey === noteKey);
+          if (!item) return null;
+          return (
+            <NoteModal
+              itemName={item.name}
+              initialNote={item.note ?? ""}
+              onSave={(note) => {
+                onSetNote(item.cartItemKey, note);
+                setNoteKey(null);
+              }}
+              onCancel={() => setNoteKey(null)}
+            />
+          );
+        })()}
 
       {showDiscountModal && (
         <DiscountModal
