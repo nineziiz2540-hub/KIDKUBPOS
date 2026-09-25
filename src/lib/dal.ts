@@ -2,7 +2,9 @@ import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/app";
+import type { CartItem, ModifierWithOptions, ProductCost, LowStockAlert } from "@/types/app";
+import { computeDiscount, type DiscountType } from "@/lib/discount";
+import type { Reduction } from "@/lib/held-bill-diff";
 import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
 
 // Re-exported so existing server-side callers can keep importing this
@@ -1185,4 +1187,165 @@ export async function getCustomerOrders(
     paymentMethod: r.payment_method,
     status: r.status,
   }));
+}
+
+// ─── Held bills ──────────────────────────────────────────────────────────────
+
+export type HeldBillSummary = {
+  id: string;
+  version: number;
+  queueNumber: number;
+  customerLabel: string | null;
+  customerId: string | null;
+  customerPhone: string | null;
+  orderType: "dine_in" | "take_away";
+  items: CartItem[];
+  discountType: DiscountType | null;
+  discountValue: number | null;
+  discountReason: string | null;
+  itemCount: number;
+  total: number;
+  createdAt: string;
+};
+
+/** Open (unpaid) held bills, oldest first. Excludes any bill that already has an order — i.e. was
+ *  paid but whose status update failed — so it can never be offered for a second payment. */
+export async function getOpenHeldBills(tenantId: string): Promise<HeldBillSummary[]> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("held_bills")
+    .select(
+      "id, version, queue_number, customer_label, customer_id, order_type, items, discount_type, discount_value, discount_reason, created_at, customers(phone)"
+    )
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .order("created_at", { ascending: true });
+  if (!rows || rows.length === 0) return [];
+
+  const { data: paid } = await supabase
+    .from("orders")
+    .select("held_bill_id")
+    .eq("tenant_id", tenantId)
+    .in(
+      "held_bill_id",
+      rows.map((r) => r.id)
+    );
+  const paidIds = new Set((paid ?? []).map((o) => o.held_bill_id));
+
+  return rows
+    .filter((r) => !paidIds.has(r.id))
+    .map((r) => {
+      const items = (r.items as unknown as CartItem[]) ?? [];
+      const subtotal = items.reduce((sum, i) => sum + Number(i.totalPrice), 0);
+      const discountType = (r.discount_type as DiscountType | null) ?? null;
+      const { total } = computeDiscount(subtotal, discountType, Number(r.discount_value ?? 0));
+      const customer = r.customers as { phone: string | null } | null;
+      return {
+        id: r.id,
+        version: r.version,
+        queueNumber: r.queue_number,
+        customerLabel: r.customer_label,
+        customerId: r.customer_id,
+        customerPhone: customer?.phone ?? null,
+        orderType: r.order_type as "dine_in" | "take_away",
+        items,
+        discountType,
+        discountValue: r.discount_value === null ? null : Number(r.discount_value),
+        discountReason: r.discount_reason,
+        itemCount: items.reduce((sum, i) => sum + i.quantity, 0),
+        total,
+        createdAt: r.created_at,
+      };
+    });
+}
+
+export type CancelledHeldBill = {
+  id: string;
+  queueNumber: number;
+  customerLabel: string | null;
+  reason: string | null;
+  cancelledAt: string;
+  cancelledByName: string | null;
+  approvedByName: string | null;
+};
+
+/** Staff can't read other members' profiles under RLS, so names are resolved server-side,
+ *  tenant-scoped, full_name only. */
+async function memberNames(tenantId: string, ids: (string | null)[]): Promise<Map<string, string | null>> {
+  const unique = [...new Set(ids.filter((id): id is string => id !== null))];
+  if (unique.length === 0) return new Map();
+  const { data } = await createAdminClient()
+    .from("profiles")
+    .select("id, full_name")
+    .eq("tenant_id", tenantId)
+    .in("id", unique);
+  return new Map((data ?? []).map((p) => [p.id, p.full_name]));
+}
+
+function bangkokTodayStartIso(): string {
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const bangkokNow = new Date(Date.now() + offsetMs);
+  const midnightUtc = Date.UTC(
+    bangkokNow.getUTCFullYear(),
+    bangkokNow.getUTCMonth(),
+    bangkokNow.getUTCDate()
+  );
+  return new Date(midnightUtc - offsetMs).toISOString();
+}
+
+export async function getCancelledHeldBillsToday(tenantId: string): Promise<CancelledHeldBill[]> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("held_bills")
+    .select("id, queue_number, customer_label, cancel_reason, cancelled_at, cancelled_by, cancelled_approved_by")
+    .eq("tenant_id", tenantId)
+    .eq("status", "cancelled")
+    .gte("cancelled_at", bangkokTodayStartIso())
+    .order("cancelled_at", { ascending: false });
+  if (!rows || rows.length === 0) return [];
+  const names = await memberNames(
+    tenantId,
+    rows.flatMap((r) => [r.cancelled_by, r.cancelled_approved_by])
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    queueNumber: r.queue_number,
+    customerLabel: r.customer_label,
+    reason: r.cancel_reason,
+    cancelledAt: r.cancelled_at ?? "",
+    cancelledByName: r.cancelled_by ? (names.get(r.cancelled_by) ?? null) : null,
+    approvedByName: r.cancelled_approved_by ? (names.get(r.cancelled_approved_by) ?? null) : null,
+  }));
+}
+
+export type HeldBillEvent = {
+  id: string;
+  eventType: "held" | "updated" | "items_reduced" | "paid" | "cancelled";
+  actorName: string | null;
+  createdAt: string;
+  reductions: Reduction[];
+  atPayment: boolean;
+};
+
+export async function getHeldBillHistory(tenantId: string, heldBillId: string): Promise<HeldBillEvent[]> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("held_bill_events")
+    .select("id, event_type, actor_id, detail, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("held_bill_id", heldBillId)
+    .order("created_at", { ascending: true });
+  if (!rows || rows.length === 0) return [];
+  const names = await memberNames(tenantId, rows.map((r) => r.actor_id));
+  return rows.map((r) => {
+    const detail = (r.detail ?? {}) as { reductions?: Reduction[]; at_payment?: boolean };
+    return {
+      id: r.id,
+      eventType: r.event_type as HeldBillEvent["eventType"],
+      actorName: names.get(r.actor_id) ?? null,
+      createdAt: r.created_at,
+      reductions: detail.reductions ?? [],
+      atPayment: detail.at_payment === true,
+    };
+  });
 }

@@ -7,7 +7,9 @@ import { getProfile, getActiveShift } from "@/lib/dal";
 import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
-import type { CreateOrderInput } from "@/types/app";
+import { diffReductions } from "@/lib/held-bill-diff";
+import type { CartItem, CreateOrderInput } from "@/types/app";
+import type { Json } from "@/types/database";
 
 export async function createOrder(
   data: CreateOrderInput
@@ -118,6 +120,29 @@ export async function createOrder(
     if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
   }
 
+  // 4b. Paying a held bill: it must still be open at the version the cashier loaded. Checked before
+  // any sequence number is generated so a stale/duplicate attempt burns nothing.
+  let heldBill: { id: string; queue_number: number; items: CartItem[] } | null = null;
+  if (data.heldBillId !== undefined) {
+    if (typeof data.heldBillId !== "string" || typeof data.heldBillVersion !== "number") {
+      return { error: "ข้อมูลบิลพักไม่ถูกต้อง" };
+    }
+    const { data: row } = await createAdminClient()
+      .from("held_bills")
+      .select("id, queue_number, items, status, version")
+      .eq("id", data.heldBillId)
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle();
+    if (!row || row.status !== "open" || row.version !== data.heldBillVersion) {
+      return { error: "บิลพักนี้ถูกแก้ไข ชำระ หรือยกเลิกไปแล้ว กรุณาเปิดรายการบิลพักใหม่" };
+    }
+    heldBill = {
+      id: row.id,
+      queue_number: row.queue_number,
+      items: row.items as unknown as CartItem[],
+    };
+  }
+
   // 5. Best-effort: attach the currently open shift (does not block the sale if none is open)
   const activeShift = await getActiveShift(profile.tenant_id);
 
@@ -131,16 +156,26 @@ export async function createOrder(
 
   // Daily queue number the cashier calls out — also after validation, so rejected attempts
   // don't leave gaps in the day's queue.
-  const { data: queueNumber, error: queueError } = await supabase.rpc("next_queue_number", {
-    p_tenant_id: profile.tenant_id,
-  });
-  if (queueError || typeof queueNumber !== "number") return { error: "สร้างเลขคิวไม่สำเร็จ" };
+  // A held bill keeps the queue number the customer was already given.
+  let queueNumber: number;
+  if (heldBill) {
+    queueNumber = heldBill.queue_number;
+  } else {
+    const { data: nextQueue, error: queueError } = await supabase.rpc("next_queue_number", {
+      p_tenant_id: profile.tenant_id,
+    });
+    if (queueError || typeof nextQueue !== "number") return { error: "สร้างเลขคิวไม่สำเร็จ" };
+    queueNumber = nextQueue;
+  }
 
   // 7. Insert order row. Written via the admin client only when an approval was just verified
   // above (discount_approved_by non-null) — prevent_direct_discount_approval rejects that exact
   // write from any caller except service_role, so the trigger and this client choice must be
   // changed together.
-  const insertClient = approverId !== null ? createAdminClient() : supabase;
+  // The same applies to held_bill_id (prevent_direct_held_bill_link): only service_role may link an
+  // order to a held bill, and the UNIQUE constraint on it makes a concurrent second payment fail.
+  const insertClient =
+    approverId !== null || heldBill !== null ? createAdminClient() : supabase;
   const { data: order, error: orderError } = await insertClient
     .from("orders")
     .insert({
@@ -164,10 +199,12 @@ export async function createOrder(
       customer_id: data.customerId ?? null,
       note: data.note ?? null,
       shift_id: activeShift?.id ?? null,
+      held_bill_id: heldBill?.id ?? null,
     })
     .select("id")
     .single();
 
+  if (orderError?.code === "23505" && heldBill) return { error: "บิลพักนี้ชำระไปแล้ว" };
   if (orderError || !order) return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
 
   // 8. Build order_items with snapshots
@@ -209,6 +246,41 @@ export async function createOrder(
       };
     }
     return { error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณากดยืนยันอีกครั้ง" };
+  }
+
+  // 8b. Close out the held bill. The order already exists, so this is best-effort: if it fails,
+  // the open-bills list excludes any held bill that has an order, and the UNIQUE link still blocks
+  // a second payment. Reductions made right before paying are audited here too.
+  if (heldBill) {
+    const admin = createAdminClient();
+    const reductions = diffReductions(heldBill.items, data.items);
+    const events: { held_bill_id: string; tenant_id: string; actor_id: string; event_type: string; detail: Json }[] = [];
+    if (reductions.length > 0) {
+      events.push({
+        held_bill_id: heldBill.id,
+        tenant_id: profile.tenant_id,
+        actor_id: profile.id,
+        event_type: "items_reduced",
+        detail: { reductions, at_payment: true } as unknown as Json,
+      });
+    }
+    events.push({
+      held_bill_id: heldBill.id,
+      tenant_id: profile.tenant_id,
+      actor_id: profile.id,
+      event_type: "paid",
+      detail: { order_id: order.id, order_number: orderNumber, total: toSatang(total) / 100 },
+    });
+    const { error: closeError } = await admin
+      .from("held_bills")
+      .update({ status: "paid", updated_by: profile.id, updated_at: new Date().toISOString() })
+      .eq("id", heldBill.id)
+      .eq("tenant_id", profile.tenant_id);
+    const { error: eventsError } = await admin.from("held_bill_events").insert(events);
+    if (closeError || eventsError) {
+      console.error("[createOrder] held bill close-out failed:", heldBill.id, closeError ?? eventsError);
+    }
+    revalidatePath("/pos");
   }
 
   // 9. Deduct stock (best-effort — don't block on failure)

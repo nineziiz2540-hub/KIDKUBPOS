@@ -115,7 +115,15 @@ export type Database = {
           id?: string
           tenant_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "held_bill_events_held_bill_id_fkey"
+            columns: ["held_bill_id"]
+            isOneToOne: false
+            referencedRelation: "held_bills"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       held_bills: {
         Row: {
@@ -187,7 +195,22 @@ export type Database = {
           updated_by?: string | null
           version?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "held_bills_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "held_bills_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inventory_transactions: {
         Row: {

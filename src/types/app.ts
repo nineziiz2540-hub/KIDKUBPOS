@@ -31,6 +31,9 @@ export type CreateOrderInput = {
   approverPin?: string;
   /** Required for cash orders, must be omitted for transfer. */
   cashReceived?: number;
+  /** Set when paying a parked bill; version must match what the cashier loaded. */
+  heldBillId?: string;
+  heldBillVersion?: number;
 };
 
 export type ProductCost = {
