@@ -19,6 +19,7 @@ type OrderItem = {
 type OrderDetail = {
   id: string;
   order_number: string | null;
+  queue_number: number | null;
   payment_method: string;
   status: string;
   subtotal: number;
@@ -58,7 +59,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)"
+      "id, order_number, queue_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -79,6 +80,11 @@ export default async function OrderDetailPage({ params }: Props) {
         <div>
           <h1 className="text-2xl font-bold text-sidebar font-mono">
             {order.order_number ?? `#${order.id.slice(0, 8).toUpperCase()}`}
+            {order.queue_number !== null && (
+              <span className="ml-3 align-middle font-sans text-base font-semibold bg-accent/10 text-accent rounded-full px-3 py-1">
+                คิว {order.queue_number}
+              </span>
+            )}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {new Date(order.created_at).toLocaleString("th-TH", {

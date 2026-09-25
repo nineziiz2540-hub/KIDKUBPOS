@@ -14,7 +14,13 @@ export async function createOrder(
 ): Promise<
   // mayHaveSaved: the sale may already be recorded, so the UI must not offer a one-tap retry.
   | { error: string; mayHaveSaved?: true }
-  | { orderId: string; orderNumber: string; cashReceived: number | null; changeAmount: number | null }
+  | {
+      orderId: string;
+      orderNumber: string;
+      queueNumber: number;
+      cashReceived: number | null;
+      changeAmount: number | null;
+    }
 > {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
@@ -123,6 +129,13 @@ export async function createOrder(
   );
   if (seqError || !orderNumber) return { error: "สร้างเลขออเดอร์ไม่สำเร็จ" };
 
+  // Daily queue number the cashier calls out — also after validation, so rejected attempts
+  // don't leave gaps in the day's queue.
+  const { data: queueNumber, error: queueError } = await supabase.rpc("next_queue_number", {
+    p_tenant_id: profile.tenant_id,
+  });
+  if (queueError || typeof queueNumber !== "number") return { error: "สร้างเลขคิวไม่สำเร็จ" };
+
   // 7. Insert order row. Written via the admin client only when an approval was just verified
   // above (discount_approved_by non-null) — prevent_direct_discount_approval rejects that exact
   // write from any caller except service_role, so the trigger and this client choice must be
@@ -147,7 +160,7 @@ export async function createOrder(
       discount_approved_by: approverId,
       order_number: orderNumber,
       order_type: data.orderType,
-      table_number: data.tableNumber ?? null,
+      queue_number: queueNumber,
       customer_id: data.customerId ?? null,
       note: data.note ?? null,
       shift_id: activeShift?.id ?? null,
@@ -210,7 +223,7 @@ export async function createOrder(
   }
 
   revalidatePath("/orders");
-  return { orderId: order.id, orderNumber, cashReceived, changeAmount };
+  return { orderId: order.id, orderNumber, queueNumber, cashReceived, changeAmount };
 }
 
 export type VoidOrderState = { error?: string; success?: boolean } | undefined;

@@ -5,7 +5,6 @@ import { Percent, Trash2, UserRound, X } from "lucide-react";
 import type { CartItem } from "@/types/app";
 import type { DiscountType } from "@/lib/discount";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/ui/pin-pad";
 import { MemberModal } from "./member-modal";
@@ -32,8 +31,6 @@ type Props = {
   onClear: () => void;
   orderType: OrderType;
   onOrderTypeChange: (type: OrderType) => void;
-  tableNumber: string;
-  onTableNumberChange: (value: string) => void;
   paymentMethod: PaymentMethod;
   onPaymentChange: (method: PaymentMethod) => void;
   customerId: string | null;
@@ -59,6 +56,7 @@ type Props = {
   pending: boolean;
   error: string | null;
   lastOrderNumber: string | null;
+  lastQueueNumber: number | null;
   lastCashTender: { received: number; change: number } | null;
   onCheckout: () => void;
 };
@@ -71,8 +69,6 @@ export function SmartCart({
   onClear,
   orderType,
   onOrderTypeChange,
-  tableNumber,
-  onTableNumberChange,
   paymentMethod,
   onPaymentChange,
   customerId,
@@ -93,6 +89,7 @@ export function SmartCart({
   pending,
   error,
   lastOrderNumber,
+  lastQueueNumber,
   lastCashTender,
   onCheckout,
 }: Props) {
@@ -147,6 +144,14 @@ export function SmartCart({
       <div className="flex-1 overflow-y-auto divide-y divide-border">
         {cartItems.length === 0 ? (
           <div className="py-10 text-center">
+            {lastOrderNumber && lastQueueNumber !== null && (
+              <div className="mb-2">
+                <p className="text-sm font-medium text-muted-foreground">คิว</p>
+                <p className="text-5xl font-bold text-accent tabular-nums leading-none">
+                  {lastQueueNumber}
+                </p>
+              </div>
+            )}
             {lastOrderNumber && (
               <p className="text-base font-semibold text-sidebar mb-2">
                 ออเดอร์ {lastOrderNumber} สำเร็จ ✓
@@ -233,7 +238,7 @@ export function SmartCart({
 
       {/* Footer */}
       <div className="border-t px-4 py-3 space-y-2.5 shrink-0">
-        {/* Order type + table */}
+        {/* Order type */}
         <div className="flex gap-2">
           {(["dine_in", "take_away"] as const).map((type) => (
             <button
@@ -245,17 +250,6 @@ export function SmartCart({
               {type === "dine_in" ? "ทานที่ร้าน" : "Take Away"}
             </button>
           ))}
-          {orderType === "dine_in" && (
-            <Input
-              type="text"
-              inputMode="numeric"
-              placeholder="โต๊ะ"
-              aria-label="หมายเลขโต๊ะ"
-              value={tableNumber}
-              onChange={(e) => onTableNumberChange(e.target.value)}
-              className="h-12 w-20 shrink-0 text-center text-base md:text-base"
-            />
-          )}
         </div>
 
         {/* Member + discount */}

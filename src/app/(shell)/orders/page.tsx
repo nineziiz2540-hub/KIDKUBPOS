@@ -10,6 +10,7 @@ type FilterValue = "all" | "cash" | "transfer" | "cancelled" | "refunded";
 type OrderRow = {
   id: string;
   order_number: string | null;
+  queue_number: number | null;
   payment_method: string;
   status: string;
   total: number;
@@ -35,7 +36,7 @@ export default async function OrdersPage({ searchParams }: Props) {
   const supabase = await createClient();
   const baseQuery = supabase
     .from("orders")
-    .select("id, order_number, payment_method, status, total, created_at")
+    .select("id, order_number, queue_number, payment_method, status, total, created_at")
     .eq("tenant_id", profile.tenant_id)
     .order("created_at", { ascending: false });
 
@@ -75,8 +76,13 @@ export default async function OrdersPage({ searchParams }: Props) {
               className="flex items-center gap-4 px-4 py-3 hover:bg-surface transition-colors"
             >
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-sidebar text-sm font-mono">
+                <p className="flex items-center gap-2 font-medium text-sidebar text-sm font-mono">
                   {order.order_number ?? `#${order.id.slice(0, 8).toUpperCase()}`}
+                  {order.queue_number !== null && (
+                    <span className="font-sans text-xs font-semibold bg-accent/10 text-accent rounded-full px-2 py-0.5">
+                      คิว {order.queue_number}
+                    </span>
+                  )}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {new Date(order.created_at).toLocaleString("th-TH", {

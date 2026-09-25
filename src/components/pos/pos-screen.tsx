@@ -40,7 +40,6 @@ export function PosScreen({
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
-  const [tableNumber, setTableNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [discountType, setDiscountType] = useState<DiscountType | null>(null);
@@ -51,6 +50,7 @@ export function PosScreen({
   const [pinAttempts, setPinAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
+  const [lastQueueNumber, setLastQueueNumber] = useState<number | null>(null);
   const [lastCashTender, setLastCashTender] = useState<{ received: number; change: number } | null>(
     null
   );
@@ -213,9 +213,9 @@ export function PosScreen({
     setCartItems([]);
     setError(null);
     setLastOrderNumber(null);
+    setLastQueueNumber(null);
     setLastCashTender(null);
     setCustomerId(null);
-    setTableNumber("");
     resetDiscount();
   }
 
@@ -231,6 +231,7 @@ export function PosScreen({
     submittingRef.current = true;
     setError(null);
     setLastOrderNumber(null);
+    setLastQueueNumber(null);
     setLastCashTender(null);
     startCheckout(async () => {
       let result: Awaited<ReturnType<typeof createOrder>>;
@@ -239,7 +240,6 @@ export function PosScreen({
           items: cartItems,
           paymentMethod,
           orderType,
-          tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
           customerId: customerId ?? undefined,
           discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
           discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
@@ -270,14 +270,14 @@ export function PosScreen({
         }
       } else {
         setLastOrderNumber(result.orderNumber);
+        setLastQueueNumber(result.queueNumber);
         setLastCashTender(
           result.cashReceived !== null && result.changeAmount !== null
             ? { received: result.cashReceived, change: result.changeAmount }
             : null
         );
         setCartItems([]);
-        setTableNumber("");
-        setCustomerId(null);
+            setCustomerId(null);
         resetDiscount();
       }
       onSettled?.(
@@ -350,8 +350,6 @@ export function PosScreen({
             onClear={clearCart}
             orderType={orderType}
             onOrderTypeChange={setOrderType}
-            tableNumber={tableNumber}
-            onTableNumberChange={setTableNumber}
             paymentMethod={paymentMethod}
             onPaymentChange={setPaymentMethod}
             customerId={customerId}
@@ -372,6 +370,7 @@ export function PosScreen({
             pending={checkoutPending}
             error={error}
             lastOrderNumber={lastOrderNumber}
+            lastQueueNumber={lastQueueNumber}
             lastCashTender={lastCashTender}
             onCheckout={handleCheckout}
           />
@@ -413,8 +412,6 @@ export function PosScreen({
                 onClear={clearCart}
                 orderType={orderType}
                 onOrderTypeChange={setOrderType}
-                tableNumber={tableNumber}
-                onTableNumberChange={setTableNumber}
                 paymentMethod={paymentMethod}
                 onPaymentChange={setPaymentMethod}
                 customerId={customerId}
@@ -435,6 +432,7 @@ export function PosScreen({
                 pending={checkoutPending}
                 error={error}
                 lastOrderNumber={lastOrderNumber}
+                lastQueueNumber={lastQueueNumber}
                 lastCashTender={lastCashTender}
                 onCheckout={handleCheckout}
               />
