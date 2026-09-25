@@ -343,6 +343,7 @@ export type Database = {
           order_number: string | null
           order_type: string
           payment_method: string
+          queue_number: number | null
           refund_method: string | null
           refund_reason: string | null
           refund_shift_id: string | null
@@ -377,6 +378,7 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          queue_number?: number | null
           refund_method?: string | null
           refund_reason?: string | null
           refund_shift_id?: string | null
@@ -411,6 +413,7 @@ export type Database = {
           order_number?: string | null
           order_type?: string
           payment_method?: string
+          queue_number?: number | null
           refund_method?: string | null
           refund_reason?: string | null
           refund_shift_id?: string | null
@@ -804,6 +807,32 @@ export type Database = {
           },
         ]
       }
+      tenant_queue_counters: {
+        Row: {
+          business_date: string
+          last_number: number
+          tenant_id: string
+        }
+        Insert: {
+          business_date: string
+          last_number?: number
+          tenant_id: string
+        }
+        Update: {
+          business_date?: string
+          last_number?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_queue_counters_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenants: {
         Row: {
           created_at: string
@@ -864,6 +893,7 @@ export type Database = {
         Returns: undefined
       }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
+      next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
       restock_for_voided_order: {
         Args: { p_order_id: string }
         Returns: undefined
