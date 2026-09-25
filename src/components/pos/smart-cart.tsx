@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/ui/pin-pad";
 import { MemberModal } from "./member-modal";
+import { DiscountModal } from "./discount-modal";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -36,9 +37,13 @@ type Props = {
   customerId: string | null;
   onCustomerIdChange: (id: string | null) => void;
   discountType: DiscountType | null;
-  onDiscountTypeChange: (type: DiscountType | null) => void;
   discountValue: string;
-  onDiscountValueChange: (value: string) => void;
+  onApplyDiscount: (
+    type: DiscountType,
+    value: string,
+    reason: string,
+    pin: string | null
+  ) => void;
   discountReason: string;
   onDiscountReasonChange: (value: string) => void;
   subtotal: number;
@@ -70,9 +75,8 @@ export function SmartCart({
   customerId,
   onCustomerIdChange,
   discountType,
-  onDiscountTypeChange,
   discountValue,
-  onDiscountValueChange,
+  onApplyDiscount,
   discountReason,
   onDiscountReasonChange,
   subtotal,
@@ -93,6 +97,7 @@ export function SmartCart({
   const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   function handleClearCustomer() {
@@ -268,7 +273,7 @@ export function SmartCart({
           {discountType === null && (
             <button
               type="button"
-              onClick={() => onDiscountTypeChange("percent")}
+              onClick={() => setShowDiscountModal(true)}
               disabled={cartItems.length === 0}
               className={SECONDARY_CLS}
             >
@@ -278,47 +283,33 @@ export function SmartCart({
           )}
         </div>
 
-        {/* Discount editor */}
+        {/* Applied discount — edited in DiscountModal, not inline */}
         {discountType !== null && (
-          <div className="space-y-1.5">
-            <div className="flex gap-2">
+          <div className="space-y-1">
+            <div className="flex items-center h-11 rounded-lg border border-destructive/30 bg-destructive/5 pl-3 pr-1 gap-2">
+              <Percent size={18} className="text-destructive shrink-0" />
+              <span className="flex-1 min-w-0 truncate text-base font-medium text-sidebar">
+                ส่วนลด {discountType === "percent" ? `${discountValue}%` : `฿${discountValue}`}
+              </span>
               <button
                 type="button"
-                onClick={() => onDiscountTypeChange("percent")}
-                className={choiceCls(discountType === "percent") + " max-w-14"}
+                onClick={() => setShowDiscountModal(true)}
+                className="h-9 px-3 shrink-0 rounded-md text-sm font-semibold text-accent hover:bg-accent/10"
               >
-                %
+                แก้ไข
               </button>
-              <button
-                type="button"
-                onClick={() => onDiscountTypeChange("amount")}
-                className={choiceCls(discountType === "amount") + " max-w-14"}
-              >
-                ฿
-              </button>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                value={discountValue}
-                onChange={(e) => onDiscountValueChange(e.target.value)}
-                placeholder={discountType === "percent" ? "% ส่วนลด" : "บาท"}
-                className="h-12 text-base md:text-base flex-1"
-              />
               <button
                 type="button"
                 onClick={onCancelDiscount}
                 aria-label="ลบส่วนลด"
-                className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20"
+                className="w-9 h-9 shrink-0 rounded-md text-destructive hover:bg-destructive/10 flex items-center justify-center"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
             {discountExceedsSubtotal && (
               <p className="text-sm text-destructive">
-                {discountType === "percent"
-                  ? "ส่วนลดต้องไม่เกิน 100%"
-                  : "ส่วนลดมากกว่ายอดรวม"}
+                ส่วนลดมากกว่ายอดรวม กรุณาแก้ไขส่วนลด
               </p>
             )}
           </div>
@@ -414,6 +405,20 @@ export function SmartCart({
         </div>
       )}
 
+      {showDiscountModal && (
+        <DiscountModal
+          subtotal={subtotal}
+          initialType={discountType}
+          initialValue={discountValue}
+          initialReason={discountReason}
+          onApply={(type, value, reason, pin) => {
+            onApplyDiscount(type, value, reason, pin);
+            setShowDiscountModal(false);
+          }}
+          onCancel={() => setShowDiscountModal(false)}
+        />
+      )}
+
       {showMemberModal && (
         <MemberModal
           onLinked={(id, phone) => {
@@ -426,7 +431,7 @@ export function SmartCart({
       )}
 
       {/* Discount approval modal */}
-      {requiresApproval && !hasApproverPin && !discountExceedsSubtotal && (
+      {requiresApproval && !hasApproverPin && !discountExceedsSubtotal && !showDiscountModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
             <h2 className="text-lg font-bold text-sidebar text-center">

@@ -99,6 +99,28 @@ export function PosScreen({
     setPinAttempts(0);
   }
 
+  // Commits a discount from DiscountModal in one step. The approval is bound to the amount computed
+  // here from the *new* values — handleApproverPinCapture's discountAmount would still be the old
+  // render's value at this point — so hasApproverPin only holds for exactly this discount, and any
+  // later cart change that moves the amount drops back to the cart's re-approval dialog.
+  function applyDiscount(
+    type: DiscountType,
+    value: string,
+    reason: string,
+    pin: string | null
+  ) {
+    setDiscountType(type);
+    setDiscountValue(value);
+    setDiscountReason(reason);
+    if (pin !== null) {
+      setApproverPin(pin);
+      setApprovedForAmount(computeDiscount(subtotal, type, Number(value)).discountAmount);
+    } else {
+      setApproverPin(null);
+      setApprovedForAmount(null);
+    }
+  }
+
   function handleApproverPinCapture(pin: string) {
     setApproverPin(pin);
     setApprovedForAmount(discountAmount);
@@ -315,9 +337,8 @@ export function PosScreen({
             customerId={customerId}
             onCustomerIdChange={setCustomerId}
             discountType={discountType}
-            onDiscountTypeChange={setDiscountType}
             discountValue={discountValue}
-            onDiscountValueChange={setDiscountValue}
+            onApplyDiscount={applyDiscount}
             discountReason={discountReason}
             onDiscountReasonChange={setDiscountReason}
             subtotal={subtotal}
@@ -378,9 +399,8 @@ export function PosScreen({
                 customerId={customerId}
                 onCustomerIdChange={setCustomerId}
                 discountType={discountType}
-                onDiscountTypeChange={setDiscountType}
                 discountValue={discountValue}
-                onDiscountValueChange={setDiscountValue}
+                onApplyDiscount={applyDiscount}
                 discountReason={discountReason}
                 onDiscountReasonChange={setDiscountReason}
                 subtotal={subtotal}
