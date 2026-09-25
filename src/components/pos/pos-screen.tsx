@@ -434,8 +434,33 @@ export function PosScreen({
     }
   }
 
+  // A held bill stores prices as of when it was parked. If the menu price changed since, paying it
+  // as-is would be rejected by the server's re-pricing — and a refresh wouldn't help, because the
+  // old price lives in the held bill itself. So lines are re-priced from the current menu on load;
+  // anything no longer on sale is left untouched for the server to reject with a clear message.
+  function repriceFromMenu(items: CartItem[]): CartItem[] {
+    return items.map((item) => {
+      const product = products.find((p) => p.id === item.productId);
+      if (!product) return item;
+      const selectedModifiers = item.selectedModifiers.map((m) => {
+        const option = allModifiers
+          .find((mod) => mod.id === m.modifierId)
+          ?.options.find((o) => o.id === m.optionId);
+        return option ? { ...m, priceDelta: option.priceDelta } : m;
+      });
+      const unit = product.price + selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
+      return {
+        ...item,
+        basePrice: product.price,
+        selectedModifiers,
+        totalPrice: unit * item.quantity,
+      };
+    });
+  }
+
   function resumeHeld(bill: HeldBillSummary) {
-    setCartItems(bill.items);
+    const items = repriceFromMenu(bill.items);
+    setCartItems(items);
     setOrderType(bill.orderType);
     setCustomer(bill.customerId ? { id: bill.customerId, phone: bill.customerPhone } : null);
     // The discount comes back without its approval — an over-threshold one is re-approved here.
@@ -451,7 +476,8 @@ export function PosScreen({
       queueNumber: bill.queueNumber,
       customerLabel: bill.customerLabel,
     });
-    setLoadedSnapshot(JSON.stringify(bill.items));
+    // Snapshot the re-priced items so a price refresh alone doesn't count as an unsaved edit.
+    setLoadedSnapshot(JSON.stringify(items));
     setError(null);
     setLastOrderNumber(null);
     setLastQueueNumber(null);
@@ -639,7 +665,16 @@ export function PosScreen({
       )}
       {showHeldPanel && (
         <HeldBillsPanel
-          bills={heldBills}
+          bills={heldBills.map((bill) => {
+            // Show what the cashier will actually charge: the same current-menu prices resumeHeld uses.
+            const items = repriceFromMenu(bill.items);
+            const sub = items.reduce((s, i) => s + i.totalPrice, 0);
+            return {
+              ...bill,
+              items,
+              total: computeDiscount(sub, bill.discountType, bill.discountValue ?? 0).total,
+            };
+          })}
           cancelledToday={cancelledHeldToday}
           activeHeldId={activeHeld?.id ?? null}
           cartBusy={cartBusy}
