@@ -16,6 +16,7 @@ export type CartItem = {
   quantity: number;
   selectedModifiers: SelectedModifier[];
   totalPrice: number; // (basePrice + sum(priceDelta)) * quantity
+  note: string | null; // per-cup note, see src/lib/notes.ts
 };
 
 export type CreateOrderInput = {

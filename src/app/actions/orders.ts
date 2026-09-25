@@ -167,6 +167,7 @@ export async function createOrder(
     subtotal: line.lineTotal,
     category_name: line.categoryName,
     modifiers_snapshot: line.modifiersSnapshot,
+    note: line.note,
   }));
 
   const { error: itemsError } = await supabase

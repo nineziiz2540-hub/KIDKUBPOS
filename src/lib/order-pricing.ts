@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { CartItem } from "@/types/app";
 import { toSatang } from "@/lib/cash";
+import { normalizeNote } from "@/lib/notes";
 
 const MAX_LINES = 100;
 const MAX_QTY = 999;
@@ -15,6 +16,7 @@ export type PricedLine = {
   unitPrice: number;
   lineTotal: number;
   modifiersSnapshot: { group: string; option: string; priceDelta: number }[] | null;
+  note: string | null;
 };
 
 const STALE = "ราคาหรือเมนูมีการเปลี่ยนแปลง กรุณารีเฟรชหน้า POS แล้วลองใหม่";
@@ -106,6 +108,8 @@ export async function priceCartItems(
   let subtotalSatang = 0;
 
   for (const item of items) {
+    const normalizedNote = normalizeNote(item.note);
+    if (!normalizedNote.ok) return { error: "หมายเหตุไม่ถูกต้อง (ไม่เกิน 200 ตัวอักษร)" };
     const product = productMap.get(item.productId);
     if (!product || !product.is_active) return { error: STALE };
 
@@ -151,6 +155,7 @@ export async function priceCartItems(
       unitPrice: unitSatang / 100,
       lineTotal: lineSatang / 100,
       modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
+      note: normalizedNote.note,
     });
   }
 

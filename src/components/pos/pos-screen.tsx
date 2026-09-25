@@ -159,6 +159,7 @@ export function PosScreen({
           basePrice: product.price,
           quantity: 1,
           selectedModifiers: [],
+          note: null,
           totalPrice: product.price,
         },
       ];

@@ -74,6 +74,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
       quantity: 1,
       selectedModifiers,
       totalPrice: unitPrice,
+      note: null,
     });
   }
 
