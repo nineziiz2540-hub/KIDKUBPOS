@@ -325,6 +325,8 @@ export type Database = {
           cancelled_approved_by: string | null
           cancelled_at: string | null
           cancelled_by: string | null
+          cash_received: number | null
+          change_amount: number | null
           created_at: string
           created_by: string
           customer_id: string | null
@@ -357,6 +359,8 @@ export type Database = {
           cancelled_approved_by?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          cash_received?: number | null
+          change_amount?: number | null
           created_at?: string
           created_by: string
           customer_id?: string | null
@@ -389,6 +393,8 @@ export type Database = {
           cancelled_approved_by?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          cash_received?: number | null
+          change_amount?: number | null
           created_at?: string
           created_by?: string
           customer_id?: string | null

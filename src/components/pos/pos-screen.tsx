@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useRef } from "react";
 import { createOrder } from "@/app/actions/orders";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type {
@@ -13,6 +13,7 @@ import { ProductGrid } from "./product-grid";
 import { ModifierModal } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
 import { QrPaymentModal } from "./qr-payment-modal";
+import { CashPaymentModal } from "./cash-payment-modal";
 
 const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 
@@ -49,9 +50,16 @@ export function PosScreen({
   const [pinAttempts, setPinAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
+  const [lastCashTender, setLastCashTender] = useState<{ received: number; change: number } | null>(
+    null
+  );
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showCashModal, setShowCashModal] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [checkoutPending, startCheckout] = useTransition();
+  // Set synchronously on the first confirm tap, so a fast double-tap can't slip a second
+  // createOrder in before checkoutPending re-renders the confirm button as disabled.
+  const submittingRef = useRef(false);
 
   const productsWithModifiers = useMemo(
     () => new Set(Object.keys(productModifierRecord)),
@@ -163,30 +171,47 @@ export function PosScreen({
     setCartItems([]);
     setError(null);
     setLastOrderNumber(null);
+    setLastCashTender(null);
     setCustomerId(null);
     setTableNumber("");
     resetDiscount();
   }
 
-  function submitOrder(onSettled?: () => void) {
+  function submitOrder(
+    cashReceived: number | undefined,
+    onSettled?: (errorMessage: string | null) => void
+  ) {
     // Re-checked here, not just in handleCheckout: this is the single write path (also reached
     // via the QR/transfer confirm flow), so the approval invariant must hold regardless of how
     // we got here, not just at the moment the "ชำระ" button was tapped.
     if (requiresApproval && !hasApproverPin) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     setLastOrderNumber(null);
+    setLastCashTender(null);
     startCheckout(async () => {
-      const result = await createOrder({
-        items: cartItems,
-        paymentMethod,
-        orderType,
-        tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
-        customerId: customerId ?? undefined,
-        discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
-        discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
-        discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
-        approverPin: approverPin ?? undefined,
-      });
+      let result: Awaited<ReturnType<typeof createOrder>>;
+      try {
+        result = await createOrder({
+          items: cartItems,
+          paymentMethod,
+          orderType,
+          tableNumber: tableNumber.trim() !== "" ? tableNumber.trim() : undefined,
+          customerId: customerId ?? undefined,
+          discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
+          discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
+          discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
+          approverPin: approverPin ?? undefined,
+          cashReceived,
+        });
+      } catch {
+        // A dropped connection doesn't mean the sale failed — the server may have saved it
+        // before the response was lost, so warn against blindly re-charging the customer.
+        result = { error: "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบหน้ารายการบิลก่อนกดชำระซ้ำ" };
+      } finally {
+        submittingRef.current = false;
+      }
       if ("error" in result) {
         setError(result.error);
         if (result.error === "PIN ไม่ถูกต้อง" && requiresApproval) {
@@ -200,12 +225,17 @@ export function PosScreen({
         }
       } else {
         setLastOrderNumber(result.orderNumber);
+        setLastCashTender(
+          result.cashReceived !== null && result.changeAmount !== null
+            ? { received: result.cashReceived, change: result.changeAmount }
+            : null
+        );
         setCartItems([]);
         setTableNumber("");
         setCustomerId(null);
         resetDiscount();
       }
-      onSettled?.();
+      onSettled?.("error" in result ? result.error : null);
     });
   }
 
@@ -217,11 +247,24 @@ export function PosScreen({
       setShowQrModal(true);
       return;
     }
-    submitOrder();
+    setError(null);
+    setShowMobileCart(false);
+    setShowCashModal(true);
   }
 
   function handleQrConfirm() {
-    submitOrder(() => setShowQrModal(false));
+    submitOrder(undefined, () => setShowQrModal(false));
+  }
+
+  function handleCashConfirm(cashReceived: number) {
+    submitOrder(cashReceived, (errorMessage) => {
+      // On most failures the modal stays open showing the error, so the cashier can retry
+      // without re-typing the amount. A rejected discount PIN is the exception: it has to be
+      // re-entered in the cart's approval dialog, which this modal would otherwise cover.
+      if (errorMessage === null || errorMessage === "PIN ไม่ถูกต้อง") {
+        setShowCashModal(false);
+      }
+    });
   }
 
   const pendingProductModifiers: ModifierWithOptions[] = pendingProduct
@@ -277,6 +320,7 @@ export function PosScreen({
             pending={checkoutPending}
             error={error}
             lastOrderNumber={lastOrderNumber}
+            lastCashTender={lastCashTender}
             onCheckout={handleCheckout}
           />
         </div>
@@ -339,6 +383,7 @@ export function PosScreen({
                 pending={checkoutPending}
                 error={error}
                 lastOrderNumber={lastOrderNumber}
+                lastCashTender={lastCashTender}
                 onCheckout={handleCheckout}
               />
             </div>
@@ -358,6 +403,18 @@ export function PosScreen({
           total={total}
           onConfirm={handleQrConfirm}
           onCancel={() => setShowQrModal(false)}
+        />
+      )}
+      {showCashModal && (
+        <CashPaymentModal
+          total={total}
+          pending={checkoutPending}
+          error={error}
+          onConfirm={handleCashConfirm}
+          onCancel={() => {
+            setError(null);
+            setShowCashModal(false);
+          }}
         />
       )}
     </div>

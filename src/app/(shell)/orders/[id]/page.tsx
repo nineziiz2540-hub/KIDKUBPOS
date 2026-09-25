@@ -25,6 +25,8 @@ type OrderDetail = {
   discount_amount: number;
   discount_reason: string | null;
   total: number;
+  cash_received: number | null;
+  change_amount: number | null;
   note: string | null;
   cancelled_at: string | null;
   cancel_reason: string | null;
@@ -54,7 +56,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: order } = (await supabase
     .from("orders")
     .select(
-      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
+      "id, order_number, payment_method, status, subtotal, discount_type, discount_value, discount_amount, discount_reason, total, cash_received, change_amount, note, cancelled_at, cancel_reason, refunded_at, refund_reason, refund_method, created_at, order_items(id, product_name, unit_price, quantity, subtotal)"
     )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
@@ -224,6 +226,22 @@ export default async function OrderDetailPage({ params }: Props) {
             ฿{Number(order.total).toFixed(2)}
           </span>
         </div>
+        {order.cash_received !== null && order.change_amount !== null && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">รับเงิน</span>
+              <span className="font-medium text-sidebar tabular-nums">
+                ฿{Number(order.cash_received).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">เงินทอน</span>
+              <span className="font-medium text-sidebar tabular-nums">
+                ฿{Number(order.change_amount).toFixed(2)}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       {order.status === "completed" && (

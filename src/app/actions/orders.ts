@@ -5,11 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
 import { computeDiscount } from "@/lib/discount";
+import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import type { CreateOrderInput } from "@/types/app";
 
 export async function createOrder(
   data: CreateOrderInput
-): Promise<{ error: string } | { orderId: string; orderNumber: string }> {
+): Promise<
+  | { error: string }
+  | { orderId: string; orderNumber: string; cashReceived: number | null; changeAmount: number | null }
+> {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
   if (data.items.length === 0) return { error: "ไม่มีสินค้าในตะกร้า" };
@@ -70,6 +74,29 @@ export async function createOrder(
 
   const total = subtotal - discountAmount;
 
+  // 3b. Validate cash tendered against the server-computed total — never trust a change amount
+  // from the client. orders_cash_tendered_check re-enforces the same arithmetic in the database.
+  let cashReceived: number | null = null;
+  let changeAmount: number | null = null;
+  if (data.paymentMethod === "cash") {
+    if (typeof data.cashReceived !== "number") {
+      // The only way the real UI reaches this is a POS tab still running pre-update code (it
+      // has no cash modal), so the message tells the cashier how to get unstuck.
+      return { error: "กรุณารีเฟรชหน้า POS แล้วลองใหม่ (ระบบเพิ่งอัปเดตการรับเงินสด)" };
+    }
+    if (!Number.isFinite(data.cashReceived) || data.cashReceived > MAX_CASH_RECEIVED) {
+      return { error: "จำนวนเงินที่รับมาไม่ถูกต้อง" };
+    }
+    const change = computeChange(total, data.cashReceived);
+    if (change === null) {
+      return { error: "จำนวนเงินที่รับมาน้อยกว่ายอดชำระ" };
+    }
+    cashReceived = toSatang(data.cashReceived) / 100;
+    changeAmount = change;
+  } else if (data.cashReceived !== undefined) {
+    return { error: "ข้อมูลการชำระเงินไม่ถูกต้อง" };
+  }
+
   // 4. PIN-verify a Manager/Owner approver when the discount crosses the threshold
   let approverId: string | null = null;
   if (requiresApproval) {
@@ -118,7 +145,11 @@ export async function createOrder(
       created_by: profile.id,
       payment_method: data.paymentMethod,
       subtotal,
-      total,
+      // Pre-rounded to satang so the stored total is exactly the one change was computed from
+      // (the column is numeric(10,2) and would round it the same way anyway).
+      total: toSatang(total) / 100,
+      cash_received: cashReceived,
+      change_amount: changeAmount,
       discount_type: discountType,
       discount_value: discountValue,
       discount_amount: discountAmount,
@@ -172,7 +203,7 @@ export async function createOrder(
   }
 
   revalidatePath("/orders");
-  return { orderId: order.id, orderNumber };
+  return { orderId: order.id, orderNumber, cashReceived, changeAmount };
 }
 
 export type VoidOrderState = { error?: string; success?: boolean } | undefined;

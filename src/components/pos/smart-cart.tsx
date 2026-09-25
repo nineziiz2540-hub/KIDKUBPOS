@@ -47,6 +47,7 @@ type Props = {
   pending: boolean;
   error: string | null;
   lastOrderNumber: string | null;
+  lastCashTender: { received: number; change: number } | null;
   onCheckout: () => void;
 };
 
@@ -80,6 +81,7 @@ export function SmartCart({
   pending,
   error,
   lastOrderNumber,
+  lastCashTender,
   onCheckout,
 }: Props) {
   const reasonId = useId();
@@ -144,6 +146,16 @@ export function SmartCart({
               <p className="text-sm font-semibold text-sidebar mb-1">
                 ออเดอร์ {lastOrderNumber} สำเร็จ ✓
               </p>
+            )}
+            {lastOrderNumber && lastCashTender && (
+              <div className="mx-auto mb-3 w-fit rounded-lg bg-success/10 px-4 py-2 text-success">
+                <p className="text-xs tabular-nums">
+                  รับเงิน ฿{lastCashTender.received.toFixed(2)}
+                </p>
+                <p className="text-xl font-bold tabular-nums">
+                  ทอน ฿{lastCashTender.change.toFixed(2)}
+                </p>
+              </div>
             )}
             <p className="text-muted-foreground text-sm">คลิกสินค้าเพื่อเพิ่ม</p>
           </div>

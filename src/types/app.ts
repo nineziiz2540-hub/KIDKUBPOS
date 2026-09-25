@@ -29,6 +29,8 @@ export type CreateOrderInput = {
   discountValue?: number;
   discountReason?: string;
   approverPin?: string;
+  /** Required for cash orders, must be omitted for transfer. */
+  cashReceived?: number;
 };
 
 export type ProductCost = {
