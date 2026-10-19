@@ -12,7 +12,8 @@ const JPEG_QUALITY = 0.85;
 export async function resizeImageForUpload(file: File, maxSide = PRODUCT_IMAGE_MAX_SIDE): Promise<File> {
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file);
+    // Explicit: camera photos store portrait as EXIF rotation, not as rotated pixels.
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
     return file;
   }

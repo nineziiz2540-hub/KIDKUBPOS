@@ -154,7 +154,7 @@ export async function removeProduct(
   const supabase = await createClient();
   const product = await loadOwnProduct(supabase, profile.tenant_id, productId);
   if (!product) return { error: NOT_FOUND };
-  if (product.archived_at !== null) return { error: "เมนูนี้ถูกเก็บไว้แล้ว" };
+  if (product.archived_at !== null) return { outcome: "archived" };
 
   // An open held bill would reopen with a product that no longer exists on the POS.
   const { data: held, error: heldError } = await supabase
@@ -194,7 +194,12 @@ export async function removeProduct(
     .eq("tenant_id", profile.tenant_id)
     .is("archived_at", null)
     .select("id");
-  if (archiveError || !archived || archived.length === 0) return { error: "ลบสินค้าไม่สำเร็จ" };
+  if (archiveError) return { error: "ลบสินค้าไม่สำเร็จ" };
+  if (!archived || archived.length === 0) {
+    // Another tab/device archived it a moment ago: the outcome the user asked for already holds.
+    const current = await loadOwnProduct(supabase, profile.tenant_id, productId);
+    if (!current?.archived_at) return { error: "ลบสินค้าไม่สำเร็จ" };
+  }
 
   revalidateMenu();
   return { outcome: "archived" };
