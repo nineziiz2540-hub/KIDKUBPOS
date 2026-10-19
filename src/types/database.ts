@@ -713,6 +713,7 @@ export type Database = {
       }
       products: {
         Row: {
+          archived_at: string | null
           category_id: string | null
           created_at: string
           description: string | null
@@ -726,6 +727,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          archived_at?: string | null
           category_id?: string | null
           created_at?: string
           description?: string | null
@@ -739,6 +741,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          archived_at?: string | null
           category_id?: string | null
           created_at?: string
           description?: string | null
@@ -1022,6 +1025,14 @@ export type Database = {
       }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
       next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
+      replace_product_modifiers: {
+        Args: { p_product_id: string; p_modifier_ids: string[] }
+        Returns: undefined
+      }
+      replace_product_recipes: {
+        Args: { p_product_id: string; p_rows: Json }
+        Returns: undefined
+      }
       restock_for_voided_order: {
         Args: { p_order_id: string }
         Returns: undefined
