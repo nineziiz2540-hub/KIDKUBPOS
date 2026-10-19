@@ -171,7 +171,13 @@ database assigns the order, and app code never computes "max + 1":**
   - On edit, if the upload fails, stay on the page with the same message. The other changes are
     already saved.
   - A new photo replaces the old one; round 1 cleanup removes the old file.
-  - No "remove photo" button. Nothing offers one today. *Builder's call.*
+  - **"ลบรูป" button** (44px, under the photo tile, shown only while a photo is set). It is
+    agreed with the user: without it a menu can never go back to "no photo".
+    - It removes the preview immediately. Nothing is deleted until "บันทึกเมนู"; "ยกเลิก" keeps
+      the photo (the unsaved-changes confirm applies).
+    - On save, `image_url` becomes null and the storage file is removed.
+    - Same rules as upload: owner/manager only; archived menus are refused.
+    - The POS falls back to the name's first letter, as it does today.
 - **Unsaved changes:**
   - Editor "ยกเลิก" with changes asks first, in an in-app dialog: "ทิ้งการแก้ไขที่ยังไม่บันทึก?".
   - Sort-mode "ยกเลิก" reverts without asking.

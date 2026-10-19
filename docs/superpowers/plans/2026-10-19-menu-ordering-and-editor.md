@@ -170,6 +170,10 @@ A shared `SortableList` (dnd-kit) drives both reorder screens. A new `MenuEditor
     - Maps RPC messages with round 1's `RPC_ERRORS`, plus `invalid_category` → "หมวดหมู่ไม่ถูกต้อง".
     - Then `revalidatePath("/products")`, `revalidatePath("/pos")`, and the product's edit path.
   - Remove `createProduct`, `updateProduct`, `updateProductRecipes` and `updateProductModifiers`, plus their now-unused imports. `ProductState` goes too if unused.
+  - `removeProductImage(productId: string): Promise<{ ok: true } | { error: string }>`, in `products.ts`.
+    - Role check; the product must exist, belong to the tenant and not be archived (round 1 messages).
+    - Update `image_url = null` (`.is("archived_at", null).select("id")`), then remove the old file found via `storagePathFromPublicUrl`, best effort.
+    - Revalidate `/products`, `/pos` and the edit path.
   - `reorderCategories(ids: string[])` and `reorderProducts(categoryId: string | null, ids: string[])`, both returning `Promise<{ ok: true } | { error: string }>`, in `menu-order.ts`. `stale_order` → "รายการมีการเปลี่ยนแปลง กรุณารีเฟรชหน้าแล้วจัดเรียงใหม่"; `forbidden` → "ไม่มีสิทธิ์ดำเนินการนี้". Revalidate `/categories`, `/products` and `/pos`.
   - `categories.ts`:
     - `createCategory` and `updateCategory` use `parseCategoryName`.
@@ -322,6 +326,7 @@ A shared `SortableList` (dnd-kit) drives both reorder screens. A new `MenuEditor
     1. High-price guard (round 1 rule: a new price ≥ 1,000 that differs from the saved price needs a second tap; inline warning).
     2. `saveMenu(productId, draft)`; on error, toast it and stay.
     3. If a new photo was picked: resize, then `uploadProductImage({ product_id: id, image })`. On failure: for a create, `router.replace("/products/<id>/edit?photo=failed")`; for an edit, stay. Both show "บันทึกเมนูแล้ว แต่อัปโหลดรูปไม่สำเร็จ กรุณาลองเพิ่มรูปอีกครั้ง".
+    3b. If the user pressed "ลบรูป" on an existing photo and picked no new one: `removeProductImage(id)`. On failure, stay on the page and show "บันทึกเมนูแล้ว แต่ลบรูปไม่สำเร็จ กรุณาลองใหม่".
     4. Success: `router.push("/products?category=<categoryId ?? 'none'>&saved=1")`.
     - Wrap the network calls with "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่".
     - Disable the save button while pending.
@@ -349,6 +354,9 @@ A shared `SortableList` (dnd-kit) drives both reorder screens. A new `MenuEditor
   - **Edit:** change category → it moves to the end of the new category.
   - **Validation:** price `8.555` → error toast, nothing saved; a 0-qty recipe → error, nothing saved, including on create (no orphan menu).
   - **Unsaved changes:** "ยกเลิก" with edits → the confirm dialog.
+  - **Remove photo:**
+    - "ลบรูป" then "ยกเลิก" (confirm discard) → the photo stays in the DB and storage.
+    - "ลบรูป" then "บันทึกเมนู" → `image_url` is null, the storage object is gone, and the POS tile shows the letter.
   - **Forced photo failure on create** (override `fetch` for the upload action only) → the menu exists, the page lands on edit with the message, and saving again doesn't duplicate.
   - **Delete a category with menus** → those menus appear under "ไม่ระบุหมวดหมู่", last.
   - **Overflow:** no horizontal overflow on any of the 4 pages (JS check: `document.documentElement.scrollWidth <= innerWidth`, plus per-card check as in the fit test).
