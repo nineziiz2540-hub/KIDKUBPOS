@@ -89,8 +89,11 @@ export function MenuEditor({
   }, [photoPreview]);
 
   const shownPhoto = photoPreview ?? (removePhoto ? null : imageUrl);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || photoFile !== null || removePhoto;
-  const listHref = `/products?category=${draft.categoryId ?? initial.categoryId ?? "none"}`;
+  // Option links are a set: unticking and re-ticking one isn't a change.
+  const comparable = (d: MenuDraft) => JSON.stringify({ ...d, modifierIds: [...d.modifierIds].sort() });
+  const dirty = comparable(draft) !== comparable(initial) || photoFile !== null || removePhoto;
+  // Cancel/discard returns to the tab the menu is actually in, not one picked but not saved.
+  const listHref = `/products?category=${initial.categoryId ?? "none"}`;
   const priceIsHigh =
     Number(draft.price) >= HIGH_PRICE_CONFIRM && draft.price.trim() !== initial.price.trim();
   const units = new Map(rawMaterials.map((m) => [m.id, m]));

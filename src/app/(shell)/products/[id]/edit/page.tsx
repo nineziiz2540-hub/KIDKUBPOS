@@ -81,10 +81,17 @@ export default async function EditMenuPage({
         categoryId: product.category_id,
         drinkType: (product.drink_type as DrinkType | null) ?? null,
         isActive: product.is_active,
-        recipes: (recipes ?? []).map((r) => ({
-          rawMaterialId: r.raw_material_id,
-          quantityUsed: String(Number(r.quantity_used)),
-        })),
+        // Same order every visit: the order materials appear in the picker (by name).
+        recipes: (recipes ?? [])
+          .map((r) => ({
+            rawMaterialId: r.raw_material_id,
+            quantityUsed: String(Number(r.quantity_used)),
+          }))
+          .sort(
+            (a, b) =>
+              rawMaterials.findIndex((m) => m.id === a.rawMaterialId) -
+              rawMaterials.findIndex((m) => m.id === b.rawMaterialId)
+          ),
         modifierIds: (links ?? []).map((l) => l.modifier_id),
       }}
       imageUrl={product.image_url}
