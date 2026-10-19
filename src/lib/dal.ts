@@ -923,6 +923,7 @@ export async function getProductsForCalculator(
     .select("id, name")
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
+    .is("archived_at", null)
     .order("name");
   return (data ?? []) as CalcProduct[];
 }

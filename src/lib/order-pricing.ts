@@ -58,7 +58,7 @@ export async function priceCartItems(
 
   const { data: products, error: productsError } = await supabase
     .from("products")
-    .select("id, name, price, is_active, categories(name)")
+    .select("id, name, price, is_active, archived_at, categories(name)")
     .eq("tenant_id", tenantId)
     .in("id", productIds);
   if (productsError) return { error: "โหลดข้อมูลสินค้าไม่สำเร็จ" };
@@ -111,7 +111,7 @@ export async function priceCartItems(
     const normalizedNote = normalizeNote(item.note);
     if (!normalizedNote.ok) return { error: "หมายเหตุไม่ถูกต้อง (ไม่เกิน 200 ตัวอักษร)" };
     const product = productMap.get(item.productId);
-    if (!product || !product.is_active) return { error: STALE };
+    if (!product || !product.is_active || product.archived_at !== null) return { error: STALE };
 
     const linked = linkedModifiers.get(product.id) ?? new Set<string>();
     const chosenPerModifier = new Map<string, number>();

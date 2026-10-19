@@ -32,6 +32,7 @@ export default async function PosPage() {
     .select("id, name, price, image_url, drink_type, category_id, categories(id, name)")
     .eq("tenant_id", profile.tenant_id)
     .eq("is_active", true)
+    .is("archived_at", null)
     .order("name")) as { data: ProductRow[] | null };
 
   const products: PosProduct[] = (productRows ?? []).map((p) => ({
