@@ -43,8 +43,10 @@ const DRINK_TYPES: { value: DrinkType | null; label: string }[] = [
 ];
 
 const LABEL = "block text-base font-medium text-sidebar mb-2";
-const FIELD =
-  "w-full h-[50px] rounded-xl border border-input bg-white px-4 text-[17px] text-sidebar focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
+// No width here: recipe rows size their select/qty inputs themselves (w-full would win over w-[92px]).
+const FIELD_BASE =
+  "h-[50px] rounded-xl border border-input bg-white text-[17px] text-sidebar focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
+const FIELD = `w-full px-4 ${FIELD_BASE}`;
 const CARD = "rounded-2xl bg-white p-5 space-y-4 min-w-0";
 const CHIP_GRID = "grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]";
 
@@ -68,6 +70,8 @@ export function MenuEditor({
   const router = useRouter();
   const toastManager = useToastManager();
   const [draft, setDraft] = useState<MenuDraft>(initial);
+  // Once a new menu is saved its id is kept, so saving again updates it instead of creating a duplicate.
+  const [savedId, setSavedId] = useState<string | null>(productId);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [removePhoto, setRemovePhoto] = useState(false);
@@ -142,11 +146,12 @@ export function MenuEditor({
     }
     startTransition(async () => {
       try {
-        const result = await saveMenu(productId, draft);
+        const result = await saveMenu(savedId, draft);
         if ("error" in result) {
           toastManager.add({ title: result.error, type: "error" });
           return;
         }
+        setSavedId(result.id);
 
         if (photoFile) {
           const upload = await resizeImageForUpload(photoFile);
@@ -163,7 +168,9 @@ export function MenuEditor({
           }
           if (!uploaded) {
             if (productId === null) {
-              router.replace(`/products/${result.id}/edit?photo=failed`);
+              // A full load: after a failed action call, a soft router navigation can be dropped,
+              // which would leave the user on "เพิ่มเมนู" with the menu already saved.
+              window.location.replace(`/products/${result.id}/edit?photo=failed`);
             } else {
               setPhotoError(PHOTO_FAILED);
               setPhotoFile(null);
@@ -172,7 +179,7 @@ export function MenuEditor({
             }
             return;
           }
-        } else if (removePhoto && productId !== null) {
+        } else if (removePhoto && savedId !== null) {
           const removed = await removeProductImage(result.id);
           if ("error" in removed) {
             setPhotoError("บันทึกเมนูแล้ว แต่ลบรูปไม่สำเร็จ กรุณาลองใหม่");
@@ -426,7 +433,7 @@ export function MenuEditor({
                       aria-label="วัตถุดิบ"
                       value={r.rawMaterialId}
                       onChange={(e) => updateRecipe(i, { rawMaterialId: e.target.value })}
-                      className={`${FIELD} flex-1 min-w-0 px-3`}
+                      className={`${FIELD_BASE} flex-1 min-w-0 px-3`}
                     >
                       <option value="">— เลือกวัตถุดิบ —</option>
                       {rawMaterials.map((m) => (
@@ -442,7 +449,7 @@ export function MenuEditor({
                       max={MAX_RECIPE_QTY}
                       onChange={(e) => updateRecipe(i, { quantityUsed: e.target.value })}
                       placeholder="ปริมาณ"
-                      className={`${FIELD} w-[92px] shrink-0 px-3`}
+                      className={`${FIELD_BASE} w-[92px] shrink-0 px-3`}
                     />
                     <span className="w-11 shrink-0 text-[15px] text-muted-foreground truncate">
                       {units.get(r.rawMaterialId)?.unit ?? ""}
