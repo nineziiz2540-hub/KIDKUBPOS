@@ -24,18 +24,27 @@ export default async function PosPage() {
     image_url: string | null;
     drink_type: string | null;
     category_id: string | null;
-    categories: { id: string; name: string } | null;
+    sort_order: number;
+    categories: { id: string; name: string; sort_order: number } | null;
   };
 
   const { data: productRows } = (await supabase
     .from("products")
-    .select("id, name, price, image_url, drink_type, category_id, categories(id, name)")
+    .select("id, name, price, image_url, drink_type, category_id, sort_order, categories(id, name, sort_order)")
     .eq("tenant_id", profile.tenant_id)
     .eq("is_active", true)
-    .is("archived_at", null)
-    .order("name")) as { data: ProductRow[] | null };
+    .is("archived_at", null)) as { data: ProductRow[] | null };
 
-  const products: PosProduct[] = (productRows ?? []).map((p) => ({
+  // The owner's order: categories first, then menus within each; uncategorized menus last.
+  const categoryRank = (p: ProductRow) => p.categories?.sort_order ?? Number.MAX_SAFE_INTEGER;
+  const orderedRows = [...(productRows ?? [])].sort(
+    (a, b) =>
+      categoryRank(a) - categoryRank(b) ||
+      a.sort_order - b.sort_order ||
+      a.name.localeCompare(b.name, "th")
+  );
+
+  const products: PosProduct[] = orderedRows.map((p) => ({
     id: p.id,
     name: p.name,
     price: Number(p.price),
@@ -45,7 +54,8 @@ export default async function PosPage() {
     categoryName: p.categories?.name ?? null,
   }));
 
-  // Unique categories derived from products (ordered by first appearance)
+  // Categories that have at least one sellable menu, in the owner's order (products are
+  // already sorted by category order, so first appearance is the right order).
   const categoryMap = new Map<string, string>();
   for (const p of products) {
     if (p.category_id && p.categoryName && !categoryMap.has(p.category_id)) {
