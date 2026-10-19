@@ -1,9 +1,8 @@
 "use server";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/dal";
-import { parseProductInput, parseRecipeRows, type ProductInput } from "@/lib/product-input";
+import { parseMenuDraft, type MenuDraft } from "@/lib/product-input";
 import {
   MAX_PRODUCT_IMAGE_BYTES,
   PRODUCT_IMAGE_BUCKET,
@@ -12,7 +11,6 @@ import {
   storagePathFromPublicUrl,
 } from "@/lib/product-images";
 
-export type ProductState = { error?: string } | undefined;
 type ActionResult = { ok: true } | { error: string };
 
 const FORBIDDEN = "ไม่มีสิทธิ์ดำเนินการนี้";
@@ -20,7 +18,7 @@ const NOT_FOUND = "ไม่พบสินค้า";
 const ARCHIVED = "เมนูนี้ถูกเก็บแล้ว กรุณากู้คืนก่อนแก้ไข";
 const SAVE_FAILED = "บันทึกข้อมูลไม่สำเร็จ";
 
-// Messages raised by replace_product_recipes / replace_product_modifiers.
+// Messages raised by save_menu / replace_product_recipes / replace_product_modifiers.
 const RPC_ERRORS: Record<string, string> = {
   forbidden: FORBIDDEN,
   product_not_found: NOT_FOUND,
@@ -28,6 +26,7 @@ const RPC_ERRORS: Record<string, string> = {
   invalid_material: "วัตถุดิบไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_modifier: "กลุ่มตัวเลือกไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_quantity: "ปริมาณวัตถุดิบไม่ถูกต้อง",
+  invalid_category: "หมวดหมู่ไม่ถูกต้อง",
 };
 
 function isManagerOrOwner(role: string): boolean {
@@ -41,32 +40,6 @@ async function requireManager() {
 }
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
-
-async function categoryBelongsToTenant(
-  supabase: Supabase,
-  tenantId: string,
-  categoryId: string | null
-): Promise<boolean> {
-  if (categoryId === null) return true;
-  const { data } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("id", categoryId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-  return data !== null;
-}
-
-function productRow(input: ProductInput) {
-  return {
-    name: input.name,
-    price: input.price,
-    description: input.description,
-    category_id: input.categoryId,
-    drink_type: input.drinkType,
-    is_active: input.isActive,
-  };
-}
 
 /** Loads a product of this shop; distinguishes "missing" from "archived" for the error message. */
 async function loadOwnProduct(supabase: Supabase, tenantId: string, productId: string) {
@@ -82,63 +55,6 @@ async function loadOwnProduct(supabase: Supabase, tenantId: string, productId: s
 function revalidateMenu() {
   revalidatePath("/products");
   revalidatePath("/pos");
-}
-
-export async function createProduct(
-  prevState: ProductState,
-  formData: FormData
-): Promise<ProductState> {
-  const profile = await requireManager();
-  if (!profile) return { error: FORBIDDEN };
-
-  const parsed = parseProductInput(formData);
-  if ("error" in parsed) return { error: parsed.error };
-
-  const supabase = await createClient();
-  if (!(await categoryBelongsToTenant(supabase, profile.tenant_id, parsed.value.categoryId))) {
-    return { error: "หมวดหมู่ไม่ถูกต้อง" };
-  }
-
-  const { error } = await supabase
-    .from("products")
-    .insert({ ...productRow(parsed.value), tenant_id: profile.tenant_id });
-  if (error) return { error: SAVE_FAILED };
-
-  redirect("/products?saved=1");
-}
-
-export async function updateProduct(
-  prevState: ProductState,
-  formData: FormData
-): Promise<ProductState> {
-  const profile = await requireManager();
-  if (!profile) return { error: FORBIDDEN };
-
-  const id = formData.get("id");
-  if (typeof id !== "string" || id === "") return { error: "ข้อมูลไม่ถูกต้อง" };
-
-  const parsed = parseProductInput(formData);
-  if ("error" in parsed) return { error: parsed.error };
-
-  const supabase = await createClient();
-  if (!(await categoryBelongsToTenant(supabase, profile.tenant_id, parsed.value.categoryId))) {
-    return { error: "หมวดหมู่ไม่ถูกต้อง" };
-  }
-
-  const { data, error } = await supabase
-    .from("products")
-    .update(productRow(parsed.value))
-    .eq("id", id)
-    .eq("tenant_id", profile.tenant_id)
-    .is("archived_at", null)
-    .select("id");
-  if (error) return { error: SAVE_FAILED };
-  if (!data || data.length === 0) {
-    const existing = await loadOwnProduct(supabase, profile.tenant_id, id);
-    return { error: existing ? ARCHIVED : NOT_FOUND };
-  }
-
-  redirect("/products?saved=1");
 }
 
 /**
@@ -229,46 +145,67 @@ function rpcError(message: string | undefined): string {
   return (message && RPC_ERRORS[message]) || SAVE_FAILED;
 }
 
-export async function updateProductRecipes(
-  productId: string,
-  rows: { rawMaterialId: string; quantityUsed: string }[]
-): Promise<ActionResult> {
+/**
+ * The one-page menu editor's single save: menu fields, recipe and option links in one
+ * transaction (save_menu). The database puts a new or re-categorised menu at the end of its
+ * category.
+ */
+export async function saveMenu(
+  productId: string | null,
+  draft: MenuDraft
+): Promise<{ ok: true; id: string; categoryId: string | null } | { error: string }> {
   const profile = await requireManager();
   if (!profile) return { error: FORBIDDEN };
 
-  const parsed = parseRecipeRows(rows);
+  const parsed = parseMenuDraft(draft);
   if ("error" in parsed) return { error: parsed.error };
+  const { menu, recipes, modifierIds } = parsed.value;
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("replace_product_recipes", {
-    p_product_id: productId,
-    p_rows: parsed.value.map((r) => ({
-      raw_material_id: r.rawMaterialId,
-      quantity_used: r.quantityUsed,
-    })),
+  const { data: id, error } = await supabase.rpc("save_menu", {
+    p_id: productId,
+    p_menu: {
+      name: menu.name,
+      price: menu.price,
+      description: menu.description,
+      category_id: menu.categoryId,
+      drink_type: menu.drinkType,
+      is_active: menu.isActive,
+    },
+    p_recipes: recipes.map((r) => ({ raw_material_id: r.rawMaterialId, quantity_used: r.quantityUsed })),
+    p_modifier_ids: modifierIds,
   });
-  if (error) return { error: rpcError(error.message) };
+  if (error || !id) return { error: rpcError(error?.message) };
 
-  revalidatePath(`/products/${productId}/edit`);
-  return { ok: true };
+  revalidateMenu();
+  revalidatePath(`/products/${id}/edit`);
+  return { ok: true, id, categoryId: menu.categoryId };
 }
 
-export async function updateProductModifiers(
-  productId: string,
-  modifierIds: string[]
-): Promise<ActionResult> {
+/** "ลบรูป" in the editor: the menu goes back to having no photo, and the file is removed. */
+export async function removeProductImage(productId: string): Promise<ActionResult> {
   const profile = await requireManager();
   if (!profile) return { error: FORBIDDEN };
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("replace_product_modifiers", {
-    p_product_id: productId,
-    p_modifier_ids: [...new Set(modifierIds)],
-  });
-  if (error) return { error: rpcError(error.message) };
+  const product = await loadOwnProduct(supabase, profile.tenant_id, productId);
+  if (!product) return { error: NOT_FOUND };
+  if (product.archived_at !== null) return { error: ARCHIVED };
+
+  const { data, error } = await supabase
+    .from("products")
+    .update({ image_url: null })
+    .eq("id", productId)
+    .eq("tenant_id", profile.tenant_id)
+    .is("archived_at", null)
+    .select("id");
+  if (error || !data || data.length === 0) return { error: "ลบรูปไม่สำเร็จ" };
+
+  const oldPath = storagePathFromPublicUrl(product.image_url);
+  if (oldPath) await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([oldPath]);
 
   revalidatePath(`/products/${productId}/edit`);
-  revalidatePath("/pos");
+  revalidateMenu();
   return { ok: true };
 }
 
