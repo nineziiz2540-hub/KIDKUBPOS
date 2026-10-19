@@ -2,6 +2,7 @@
 import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MAX_PRODUCT_IMAGE_BYTES, PRODUCT_IMAGE_TYPES } from "@/lib/product-images";
+import { resizeImageForUpload } from "@/lib/resize-image";
 import { uploadProductImage } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,25 +26,35 @@ export function ImageUploadSection({ productId, currentImageUrl }: Props) {
     setError(null);
     const formData = new FormData(e.currentTarget);
     const file = formData.get("image");
-    if (file instanceof File && file.size > 0) {
-      if (!(file.type in PRODUCT_IMAGE_TYPES)) {
-        setError("รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP");
-        return;
-      }
-      if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
+    if (!(file instanceof File) || file.size === 0) {
+      setError("ไม่พบไฟล์");
+      return;
+    }
+    if (!(file.type in PRODUCT_IMAGE_TYPES)) {
+      setError("รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP");
+      return;
+    }
+
+    startTransition(async () => {
+      // Camera photos are shrunk on the device first; the 5MB limit applies to what is sent.
+      const upload = await resizeImageForUpload(file);
+      if (upload.size > MAX_PRODUCT_IMAGE_BYTES) {
         setError("ไฟล์ขนาดใหญ่เกิน 5MB");
         return;
       }
-    }
-    formData.append("product_id", productId);
-
-    startTransition(async () => {
-      const result = await uploadProductImage(formData);
-      if ("error" in result) {
-        setError(result.error);
-      } else {
-        setPreviewUrl(result.url);
-        router.refresh();
+      const body = new FormData();
+      body.append("product_id", productId);
+      body.append("image", upload);
+      try {
+        const result = await uploadProductImage(body);
+        if ("error" in result) {
+          setError(result.error);
+        } else {
+          setPreviewUrl(result.url);
+          router.refresh();
+        }
+      } catch {
+        setError("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่");
       }
     });
   }

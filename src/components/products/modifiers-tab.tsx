@@ -38,9 +38,13 @@ export function ModifiersTab({
     setError(null);
     setSaved(false);
     startTransition(async () => {
-      const result = await updateProductModifiers(productId, [...selected]);
-      if ("error" in result) setError(result.error);
-      else setSaved(true);
+      try {
+        const result = await updateProductModifiers(productId, [...selected]);
+        if ("error" in result) setError(result.error);
+        else setSaved(true);
+      } catch {
+        setError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+      }
     });
   }
 

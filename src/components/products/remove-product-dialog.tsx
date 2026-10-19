@@ -20,7 +20,13 @@ export function RemoveProductDialog({ productId, productName, onClose }: Props) 
   function confirmRemove() {
     setError(null);
     startTransition(async () => {
-      const result = await removeProduct(productId);
+      let result: Awaited<ReturnType<typeof removeProduct>>;
+      try {
+        result = await removeProduct(productId);
+      } catch {
+        setError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+        return;
+      }
       if ("error" in result) {
         setError(result.error);
         return;

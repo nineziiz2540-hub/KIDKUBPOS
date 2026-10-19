@@ -46,12 +46,16 @@ export function RecipeTab({ productId, rawMaterials, initialRows }: Props) {
     setError(null);
     setSaved(false);
     startTransition(async () => {
-      const result = await updateProductRecipes(
-        productId,
-        rows.map((r) => ({ rawMaterialId: r.raw_material_id, quantityUsed: r.quantity_used }))
-      );
-      if ("error" in result) setError(result.error);
-      else setSaved(true);
+      try {
+        const result = await updateProductRecipes(
+          productId,
+          rows.map((r) => ({ rawMaterialId: r.raw_material_id, quantityUsed: r.quantity_used }))
+        );
+        if ("error" in result) setError(result.error);
+        else setSaved(true);
+      } catch {
+        setError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+      }
     });
   }
 

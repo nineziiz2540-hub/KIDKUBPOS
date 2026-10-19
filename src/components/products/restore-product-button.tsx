@@ -18,7 +18,13 @@ export function RestoreProductButton({ productId }: { productId: string }) {
       className="h-10 px-4"
       onClick={() =>
         startTransition(async () => {
-          const result = await restoreProduct(productId);
+          let result: Awaited<ReturnType<typeof restoreProduct>>;
+          try {
+            result = await restoreProduct(productId);
+          } catch {
+            toastManager.add({ title: "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่", type: "error" });
+            return;
+          }
           if ("error" in result) {
             toastManager.add({ title: result.error, type: "error" });
             return;
