@@ -81,7 +81,7 @@ function SortableRow({ id, children }: { id: string; children: (handle: ReactNod
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={
         isDragging
-          ? "relative z-10 rounded-xl border-2 border-accent bg-orange-50 shadow-xl"
+          ? "relative z-10 rounded-xl border-2 border-accent bg-white shadow-xl"
           : "relative"
       }
     >

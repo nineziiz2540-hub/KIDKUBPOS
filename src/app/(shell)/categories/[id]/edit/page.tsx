@@ -22,15 +22,16 @@ export default async function EditCategoryPage({
     .from("categories")
     .select("id, name")
     .eq("id", id)
-    .single();
+    .eq("tenant_id", profile.tenant_id)
+    .maybeSingle();
 
   if (!category) notFound();
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-sidebar">แก้ไขหมวดหมู่</h1>
-        <p className="text-sm text-muted-foreground mt-1">{category.name}</p>
+        <h1 className="text-[26px] font-bold text-sidebar leading-tight">แก้ไขหมวดหมู่</h1>
+        <p className="text-base text-muted-foreground mt-1">{category.name}</p>
       </div>
       <CategoryForm
         action={updateCategory}

@@ -13,8 +13,8 @@ export default async function NewCategoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-sidebar">เพิ่มหมวดหมู่ใหม่</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-[26px] font-bold text-sidebar leading-tight">เพิ่มหมวดหมู่ใหม่</h1>
+        <p className="text-base text-muted-foreground mt-1">
           กรอกชื่อหมวดหมู่สินค้าที่ต้องการเพิ่ม
         </p>
       </div>
