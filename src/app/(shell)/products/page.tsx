@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { ProductRowMenu } from "@/components/products/product-row-menu";
 import { SearchFilter } from "@/components/ui/search-filter";
 import { SavedToastTrigger } from "@/components/products/saved-toast-trigger";
+import { ArchivedProductsSection } from "@/components/products/archived-products-section";
+import { formatPrice } from "@/lib/cash";
 import { cn } from "@/lib/utils";
 
 type ProductRow = {
@@ -31,10 +33,27 @@ export default async function ProductsPage({
   const { saved } = await searchParams;
 
   const supabase = await createClient();
-  const { data: products } = (await supabase
-    .from("products")
-    .select("id, name, price, is_active, categories(name)")
-    .order("name")) as { data: ProductRow[] | null };
+  const [{ data: activeRows }, { data: archived }] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, name, price, is_active, categories(name)")
+      .eq("tenant_id", profile.tenant_id)
+      .is("archived_at", null)
+      .order("name"),
+    supabase
+      .from("products")
+      .select("id, name, price, archived_at")
+      .eq("tenant_id", profile.tenant_id)
+      .not("archived_at", "is", null)
+      .order("archived_at", { ascending: false }),
+  ]);
+  const products = activeRows as ProductRow[] | null;
+  const archivedProducts = (archived ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    price: Number(p.price),
+    archivedAt: p.archived_at as string,
+  }));
 
   return (
     <div className="space-y-6">
@@ -75,7 +94,7 @@ export default async function ProductsPage({
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {product.categories?.name ?? "ไม่ระบุหมวดหมู่"} ·{" "}
-                    ฿{Number(product.price).toFixed(2)}
+                    ฿{formatPrice(Number(product.price))}
                   </p>
                 </div>
                 <Badge variant={product.is_active ? "default" : "secondary"}>
@@ -95,6 +114,8 @@ export default async function ProductsPage({
           </p>
         </div>
       )}
+
+      {archivedProducts.length > 0 && <ArchivedProductsSection products={archivedProducts} />}
     </div>
   );
 }

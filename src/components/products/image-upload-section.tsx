@@ -1,5 +1,7 @@
 "use client";
 import { useTransition, useState } from "react";
+import { useRouter } from "next/navigation";
+import { MAX_PRODUCT_IMAGE_BYTES, PRODUCT_IMAGE_TYPES } from "@/lib/product-images";
 import { uploadProductImage } from "@/app/actions/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +13,7 @@ type Props = {
 };
 
 export function ImageUploadSection({ productId, currentImageUrl }: Props) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(
@@ -21,6 +24,17 @@ export function ImageUploadSection({ productId, currentImageUrl }: Props) {
     e.preventDefault();
     setError(null);
     const formData = new FormData(e.currentTarget);
+    const file = formData.get("image");
+    if (file instanceof File && file.size > 0) {
+      if (!(file.type in PRODUCT_IMAGE_TYPES)) {
+        setError("รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP");
+        return;
+      }
+      if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
+        setError("ไฟล์ขนาดใหญ่เกิน 5MB");
+        return;
+      }
+    }
     formData.append("product_id", productId);
 
     startTransition(async () => {
@@ -29,8 +43,7 @@ export function ImageUploadSection({ productId, currentImageUrl }: Props) {
         setError(result.error);
       } else {
         setPreviewUrl(result.url);
-        // Reload to reflect the saved URL on the product
-        window.location.reload();
+        router.refresh();
       }
     });
   }
@@ -52,13 +65,13 @@ export function ImageUploadSection({ productId, currentImageUrl }: Props) {
       <form onSubmit={handleSubmit} className="flex items-end gap-2">
         <div className="space-y-1">
           <Label htmlFor="img-file" className="text-xs text-muted-foreground">
-            อัปโหลดรูปใหม่ (สูงสุด 5MB)
+            อัปโหลดรูปใหม่ (JPG, PNG, WebP สูงสุด 5MB)
           </Label>
           <Input
             id="img-file"
             name="image"
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             className="w-auto text-sm"
             required
           />

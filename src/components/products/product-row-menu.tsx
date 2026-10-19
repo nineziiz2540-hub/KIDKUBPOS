@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useState } from "react";
 import { MoreVertical, Pencil, Trash2 } from "lucide-react";
 import {
   Menu,
@@ -10,7 +10,7 @@ import {
   MenuLinkItem,
   MenuSeparator,
 } from "@/components/ui/menu";
-import { deleteProduct } from "@/app/actions/products";
+import { RemoveProductDialog } from "@/components/products/remove-product-dialog";
 
 export function ProductRowMenu({
   productId,
@@ -19,7 +19,7 @@ export function ProductRowMenu({
   productId: string;
   productName: string;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <>
@@ -35,21 +35,18 @@ export function ProductRowMenu({
             <Pencil size={14} /> แก้ไข
           </MenuLinkItem>
           <MenuSeparator />
-          <MenuItem
-            destructive
-            onClick={() => {
-              if (confirm(`ลบสินค้า "${productName}"?`)) {
-                formRef.current?.requestSubmit();
-              }
-            }}
-          >
+          <MenuItem destructive onClick={() => setConfirming(true)}>
             <Trash2 size={14} /> ลบ
           </MenuItem>
         </MenuPopup>
       </Menu>
-      <form ref={formRef} action={deleteProduct} className="hidden">
-        <input type="hidden" name="id" value={productId} />
-      </form>
+      {confirming && (
+        <RemoveProductDialog
+          productId={productId}
+          productName={productName}
+          onClose={() => setConfirming(false)}
+        />
+      )}
     </>
   );
 }

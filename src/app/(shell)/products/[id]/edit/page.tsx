@@ -12,6 +12,7 @@ import { ProductForm } from "@/components/products/product-form";
 import { RecipeTab } from "@/components/products/recipe-tab";
 import { ModifiersTab } from "@/components/products/modifiers-tab";
 import { ImageUploadSection } from "@/components/products/image-upload-section";
+import { RestoreProductButton } from "@/components/products/restore-product-button";
 
 export default async function EditProductPage({
   params,
@@ -34,7 +35,7 @@ export default async function EditProductPage({
     supabase
       .from("products")
       .select(
-        "id, name, price, description, is_active, category_id, image_url, drink_type"
+        "id, name, price, description, is_active, category_id, image_url, drink_type, archived_at"
       )
       .eq("id", id)
       .eq("tenant_id", profile.tenant_id)
@@ -47,6 +48,23 @@ export default async function EditProductPage({
   ]);
 
   if (!product) notFound();
+
+  if (product.archived_at !== null) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-sidebar">แก้ไขสินค้า</h1>
+          <p className="text-sm text-muted-foreground mt-1">{product.name}</p>
+        </div>
+        <div className="max-w-lg rounded-lg border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">
+          <p className="flex-1 text-sm font-medium text-sidebar">
+            เมนูนี้ถูกเก็บแล้ว ไม่แสดงในหน้า POS
+          </p>
+          <RestoreProductButton productId={product.id} />
+        </div>
+      </div>
+    );
+  }
 
   // Fetch tab-specific data
   const [rawMaterials, allModifiers, existingRecipesResult, linkedModifiersResult] =

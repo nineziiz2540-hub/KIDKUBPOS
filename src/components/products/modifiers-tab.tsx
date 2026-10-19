@@ -21,6 +21,7 @@ export function ModifiersTab({
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function toggle(modifierId: string) {
     setSelected((prev) => {
@@ -30,17 +31,16 @@ export function ModifiersTab({
       return next;
     });
     setSaved(false);
+    setError(null);
   }
 
   function handleSave() {
-    const formData = new FormData();
-    formData.append("product_id", productId);
-    for (const id of selected) {
-      formData.append("modifier_id", id);
-    }
+    setError(null);
+    setSaved(false);
     startTransition(async () => {
-      await updateProductModifiers(formData);
-      setSaved(true);
+      const result = await updateProductModifiers(productId, [...selected]);
+      if ("error" in result) setError(result.error);
+      else setSaved(true);
     });
   }
 
@@ -97,6 +97,7 @@ export function ModifiersTab({
         </div>
       )}
 
+      {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && (
         <p className="text-sm text-success">บันทึกตัวเลือกเรียบร้อยแล้ว</p>
       )}

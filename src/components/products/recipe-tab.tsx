@@ -4,6 +4,7 @@ import { updateProductRecipes } from "@/app/actions/products";
 import type { RawMaterial } from "@/lib/dal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MAX_RECIPE_QTY } from "@/lib/product-input";
 
 type RecipeRow = { raw_material_id: string; quantity_used: string };
 
@@ -28,10 +29,14 @@ export function RecipeTab({ productId, rawMaterials, initialRows }: Props) {
   }
 
   function removeRow(index: number) {
+    setError(null);
+    setSaved(false);
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
   function updateRow(index: number, field: keyof RecipeRow, value: string) {
+    setError(null);
+    setSaved(false);
     setRows((prev) =>
       prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
     );
@@ -40,17 +45,13 @@ export function RecipeTab({ productId, rawMaterials, initialRows }: Props) {
   function handleSave() {
     setError(null);
     setSaved(false);
-    const formData = new FormData();
-    formData.append("product_id", productId);
-    for (const row of rows) {
-      if (row.raw_material_id && row.quantity_used) {
-        formData.append("raw_material_id", row.raw_material_id);
-        formData.append("quantity_used", row.quantity_used);
-      }
-    }
     startTransition(async () => {
-      await updateProductRecipes(formData);
-      setSaved(true);
+      const result = await updateProductRecipes(
+        productId,
+        rows.map((r) => ({ rawMaterialId: r.raw_material_id, quantityUsed: r.quantity_used }))
+      );
+      if ("error" in result) setError(result.error);
+      else setSaved(true);
     });
   }
 
@@ -89,6 +90,7 @@ export function RecipeTab({ productId, rawMaterials, initialRows }: Props) {
               type="number"
               step="0.001"
               min="0.001"
+              max={MAX_RECIPE_QTY}
               placeholder="ปริมาณ"
               value={row.quantity_used}
               onChange={(e) => updateRow(i, "quantity_used", e.target.value)}
