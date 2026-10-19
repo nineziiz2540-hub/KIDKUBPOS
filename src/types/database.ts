@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       categories: {
         Row: {
+          sort_order: number
           created_at: string
           id: string
           name: string
@@ -23,6 +24,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          sort_order?: number
           created_at?: string
           id?: string
           name: string
@@ -30,6 +32,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          sort_order?: number
           created_at?: string
           id?: string
           name?: string
@@ -713,6 +716,7 @@ export type Database = {
       }
       products: {
         Row: {
+          sort_order: number
           archived_at: string | null
           category_id: string | null
           created_at: string
@@ -727,6 +731,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          sort_order?: number
           archived_at?: string | null
           category_id?: string | null
           created_at?: string
@@ -741,6 +746,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          sort_order?: number
           archived_at?: string | null
           category_id?: string | null
           created_at?: string
@@ -1025,6 +1031,11 @@ export type Database = {
       }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
       next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
+      reorder_categories: { Args: { p_ids: string[] }; Returns: undefined }
+      reorder_products: {
+        Args: { p_category_id: string | null; p_ids: string[] }
+        Returns: undefined
+      }
       replace_product_modifiers: {
         Args: { p_product_id: string; p_modifier_ids: string[] }
         Returns: undefined
@@ -1032,6 +1043,15 @@ export type Database = {
       replace_product_recipes: {
         Args: { p_product_id: string; p_rows: Json }
         Returns: undefined
+      }
+      save_menu: {
+        Args: {
+          p_id: string | null
+          p_menu: Json
+          p_recipes: Json
+          p_modifier_ids: string[]
+        }
+        Returns: string
       }
       restock_for_voided_order: {
         Args: { p_order_id: string }
