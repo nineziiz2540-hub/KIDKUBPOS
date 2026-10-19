@@ -1,28 +1,19 @@
 import { notFound, redirect } from "next/navigation";
-import Link from "next/link";
-import {
-  getProfile,
-  getRawMaterials,
-  getModifiers,
-  getModifiersForProduct,
-} from "@/lib/dal";
+import { getProfile, getModifiers, getRawMaterials } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { updateProduct } from "@/app/actions/products";
-import { ProductForm } from "@/components/products/product-form";
-import { RecipeTab } from "@/components/products/recipe-tab";
-import { ModifiersTab } from "@/components/products/modifiers-tab";
-import { ImageUploadSection } from "@/components/products/image-upload-section";
+import { MenuEditor } from "@/components/products/menu-editor";
 import { RestoreProductButton } from "@/components/products/restore-product-button";
+import type { DrinkType } from "@/lib/product-input";
 
-export default async function EditProductPage({
+export default async function EditMenuPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ photo?: string }>;
 }) {
   const { id } = await params;
-  const { tab = "info" } = await searchParams;
+  const { photo } = await searchParams;
 
   const profile = await getProfile();
   if (!profile) redirect("/login");
@@ -31,21 +22,12 @@ export default async function EditProductPage({
   }
 
   const supabase = await createClient();
-  const [{ data: product }, { data: categories }] = await Promise.all([
-    supabase
-      .from("products")
-      .select(
-        "id, name, price, description, is_active, category_id, image_url, drink_type, archived_at"
-      )
-      .eq("id", id)
-      .eq("tenant_id", profile.tenant_id)
-      .single(),
-    supabase
-      .from("categories")
-      .select("id, name")
-      .eq("tenant_id", profile.tenant_id)
-      .order("name"),
-  ]);
+  const { data: product } = await supabase
+    .from("products")
+    .select("id, name, price, description, is_active, category_id, image_url, drink_type, archived_at")
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id)
+    .maybeSingle();
 
   if (!product) notFound();
 
@@ -53,11 +35,11 @@ export default async function EditProductPage({
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-sidebar">แก้ไขสินค้า</h1>
-          <p className="text-sm text-muted-foreground mt-1">{product.name}</p>
+          <h1 className="text-[26px] font-bold text-sidebar leading-tight">แก้ไขเมนู</h1>
+          <p className="text-base text-muted-foreground mt-1">{product.name}</p>
         </div>
-        <div className="max-w-lg rounded-lg border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">
-          <p className="flex-1 text-sm font-medium text-sidebar">
+        <div className="max-w-lg rounded-xl border border-warning/30 bg-warning/10 p-4 flex items-center gap-4">
+          <p className="flex-1 text-base font-medium text-sidebar">
             เมนูนี้ถูกเก็บแล้ว ไม่แสดงในหน้า POS
           </p>
           <RestoreProductButton productId={product.id} />
@@ -66,109 +48,55 @@ export default async function EditProductPage({
     );
   }
 
-  // Fetch tab-specific data
-  const [rawMaterials, allModifiers, existingRecipesResult, linkedModifiersResult] =
+  const [{ data: categories }, modifiers, rawMaterials, { data: recipes }, { data: links }] =
     await Promise.all([
-      tab === "recipe" ? getRawMaterials(profile.tenant_id) : Promise.resolve([]),
-      tab === "modifiers"
-        ? getModifiers(profile.tenant_id)
-        : Promise.resolve([]),
-      tab === "recipe"
-        ? supabase
-            .from("product_recipes")
-            .select("raw_material_id, quantity_used")
-            .eq("product_id", id)
-            .eq("tenant_id", profile.tenant_id)
-        : Promise.resolve({ data: null }),
-      tab === "modifiers"
-        ? getModifiersForProduct(id)
-        : Promise.resolve([]),
+      supabase
+        .from("categories")
+        .select("id, name")
+        .eq("tenant_id", profile.tenant_id)
+        .order("sort_order")
+        .order("name"),
+      getModifiers(profile.tenant_id),
+      getRawMaterials(profile.tenant_id),
+      supabase
+        .from("product_recipes")
+        .select("raw_material_id, quantity_used")
+        .eq("product_id", id)
+        .eq("tenant_id", profile.tenant_id),
+      supabase
+        .from("product_modifiers")
+        .select("modifier_id")
+        .eq("product_id", id)
+        .eq("tenant_id", profile.tenant_id),
     ]);
 
-  const existingRecipes = (existingRecipesResult?.data ?? []) as {
-    raw_material_id: string;
-    quantity_used: number;
-  }[];
-  const linkedModifierIds = (
-    linkedModifiersResult as { id: string }[]
-  ).map((m) => m.id);
-
-  const tabs = [
-    { key: "info", label: "ข้อมูลทั่วไป" },
-    { key: "recipe", label: "สูตรอาหาร" },
-    { key: "modifiers", label: "ตัวเลือกเพิ่มเติม" },
-  ];
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-sidebar">แก้ไขสินค้า</h1>
-        <p className="text-sm text-muted-foreground mt-1">{product.name}</p>
-      </div>
-
-      {/* Tab navigation */}
-      <div className="flex border-b gap-0">
-        {tabs.map((t) => (
-          <Link
-            key={t.key}
-            href={`/products/${id}/edit?tab=${t.key}`}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.key
-                ? "border-accent text-accent"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {tab === "info" && (
-        <div className="space-y-6">
-          <ProductForm
-            action={updateProduct}
-            categories={categories ?? []}
-            defaults={{
-              id: product.id,
-              name: product.name,
-              price: Number(product.price),
-              description: product.description,
-              category_id: product.category_id,
-              drink_type: product.drink_type,
-              is_active: product.is_active,
-            }}
-          />
-          <div className="rounded-lg border bg-white p-5 max-w-lg">
-            <h2 className="text-base font-semibold text-sidebar mb-4">
-              รูปภาพสินค้า
-            </h2>
-            <ImageUploadSection
-              productId={id}
-              currentImageUrl={product.image_url}
-            />
-          </div>
-        </div>
-      )}
-
-      {tab === "recipe" && (
-        <RecipeTab
-          productId={id}
-          rawMaterials={rawMaterials}
-          initialRows={existingRecipes.map((r) => ({
-            raw_material_id: r.raw_material_id,
-            quantity_used: String(r.quantity_used),
-          }))}
-        />
-      )}
-
-      {tab === "modifiers" && (
-        <ModifiersTab
-          productId={id}
-          allModifiers={allModifiers}
-          linkedModifierIds={linkedModifierIds}
-        />
-      )}
-    </div>
+    <MenuEditor
+      key={product.id}
+      productId={product.id}
+      initial={{
+        name: product.name,
+        price: String(Number(product.price)),
+        description: product.description ?? "",
+        categoryId: product.category_id,
+        drinkType: (product.drink_type as DrinkType | null) ?? null,
+        isActive: product.is_active,
+        recipes: (recipes ?? []).map((r) => ({
+          rawMaterialId: r.raw_material_id,
+          quantityUsed: String(Number(r.quantity_used)),
+        })),
+        modifierIds: (links ?? []).map((l) => l.modifier_id),
+      }}
+      imageUrl={product.image_url}
+      categories={categories ?? []}
+      modifiers={modifiers}
+      rawMaterials={rawMaterials.map((m) => ({
+        id: m.id,
+        name: m.name,
+        unit: m.unit,
+        costPerUnit: Number(m.cost_per_unit),
+      }))}
+      photoFailed={photo === "failed"}
+    />
   );
 }

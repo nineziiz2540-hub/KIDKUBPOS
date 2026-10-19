@@ -1,31 +1,57 @@
 import { redirect } from "next/navigation";
-import { getProfile } from "@/lib/dal";
+import { getProfile, getModifiers, getRawMaterials } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { createProduct } from "@/app/actions/products";
-import { ProductForm } from "@/components/products/product-form";
+import { MenuEditor } from "@/components/products/menu-editor";
 
-export default async function NewProductPage() {
+export default async function NewMenuPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>;
+}) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "owner" && profile.role !== "manager") {
     redirect("/products");
   }
 
+  const { category } = await searchParams;
   const supabase = await createClient();
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("id, name")
-    .order("name");
+  const [{ data: categories }, modifiers, rawMaterials] = await Promise.all([
+    supabase
+      .from("categories")
+      .select("id, name")
+      .eq("tenant_id", profile.tenant_id)
+      .order("sort_order")
+      .order("name"),
+    getModifiers(profile.tenant_id),
+    getRawMaterials(profile.tenant_id),
+  ]);
+
+  // Opened from a category tab: start in that category.
+  const startCategory = (categories ?? []).some((c) => c.id === category) ? category! : null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-sidebar">เพิ่มสินค้าใหม่</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          กรอกข้อมูลสินค้าที่ต้องการเพิ่ม
-        </p>
-      </div>
-      <ProductForm action={createProduct} categories={categories ?? []} />
-    </div>
+    <MenuEditor
+      productId={null}
+      initial={{
+        name: "",
+        price: "",
+        description: "",
+        categoryId: startCategory,
+        drinkType: null,
+        isActive: true,
+        recipes: [],
+        modifierIds: [],
+      }}
+      imageUrl={null}
+      categories={categories ?? []}
+      modifiers={modifiers}
+      rawMaterials={rawMaterials.map((m) => ({
+        id: m.id,
+        name: m.name,
+        unit: m.unit,
+        costPerUnit: Number(m.cost_per_unit),
+      }))}
+    />
   );
 }
