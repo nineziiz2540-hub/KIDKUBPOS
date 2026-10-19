@@ -26,9 +26,9 @@ export function ProductRowMenu({
       <Menu>
         <MenuTrigger
           aria-label={`ตัวเลือกสำหรับ ${productName}`}
-          className="rounded p-1.5 text-muted-foreground hover:bg-muted/20"
+          className="w-11 h-11 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted"
         >
-          <MoreVertical size={16} />
+          <MoreVertical size={20} />
         </MenuTrigger>
         <MenuPopup>
           <MenuLinkItem href={`/products/${productId}/edit`}>
