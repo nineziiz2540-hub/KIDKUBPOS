@@ -6,6 +6,8 @@ import type { CartItem, ModifierWithOptions, ProductCost, LowStockAlert } from "
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type { Reduction } from "@/lib/held-bill-diff";
 import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
+import { bangkokDayRange } from "@/lib/bangkok-time";
+import type { HistoryRow } from "@/lib/order-history";
 
 // Re-exported so existing server-side callers can keep importing this
 // constant from dal.ts. Client components must import it from
@@ -1042,6 +1044,83 @@ export async function getShiftSummary(
     orderCount: rows.length,
     expectedCash: openingCash + totalCash,
   };
+}
+
+// ─── Order History ───────────────────────────────────────────────────────────
+
+const HISTORY_SELECT =
+  "id, order_number, queue_number, payment_method, status, total, created_at, transfer_verified_at, order_items(product_name)";
+
+type HistoryDbRow = {
+  id: string;
+  order_number: string | null;
+  queue_number: number | null;
+  payment_method: string;
+  status: string;
+  total: number;
+  created_at: string;
+  transfer_verified_at: string | null;
+  order_items: { product_name: string }[] | null;
+};
+
+function toHistoryRow(r: HistoryDbRow): HistoryRow {
+  return {
+    id: r.id,
+    orderNumber: r.order_number,
+    queueNumber: r.queue_number,
+    paymentMethod: r.payment_method,
+    status: r.status,
+    total: Number(r.total),
+    createdAt: r.created_at,
+    transferVerified: r.transfer_verified_at !== null,
+    itemNames: (r.order_items ?? []).map((i) => i.product_name),
+  };
+}
+
+/**
+ * Every bill of one Bangkok day, newest first, every status. Paginated with `.range()` like
+ * getOrdersInRange so a busy day can never be cut at PostgREST's row cap. Item names come in
+ * as an embedded array per order, so they don't count toward that cap.
+ */
+export async function getOrdersForDay(tenantId: string, date: string): Promise<HistoryRow[]> {
+  const supabase = await createClient();
+  const { start, end } = bangkokDayRange(date);
+  const rows: HistoryRow[] = [];
+
+  for (let from = 0; ; from += DB_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("orders")
+      .select(HISTORY_SELECT)
+      .eq("tenant_id", tenantId)
+      .gte("created_at", start)
+      .lt("created_at", end)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + DB_PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const page = (data ?? []) as unknown as HistoryDbRow[];
+    rows.push(...page.map(toHistoryRow));
+    if (page.length < DB_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+/** Bills whose number starts with `q`, on any day, newest first (at most 20). */
+export async function findOrdersByNumber(tenantId: string, q: string): Promise<HistoryRow[]> {
+  const supabase = await createClient();
+  const pattern = `${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const { data, error } = await supabase
+    .from("orders")
+    .select(HISTORY_SELECT)
+    .eq("tenant_id", tenantId)
+    .ilike("order_number", pattern)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) throw error;
+  return ((data ?? []) as unknown as HistoryDbRow[]).map(toHistoryRow);
 }
 
 // ─── Customer History ────────────────────────────────────────────────────────

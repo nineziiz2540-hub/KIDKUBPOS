@@ -1,119 +1,154 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getProfile } from "@/lib/dal";
-import { createClient } from "@/lib/supabase/server";
-import { OrdersFilter } from "@/components/orders/orders-filter";
-import { formatDateTime } from "@/lib/bangkok-time";
-
-type FilterValue = "all" | "cash" | "transfer" | "cancelled" | "refunded";
-
-type OrderRow = {
-  id: string;
-  order_number: string | null;
-  queue_number: number | null;
-  payment_method: string;
-  status: string;
-  total: number;
-  created_at: string;
-};
-
-const PAYMENT_LABELS: Record<string, string> = {
-  cash: "เงินสด",
-  transfer: "โอน",
-};
+import { findOrdersByNumber, getOrdersForDay, getProfile } from "@/lib/dal";
+import { bangkokToday, formatDayLabel } from "@/lib/bangkok-time";
+import {
+  filterRows,
+  formatBaht,
+  historyHref,
+  matchQueue,
+  parseHistoryParams,
+  searchKind,
+  summarizeDay,
+  type HistoryRow as Row,
+} from "@/lib/order-history";
+import { DayNav } from "@/components/orders/day-nav";
+import { HistorySearch } from "@/components/orders/history-search";
+import { HistoryChips } from "@/components/orders/history-chips";
+import { DaySummary } from "@/components/orders/day-summary";
+import { HistoryRow } from "@/components/orders/history-row";
+import { TransferCheckToggle } from "@/components/orders/transfer-check-toggle";
 
 type Props = {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ date?: string; filter?: string; q?: string }>;
 };
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="rounded-xl border bg-white px-4 py-12 text-center text-base text-muted-foreground">
+      {children}
+    </p>
+  );
+}
 
 export default async function OrdersPage({ searchParams }: Props) {
   const profile = await getProfile();
   if (!profile) redirect("/login");
 
-  const { filter } = await searchParams;
-  const filterValue = (filter ?? "all") as FilterValue;
+  const today = bangkokToday();
+  const view = parseHistoryParams(await searchParams, today);
+  const { date, filter, q } = view;
+  const currentHref = historyHref(view, today);
+  const detailHref = (id: string) => `/orders/${id}?back=${encodeURIComponent(currentHref)}`;
+  const canCheckTransfers = profile.role === "owner" || profile.role === "manager";
+  const kind = searchKind(q);
 
-  const supabase = await createClient();
-  const baseQuery = supabase
-    .from("orders")
-    .select("id, order_number, queue_number, payment_method, status, total, created_at")
-    .eq("tenant_id", profile.tenant_id)
-    .order("created_at", { ascending: false });
-
-  const filteredQuery =
-    filterValue === "cancelled"
-      ? baseQuery.eq("status", "cancelled")
-      : filterValue === "refunded"
-        ? baseQuery.eq("status", "refunded")
-        : filterValue !== "all"
-          ? baseQuery
-              .eq("payment_method", filterValue)
-              .eq("status", "completed")
-          : baseQuery;
-
-  const { data: orders } = (await filteredQuery) as { data: OrderRow[] | null };
-
-  return (
-    <div className="space-y-6">
+  const header = (
+    <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-sidebar">ประวัติบิล</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          บิลทั้งหมดของร้าน
-        </p>
+        <h1 className="text-[26px] font-bold leading-tight text-sidebar">ประวัติบิล</h1>
       </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DayNav
+          date={date}
+          today={today}
+          filter={filter}
+          q={q}
+          label={formatDayLabel(date, today)}
+        />
+        <HistorySearch date={date} today={today} filter={filter} q={q} />
+      </div>
+    </div>
+  );
 
-      <Suspense fallback={null}>
-        <OrdersFilter />
-      </Suspense>
-
-      <div className="rounded-lg border bg-white divide-y divide-border">
-        {orders && orders.length > 0 ? (
-          orders.map((order) => (
-            <Link
-              key={order.id}
-              href={`/orders/${order.id}`}
-              className="flex items-center gap-4 px-4 py-3 hover:bg-surface transition-colors"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="flex items-center gap-2 font-medium text-sidebar text-sm font-mono">
-                  {order.order_number ?? `#${order.id.slice(0, 8).toUpperCase()}`}
-                  {order.queue_number !== null && (
-                    <span className="font-sans text-xs font-semibold bg-accent/10 text-accent rounded-full px-2 py-0.5">
-                      คิว {order.queue_number}
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatDateTime(order.created_at)}
-                </p>
-              </div>
-              <span
-                className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
-                  order.status === "cancelled"
-                    ? "border-destructive/30 bg-destructive/10 text-destructive"
-                    : order.status === "refunded"
-                      ? "border-warning/30 bg-warning/10 text-warning"
-                      : "border-success/30 bg-success/10 text-success"
-                }`}
-              >
-                {order.status === "cancelled"
-                  ? "ยกเลิก"
-                  : order.status === "refunded"
-                    ? "คืนเงิน"
-                    : (PAYMENT_LABELS[order.payment_method] ?? order.payment_method)}
-              </span>
-              <p className="text-sm font-semibold text-sidebar tabular-nums w-24 text-right">
-                ฿{Number(order.total).toFixed(2)}
-              </p>
-            </Link>
-          ))
+  if (kind === "bill") {
+    const found = await findOrdersByNumber(profile.tenant_id, q);
+    return (
+      <div className="space-y-5">
+        {header}
+        <p className="text-base text-muted-foreground">
+          ผลค้นหาเลขบิล “{q}” ทุกวัน ({found.length} บิล)
+        </p>
+        {found.length === 0 ? (
+          <EmptyState>ไม่พบเลขบิล “{q}”</EmptyState>
         ) : (
-          <p className="px-4 py-12 text-center text-muted-foreground text-sm">
-            ไม่พบบิล
-          </p>
+          <div className="divide-y divide-border rounded-xl border bg-white">
+            {found.map((row) => (
+              <HistoryRow key={row.id} row={row} href={detailHref(row.id)} showDate />
+            ))}
+          </div>
         )}
       </div>
+    );
+  }
+
+  const dayRows = await getOrdersForDay(profile.tenant_id, date);
+  const summary = summarizeDay(dayRows);
+  let rows: Row[] = filterRows(dayRows, filter);
+  if (kind === "queue") rows = matchQueue(rows, q);
+  const isTransferView = filter === "transfer";
+
+  return (
+    <div className="space-y-5">
+      {header}
+      <HistoryChips date={date} today={today} filter={filter} q={q} counts={summary.counts} />
+      <DaySummary summary={summary} />
+
+      {isTransferView && summary.transferTotal > 0 && (
+        <div className="space-y-1 rounded-xl border border-success/30 bg-success/10 px-4 py-3">
+          <p className="text-base font-semibold text-success">
+            ตรวจยอดโอนแล้ว {summary.transferChecked} จาก {summary.transferTotal} บิล · เหลือ{" "}
+            {summary.transferTotal - summary.transferChecked} บิล
+          </p>
+          {summary.refundedTransfer.count > 0 && (
+            <p className="text-[15px] text-muted-foreground">
+              บิลโอนที่คืนเงินแล้ววันนี้ {summary.refundedTransfer.count} บิล ฿
+              {formatBaht(summary.refundedTransfer.total)} (เงินเคยเข้าบัญชี)
+            </p>
+          )}
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <EmptyState>
+          {kind === "queue"
+            ? `ไม่พบคิว ${q} ในวันที่เลือก`
+            : dayRows.length === 0
+              ? "ไม่มีบิลในวันที่เลือก"
+              : "ไม่มีบิลในหมวดนี้"}
+        </EmptyState>
+      ) : (
+        <div className="divide-y divide-border overflow-hidden rounded-xl border bg-white">
+          {rows.map((row) => (
+            <HistoryRow
+              key={row.id}
+              row={row}
+              href={detailHref(row.id)}
+              highlight={isTransferView && !row.transferVerified}
+              action={
+                isTransferView ? (
+                  <TransferCheckToggle
+                    orderId={row.id}
+                    verified={row.transferVerified}
+                    canEdit={canCheckTransfers}
+                  />
+                ) : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {kind === "queue" && (
+        <p className="text-center">
+          <Link
+            href={historyHref({ date, filter, q: "" }, today)}
+            className="text-base font-medium text-accent hover:underline"
+          >
+            ล้างการค้นหา ดูบิลทั้งหมดของวันที่เลือก
+          </Link>
+        </p>
+      )}
     </div>
   );
 }
