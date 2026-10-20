@@ -393,6 +393,60 @@ export type Database = {
           },
         ]
       }
+      order_adjustments: {
+        Row: {
+          actor_id: string | null
+          approver_id: string | null
+          created_at: string
+          from_value: string
+          id: string
+          kind: string
+          order_id: string
+          reason: string
+          tenant_id: string
+          to_value: string
+        }
+        Insert: {
+          actor_id?: string | null
+          approver_id?: string | null
+          created_at?: string
+          from_value: string
+          id?: string
+          kind: string
+          order_id: string
+          reason: string
+          tenant_id: string
+          to_value: string
+        }
+        Update: {
+          actor_id?: string | null
+          approver_id?: string | null
+          created_at?: string
+          from_value?: string
+          id?: string
+          kind?: string
+          order_id?: string
+          reason?: string
+          tenant_id?: string
+          to_value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_adjustments_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_adjustments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           category_name: string | null
@@ -485,6 +539,12 @@ export type Database = {
           table_number: string | null
           tenant_id: string
           total: number
+          transfer_verified_at: string | null
+          transfer_verified_by: string | null
+          unpaid_approved_by: string | null
+          unpaid_at: string | null
+          unpaid_by: string | null
+          unpaid_reason: string | null
           updated_at: string
         }
         Insert: {
@@ -521,6 +581,12 @@ export type Database = {
           table_number?: string | null
           tenant_id: string
           total?: number
+          transfer_verified_at?: string | null
+          transfer_verified_by?: string | null
+          unpaid_approved_by?: string | null
+          unpaid_at?: string | null
+          unpaid_by?: string | null
+          unpaid_reason?: string | null
           updated_at?: string
         }
         Update: {
@@ -557,6 +623,12 @@ export type Database = {
           table_number?: string | null
           tenant_id?: string
           total?: number
+          transfer_verified_at?: string | null
+          transfer_verified_by?: string | null
+          unpaid_approved_by?: string | null
+          unpaid_at?: string | null
+          unpaid_by?: string | null
+          unpaid_reason?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1031,6 +1103,46 @@ export type Database = {
       }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
       next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
+      order_change_payment_method: {
+        Args: {
+          p_actor_id: string
+          p_approver_id: string
+          p_order_id: string
+          p_reason: string
+          p_tenant_id: string
+          p_to_method: string
+        }
+        Returns: undefined
+      }
+      order_mark_unpaid: {
+        Args: {
+          p_actor_id: string
+          p_approver_id: string
+          p_order_id: string
+          p_reason: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      order_restore_paid: {
+        Args: {
+          p_actor_id: string
+          p_approver_id: string
+          p_order_id: string
+          p_reason: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      order_set_transfer_verified: {
+        Args: {
+          p_actor_id: string
+          p_order_id: string
+          p_tenant_id: string
+          p_verified: boolean
+        }
+        Returns: undefined
+      }
       reorder_categories: { Args: { p_ids: string[] }; Returns: undefined }
       reorder_products: {
         Args: { p_category_id: string | null; p_ids: string[] }
