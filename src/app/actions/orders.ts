@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
+import { verifyManagerPin } from "@/lib/manager-pin";
 import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
@@ -337,29 +338,17 @@ export async function voidOrder(
   if (!order) return { error: "ไม่พบบิลนี้" };
   if (order.status === "cancelled") return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
   if (order.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว ไม่สามารถยกเลิกได้" };
+  if (order.status === "unpaid") return { error: "บิลนี้ถูกแจ้งว่าไม่ได้รับเงิน" };
 
   const activeShift = await getActiveShift(profile.tenant_id);
   if (!activeShift || order.shift_id !== activeShift.id) {
     return { error: "ยกเลิกได้เฉพาะบิลในกะที่เปิดอยู่ตอนนี้" };
   }
 
-  const admin = createAdminClient();
-  const { data: approvers } = await admin
-    .from("profiles")
-    .select("id, pin_hash")
-    .eq("tenant_id", profile.tenant_id)
-    .in("role", ["owner", "manager"])
-    .not("pin_hash", "is", null);
-
-  let approverId: string | null = null;
-  for (const approver of approvers ?? []) {
-    if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
-      approverId = approver.id;
-      break;
-    }
-  }
-
+  const approverId = await verifyManagerPin(profile.tenant_id, pin);
   if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
+
+  const admin = createAdminClient();
 
   // Written via the admin client, not the regular one: orders_update_own_tenant RLS has no
   // WITH CHECK, so any tenant member could otherwise PATCH status/cancelled_* directly through
@@ -465,29 +454,17 @@ export async function refundOrder(
     return { error: "บิลนี้ถูกยกเลิกไปแล้ว ไม่สามารถคืนเงินได้" };
   }
   if (order.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว" };
+  if (order.status === "unpaid") return { error: "บิลนี้ถูกแจ้งว่าไม่ได้รับเงิน" };
 
   const activeShift = await getActiveShift(profile.tenant_id);
   if (refundMethod === "cash" && !activeShift) {
     return { error: "ต้องเปิดกะก่อนจึงจะคืนเงินสดได้" };
   }
 
-  const admin = createAdminClient();
-  const { data: approvers } = await admin
-    .from("profiles")
-    .select("id, pin_hash")
-    .eq("tenant_id", profile.tenant_id)
-    .in("role", ["owner", "manager"])
-    .not("pin_hash", "is", null);
-
-  let approverId: string | null = null;
-  for (const approver of approvers ?? []) {
-    if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
-      approverId = approver.id;
-      break;
-    }
-  }
-
+  const approverId = await verifyManagerPin(profile.tenant_id, pin);
   if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
+
+  const admin = createAdminClient();
 
   // The PIN-verification loop above does a bcrypt comparison against every Manager/Owner in the
   // tenant, which can take a noticeable moment. If another device closes the shift fetched into
