@@ -161,8 +161,7 @@ async function getOrderItemsInRange(
         "product_id, product_name, category_name, quantity, subtotal, orders!inner(tenant_id, status, created_at)"
       )
       .eq("orders.tenant_id", tenantId)
-      .neq("orders.status", "cancelled")
-      .neq("orders.status", "refunded")
+      .eq("orders.status", "completed")
       .gte("orders.created_at", rangeStart.toISOString())
       .lt("orders.created_at", rangeEnd.toISOString())
       .range(from, from + DB_PAGE_SIZE - 1);
@@ -209,8 +208,7 @@ async function getOrdersInRange(
       .from("orders")
       .select("created_at, total, payment_method")
       .eq("tenant_id", tenantId)
-      .neq("status", "cancelled")
-      .neq("status", "refunded")
+      .eq("status", "completed")
       .gte("created_at", rangeStart.toISOString())
       .lt("created_at", rangeEnd.toISOString())
       .range(from, from + DB_PAGE_SIZE - 1);
@@ -998,7 +996,7 @@ export async function getShiftSummary(
     .select("total, payment_method")
     .eq("tenant_id", tenantId)
     .eq("shift_id", shiftId)
-    .neq("status", "cancelled");
+    .in("status", ["completed", "refunded"]);
   // Deliberately NOT excluding 'refunded' here: the cash from a later-refunded order's original
   // sale genuinely entered this shift's drawer historically. The refund's cash outflow is
   // subtracted separately below, tagged to whichever shift the refund itself happened in
@@ -1080,8 +1078,7 @@ export async function getCustomers(tenantId: string): Promise<CustomerListItem[]
     .select("customer_id, total, created_at")
     .eq("tenant_id", tenantId)
     .not("customer_id", "is", null)
-    .neq("status", "cancelled")
-    .neq("status", "refunded");
+    .eq("status", "completed");
 
   type OrderAggRow = { customer_id: string | null; total: number; created_at: string };
   const byCustomer = new Map<string, { count: number; spent: number; last: string }>();
@@ -1137,8 +1134,7 @@ export async function getCustomerById(
     .select("total, created_at")
     .eq("tenant_id", tenantId)
     .eq("customer_id", customerId)
-    .neq("status", "cancelled")
-    .neq("status", "refunded");
+    .eq("status", "completed");
 
   const rows = (orderRows ?? []) as { total: number; created_at: string }[];
   const totalSpent = rows.reduce((sum, r) => sum + Number(r.total), 0);

@@ -8,6 +8,20 @@ const PAYMENT_LABELS: Record<string, string> = {
   transfer: "โอน",
 };
 
+// Only bills that aren't a normal completed sale get a label; none of these count toward the
+// customer's totals (getCustomerById counts completed bills only).
+const STATUS_LABELS: Record<string, { label: string; className: string }> = {
+  cancelled: { label: "ยกเลิก", className: "text-destructive" },
+  refunded: { label: "คืนเงิน", className: "text-warning" },
+  unpaid: { label: "ไม่ได้รับเงิน", className: "text-destructive" },
+};
+
+function StatusNote({ status }: { status: string }) {
+  const note = STATUS_LABELS[status];
+  if (!note) return null;
+  return <span className={`ml-2 font-medium ${note.className}`}>· {note.label}</span>;
+}
+
 export default async function CustomerDetailPage({
   params,
 }: {
@@ -70,6 +84,7 @@ export default async function CustomerDetailPage({
                   <p className="text-sm text-muted-foreground">
                     {formatDate(o.createdAt)} ·{" "}
                     {PAYMENT_LABELS[o.paymentMethod] ?? o.paymentMethod}
+                    <StatusNote status={o.status} />
                   </p>
                 </div>
                 <p className="text-sm font-semibold text-sidebar tabular-nums shrink-0">

@@ -49,8 +49,7 @@ export default async function OrdersPage({ searchParams }: Props) {
         : filterValue !== "all"
           ? baseQuery
               .eq("payment_method", filterValue)
-              .neq("status", "cancelled")
-              .neq("status", "refunded")
+              .eq("status", "completed")
           : baseQuery;
 
   const { data: orders } = (await filteredQuery) as { data: OrderRow[] | null };
