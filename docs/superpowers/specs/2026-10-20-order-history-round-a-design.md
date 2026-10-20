@@ -197,7 +197,13 @@ Summary numbers for the selected day:
 - Records who pressed, who approved, when, and why (mirrors the `cancelled_*` columns).
 - No restock.
 - Excluded from every revenue/count figure in the app (see constraints).
-- One-way in this round, unless the user decides otherwise (see open question).
+- **Reversible (user decision 2026-10-20).** If the customer transfers later, an owner/manager
+  can restore the bill with "ได้รับเงินแล้ว" (money received): PIN + reason, back to `completed`
+  with method transfer, untouched stock (it was never returned), and the transfer tick unset so
+  the owner ticks it after seeing the money. Allowed regardless of shift state, like marking.
+  Marking and restoring can repeat, so the current-state columns on `orders` alone are not
+  enough. Every mark and restore is also appended to the bill's adjustment history (see the
+  method-change section).
 
 ### "แก้ช่องทางชำระ" (payment method change)
 
@@ -207,11 +213,12 @@ Summary numbers for the selected day:
   method afterwards would leave that reconciliation silently wrong. This matches the rule
   `voidOrder` already enforces. The UI explains why when the button is unavailable.
 - Needs an owner/manager PIN and a reason.
-- Each change is appended to a history that can't be edited or deleted: order, from, to, who
-  pressed, who approved, when, reason. A bill can be changed more than once. Recommendation (the
-  builder's call): a small append-only table with RLS select for the tenant and no direct
-  write grants, written only by the service-role path. Shape it so round B's audit log can grow
-  out of it.
+- Each change is appended to a history that can't be edited or deleted: order, kind, from, to,
+  who pressed, who approved, when, reason. A bill can be changed more than once. Decided: one
+  small append-only adjustment table for this round's three kinds (`payment_method_change`,
+  `mark_unpaid`, `restore_paid`). It has RLS select for the tenant, no direct write grants, and
+  is written only by the service-role path in the same transaction as the order update (if the
+  history write fails, the change fails). Shape it so round B's audit log can grow out of it.
 - `cash_received`/`change_amount` stay as recorded (they describe what happened at the till). When
   a bill moves to transfer, the detail page hides the cash-tendered lines.
 - The open shift's summary follows automatically, because `getShiftSummary` reads the live
@@ -225,8 +232,16 @@ Summary numbers for the selected day:
   members. The builder must check that profiles RLS lets every role allowed on this page read
   those names. If it doesn't, resolve the names server-side without widening RLS.
 - Actions on a `completed` bill: คืนเงิน and ยกเลิกบิล (existing), แก้ช่องทางชำระ (new),
-  ไม่ได้รับเงิน (new, transfer only). All four require the manager/owner PIN.
-- Payment-method change history listed under the summary when present.
+  ไม่ได้รับเงิน (new, transfer only). On an `unpaid` bill: ได้รับเงินแล้ว (restore). All require
+  the manager/owner PIN.
+- Adjustment history (method changes, mark/restore) listed under the summary when present.
+
+## User-confirmed calls (2026-10-20)
+
+The user reviewed and accepted these: not-received is transfer-only; method change only while
+the bill's shift is open (or no shift); not-received/restore allowed after shift close; ticks are
+owner/manager only; refunded-transfer note in the โอน view; day net sales must equal the
+Dashboard; every new action is guarded at the database level against direct Data-API writes.
 
 ## Verification expected
 
