@@ -62,7 +62,7 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
       <Button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="w-full bg-white border border-destructive/40 text-destructive hover:bg-destructive/5"
+        className="h-12 w-full rounded-xl text-base font-semibold bg-white border border-destructive/40 text-destructive hover:bg-destructive/5"
       >
         ยกเลิกบิล
       </Button>

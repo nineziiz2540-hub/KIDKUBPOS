@@ -1123,6 +1123,61 @@ export async function findOrdersByNumber(tenantId: string, q: string): Promise<H
   return ((data ?? []) as unknown as HistoryDbRow[]).map(toHistoryRow);
 }
 
+/**
+ * id → full_name for the people on a bill (seller, approvers, …). Uses the admin client scoped
+ * to the tenant: profiles RLS doesn't let every role read every colleague, and deactivated
+ * members must still resolve on old bills.
+ */
+export async function getPeopleNames(
+  tenantId: string,
+  ids: string[]
+): Promise<Record<string, string>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return {};
+  const { data } = await createAdminClient()
+    .from("profiles")
+    .select("id, full_name")
+    .eq("tenant_id", tenantId)
+    .in("id", unique);
+  const names: Record<string, string> = {};
+  for (const p of data ?? []) {
+    if (p.full_name) names[p.id] = p.full_name;
+  }
+  return names;
+}
+
+export type OrderAdjustment = {
+  kind: string;
+  fromValue: string;
+  toValue: string;
+  reason: string;
+  actorId: string | null;
+  approverId: string | null;
+  createdAt: string;
+};
+
+export async function getOrderAdjustments(
+  tenantId: string,
+  orderId: string
+): Promise<OrderAdjustment[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("order_adjustments")
+    .select("kind, from_value, to_value, reason, actor_id, approver_id, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: true });
+  return (data ?? []).map((a) => ({
+    kind: a.kind,
+    fromValue: a.from_value,
+    toValue: a.to_value,
+    reason: a.reason,
+    actorId: a.actor_id,
+    approverId: a.approver_id,
+    createdAt: a.created_at,
+  }));
+}
+
 // ─── Customer History ────────────────────────────────────────────────────────
 
 export type CustomerListItem = {
