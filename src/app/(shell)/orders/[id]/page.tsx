@@ -5,6 +5,7 @@ import { getProfile, getHeldBillHistory, type HeldBillEvent } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { VoidOrderButton } from "@/components/orders/void-order-button";
 import { RefundOrderButton } from "@/components/orders/refund-order-button";
+import { formatDateTime, formatTime } from "@/lib/bangkok-time";
 
 type OrderItem = {
   id: string;
@@ -100,10 +101,7 @@ export default async function OrderDetailPage({ params }: Props) {
             )}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {new Date(order.created_at).toLocaleString("th-TH", {
-              dateStyle: "long",
-              timeStyle: "short",
-            })}
+            {formatDateTime(order.created_at, "long")}
           </p>
         </div>
       </div>
@@ -215,10 +213,7 @@ export default async function OrderDetailPage({ params }: Props) {
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">เวลาที่ยกเลิก</span>
             <span className="font-medium text-sidebar">
-              {new Date(order.cancelled_at).toLocaleString("th-TH", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
+              {formatDateTime(order.cancelled_at)}
             </span>
           </div>
         )}
@@ -242,10 +237,7 @@ export default async function OrderDetailPage({ params }: Props) {
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">เวลาที่คืนเงิน</span>
             <span className="font-medium text-sidebar">
-              {new Date(order.refunded_at).toLocaleString("th-TH", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
+              {formatDateTime(order.refunded_at)}
             </span>
           </div>
         )}
@@ -285,10 +277,7 @@ export default async function OrderDetailPage({ params }: Props) {
                   <span className="text-muted-foreground">
                     {" "}
                     · {event.actorName ?? "—"} ·{" "}
-                    {new Date(event.createdAt).toLocaleTimeString("th-TH", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {formatTime(event.createdAt)}
                   </span>
                 </p>
                 {event.reductions.map((r, i) => (

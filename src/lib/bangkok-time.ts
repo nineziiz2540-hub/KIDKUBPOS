@@ -59,6 +59,13 @@ const timeFormat = new Intl.DateTimeFormat("th-TH", {
 const dateFormats = {
   medium: new Intl.DateTimeFormat("th-TH", { timeZone: BANGKOK_TZ, dateStyle: "medium" }),
   long: new Intl.DateTimeFormat("th-TH", { timeZone: BANGKOK_TZ, dateStyle: "long" }),
+  full: new Intl.DateTimeFormat("th-TH", {
+    timeZone: BANGKOK_TZ,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }),
 };
 
 const dateTimeFormats = {
@@ -84,7 +91,7 @@ export function formatTime(iso: string): string {
   return timeFormat.format(new Date(iso));
 }
 
-export function formatDate(iso: string, style: "medium" | "long" = "medium"): string {
+export function formatDate(iso: string, style: "medium" | "long" | "full" = "medium"): string {
   return dateFormats[style].format(new Date(iso));
 }
 

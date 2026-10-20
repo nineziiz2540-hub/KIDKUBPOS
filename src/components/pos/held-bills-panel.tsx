@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPrice } from "@/lib/cash";
+import { formatTime } from "@/lib/bangkok-time";
 import type { CancelledHeldBill, HeldBillSummary } from "@/lib/dal";
 import { CancelHeldBillModal } from "./cancel-held-bill-modal";
 
@@ -145,10 +146,7 @@ export function HeldBillsPanel({
                         <span className="font-normal text-muted-foreground">
                           {" "}
                           ·{" "}
-                          {new Date(c.cancelledAt).toLocaleTimeString("th-TH", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatTime(c.cancelledAt)}
                         </span>
                       </p>
                       <p className="text-muted-foreground">

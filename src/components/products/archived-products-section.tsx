@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatPrice } from "@/lib/cash";
+import { formatDate } from "@/lib/bangkok-time";
 import { RestoreProductButton } from "@/components/products/restore-product-button";
 
 type ArchivedProduct = { id: string; name: string; price: number; archivedAt: string };
@@ -28,7 +29,7 @@ export function ArchivedProductsSection({ products }: { products: ArchivedProduc
                 <p className="font-medium text-sidebar text-sm truncate">{product.name}</p>
                 <p className="text-xs text-muted-foreground">
                   ฿{formatPrice(product.price)} · เก็บเมื่อ{" "}
-                  {new Date(product.archivedAt).toLocaleDateString("th-TH")}
+                  {formatDate(product.archivedAt)}
                 </p>
               </div>
               <RestoreProductButton productId={product.id} />

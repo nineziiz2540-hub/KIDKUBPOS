@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { ClipboardList } from "lucide-react";
+import { formatDate } from "@/lib/bangkok-time";
 
 type Props = {
   userName: string;
@@ -17,12 +18,7 @@ export function PosHeader({
   heldCount,
   onOpenHeld,
 }: Props) {
-  const dateStr = new Date().toLocaleDateString("th-TH", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const dateStr = formatDate(new Date().toISOString(), "full");
 
   return (
     <div className="flex items-center justify-between py-1 shrink-0">

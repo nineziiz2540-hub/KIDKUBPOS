@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { getProfile, getCustomerById, getCustomerOrders } from "@/lib/dal";
+import { formatDate } from "@/lib/bangkok-time";
 
 const PAYMENT_LABELS: Record<string, string> = {
   cash: "เงินสด",
@@ -67,7 +68,7 @@ export default async function CustomerDetailPage({
                     {o.orderNumber ?? "—"}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {new Date(o.createdAt).toLocaleDateString("th-TH")} ·{" "}
+                    {formatDate(o.createdAt)} ·{" "}
                     {PAYMENT_LABELS[o.paymentMethod] ?? o.paymentMethod}
                   </p>
                 </div>

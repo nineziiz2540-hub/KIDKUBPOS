@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   bangkokDayRange,
   bangkokToday,
+  formatDate,
   formatDateTime,
   formatDayLabel,
   formatTime,
@@ -48,6 +49,14 @@ test("formatDayLabel names today and yesterday", () => {
   const older = formatDayLabel("2026-10-15", "2026-10-21");
   assert.ok(!older.startsWith("วันนี้") && !older.startsWith("เมื่อวาน"));
   assert.ok(older.includes("15"));
+});
+
+test("formatDate full shows the Bangkok weekday and date, even just after Bangkok midnight", () => {
+  // 17:30 UTC on Mon 19 Oct is 00:30 on Tue 20 Oct in Bangkok.
+  const s = formatDate("2026-10-19T17:30:00Z", "full");
+  assert.ok(s.includes("อังคาร"), s);
+  assert.ok(s.includes("20"), s);
+  assert.ok(s.includes("ตุลาคม"), s);
 });
 
 test("formatDateTime includes the Bangkok time", () => {

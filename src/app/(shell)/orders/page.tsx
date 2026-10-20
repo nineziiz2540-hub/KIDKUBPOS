@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { OrdersFilter } from "@/components/orders/orders-filter";
+import { formatDateTime } from "@/lib/bangkok-time";
 
 type FilterValue = "all" | "cash" | "transfer" | "cancelled" | "refunded";
 
@@ -85,10 +86,7 @@ export default async function OrdersPage({ searchParams }: Props) {
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {new Date(order.created_at).toLocaleString("th-TH", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
+                  {formatDateTime(order.created_at)}
                 </p>
               </div>
               <span

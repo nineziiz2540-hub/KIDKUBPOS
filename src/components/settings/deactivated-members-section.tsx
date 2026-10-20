@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TeamMember } from "@/lib/dal";
+import { formatDate } from "@/lib/bangkok-time";
 import { ReactivateButton } from "@/components/settings/deactivate-team-member-form";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -34,7 +35,7 @@ export function DeactivatedMembersSection({ members }: { members: TeamMember[] }
                 <p className="text-xs text-muted-foreground">
                   {ROLE_LABELS[member.role] ?? member.role}
                   {member.deactivated_at &&
-                    ` · ปิดใช้งานแล้วเมื่อ ${new Date(member.deactivated_at).toLocaleDateString("th-TH")}`}
+                    ` · ปิดใช้งานแล้วเมื่อ ${formatDate(member.deactivated_at)}`}
                 </p>
               </div>
               <ReactivateButton memberId={member.id} />
