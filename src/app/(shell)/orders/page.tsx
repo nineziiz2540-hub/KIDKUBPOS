@@ -3,13 +3,12 @@ import { redirect } from "next/navigation";
 import { findOrdersByNumber, getOrdersForDay, getProfile } from "@/lib/dal";
 import { bangkokToday, formatDayLabel } from "@/lib/bangkok-time";
 import {
-  filterRows,
   formatBaht,
   historyHref,
-  matchQueue,
   parseHistoryParams,
   searchKind,
   summarizeDay,
+  visibleRows,
   type HistoryRow as Row,
 } from "@/lib/order-history";
 import { DayNav } from "@/components/orders/day-nav";
@@ -84,9 +83,9 @@ export default async function OrdersPage({ searchParams }: Props) {
 
   const dayRows = await getOrdersForDay(profile.tenant_id, date);
   const summary = summarizeDay(dayRows);
-  let rows: Row[] = filterRows(dayRows, filter);
-  if (kind === "queue") rows = matchQueue(rows, q);
-  const isTransferView = filter === "transfer";
+  const rows: Row[] = visibleRows(dayRows, filter, q);
+  // Ticks belong to the transfer view; a queue search can surface any kind of bill.
+  const isTransferView = filter === "transfer" && kind !== "queue";
 
   return (
     <div className="space-y-5">

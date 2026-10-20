@@ -9,6 +9,7 @@ import {
   parseHistoryParams,
   searchKind,
   summarizeDay,
+  visibleRows,
   type HistoryRow,
 } from "./order-history.ts";
 
@@ -96,6 +97,17 @@ test("searchKind treats short digit strings as queue numbers and anything else a
 test("matchQueue finds the bill with that queue number only", () => {
   assert.deepEqual(matchQueue(day, "27").map((r) => r.id), ["3"]);
   assert.deepEqual(matchQueue(day, "99"), []);
+});
+
+test("visibleRows: a queue search looks at every bill of the day, whatever chip is selected", () => {
+  // Queue 3 was recorded as cash; the owner is in the โอน view looking for a wrong-method bill.
+  assert.deepEqual(visibleRows(day, "transfer", "3").map((r) => r.id), ["1"]);
+  assert.deepEqual(visibleRows(day, "transfer", "99"), []);
+});
+
+test("visibleRows without a queue search applies the chip", () => {
+  assert.deepEqual(visibleRows(day, "transfer", "").map((r) => r.id), ["3", "4"]);
+  assert.equal(visibleRows(day, "all", "").length, 7);
 });
 
 test("historyHref leaves defaults out of the URL", () => {

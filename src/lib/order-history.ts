@@ -121,6 +121,16 @@ export function formatBaht(baht: number): string {
   });
 }
 
+/**
+ * The rows the list shows. A queue search ignores the chip: the bill a customer is asking about
+ * may sit under another chip (e.g. a "transfer" recorded as cash), and saying "not found" there
+ * would be wrong.
+ */
+export function visibleRows(rows: HistoryRow[], filter: HistoryFilter, q: string): HistoryRow[] {
+  if (searchKind(q) === "queue") return matchQueue(rows, q);
+  return filterRows(rows, filter);
+}
+
 export function itemSummary(names: string[], max = 2): string {
   if (names.length <= max) return names.join(", ");
   return `${names.slice(0, max).join(", ")} +${names.length - max}`;
