@@ -9,6 +9,7 @@ declare
   ua uuid := gen_random_uuid();  -- owner, tenant A
   us uuid := gen_random_uuid();  -- staff, tenant A
   ub uuid := gen_random_uuid();  -- owner, tenant B
+  um uuid := gen_random_uuid();  -- deactivated manager, tenant A
   ta uuid; tb uuid;
   s1 uuid; s0 uuid;
   t1 uuid; t2 uuid; t3 uuid; t4 uuid; c1 uuid; c0 uuid; c2 uuid; x1 uuid;
@@ -20,7 +21,8 @@ begin
   values
     (ua, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-adj-a-' || ua || '@example.test', 'x', now(), now()),
     (us, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-adj-s-' || us || '@example.test', 'x', now(), now()),
-    (ub, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-adj-b-' || ub || '@example.test', 'x', now(), now());
+    (ub, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-adj-b-' || ub || '@example.test', 'x', now(), now()),
+    (um, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-adj-m-' || um || '@example.test', 'x', now(), now());
   perform public.create_tenant_and_owner(ua, 'QA ADJ A', true);
   perform public.create_tenant_and_owner(ub, 'QA ADJ B', true);
   select tenant_id into ta from public.profiles where id = ua;
@@ -28,6 +30,9 @@ begin
   insert into public.profiles (id, tenant_id, full_name, role)
   values (us, ta, 'QA Staff', 'staff')
   on conflict (id) do update set tenant_id = excluded.tenant_id, role = 'staff';
+  insert into public.profiles (id, tenant_id, full_name, role, deactivated_at)
+  values (um, ta, 'QA ex-manager', 'manager', now())
+  on conflict (id) do update set tenant_id = excluded.tenant_id, role = 'manager', deactivated_at = now();
 
   insert into public.shifts (tenant_id, opened_by, status, opening_cash, closed_by, closed_at)
   values (ta, ua, 'closed', 0, ua, now()) returning id into s0;
@@ -167,6 +172,26 @@ begin
       (select payment_method = 'cash' and transfer_verified_at is null and transfer_verified_by is null
        from public.orders where id = t3));
   exception when others then r := r || jsonb_build_object('tick_cleared_on_cash', false, 'tick_err', sqlerrm);
+  end;
+
+  -- Final review: approvers must be active owners/managers.
+  begin
+    perform public.order_mark_unpaid(ta, t4, ua, us, 'staff as approver');
+    r := r || jsonb_build_object('staff_approver_forbidden', false);
+  exception when others then r := r || jsonb_build_object('staff_approver_forbidden', sqlerrm like '%forbidden%');
+  end;
+  begin
+    perform public.order_mark_unpaid(ta, t4, ua, um, 'deactivated approver');
+    r := r || jsonb_build_object('deactivated_approver_forbidden', false);
+  exception when others then r := r || jsonb_build_object('deactivated_approver_forbidden', sqlerrm like '%forbidden%');
+  end;
+  begin
+    perform public.order_set_transfer_verified(ta, t4, um, true);
+    r := r || jsonb_build_object('deactivated_ticker_forbidden', false);
+  exception when others then
+    r := r || jsonb_build_object('deactivated_ticker_forbidden',
+      sqlerrm like '%forbidden%'
+      and (select transfer_verified_at is null and status = 'completed' from public.orders where id = t4));
   end;
 
   begin
