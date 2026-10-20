@@ -11,7 +11,7 @@ declare
   ub uuid := gen_random_uuid();  -- owner, tenant B
   ta uuid; tb uuid;
   s1 uuid; s0 uuid;
-  t1 uuid; t2 uuid; t3 uuid; t4 uuid; c1 uuid; c0 uuid; x1 uuid;
+  t1 uuid; t2 uuid; t3 uuid; t4 uuid; c1 uuid; c0 uuid; c2 uuid; x1 uuid;
   rm uuid;
   inv_before int; stock_before numeric;
   n int;
@@ -46,6 +46,8 @@ begin
   values (ta, us, 'completed', 'cash', 100, 100, s1) returning id into c1;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
   values (ta, us, 'completed', 'cash', 50, 50, s0) returning id into c0;
+  insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id, cash_received, change_amount)
+  values (ta, us, 'completed', 'cash', 65, 65, s1, 100, 35) returning id into c2;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id, cancelled_at, cancelled_by, cancel_reason)
   values (ta, us, 'cancelled', 'cash', 40, 40, s1, now(), us, 'qa') returning id into x1;
 
@@ -124,6 +126,15 @@ begin
            where order_id = c1 and kind = 'payment_method_change'
              and from_value = 'cash' and to_value = 'transfer'));
   exception when others then r := r || jsonb_build_object('method_change_ok', false, 'method_change_err', sqlerrm);
+  end;
+
+  -- Found live: a cash bill with cash tendered recorded hit orders_cash_tendered_check.
+  begin
+    perform public.order_change_payment_method(ta, c2, 'transfer', ua, ua, 'ลูกค้าโอน กดผิด');
+    r := r || jsonb_build_object('method_change_clears_tendered',
+      (select payment_method = 'transfer' and cash_received is null and change_amount is null
+       from public.orders where id = c2));
+  exception when others then r := r || jsonb_build_object('method_change_clears_tendered', false, 'tendered_err', sqlerrm);
   end;
 
   begin
