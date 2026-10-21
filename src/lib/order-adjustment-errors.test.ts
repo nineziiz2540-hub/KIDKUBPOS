@@ -10,6 +10,10 @@ test("each database error code maps to its Thai message", () => {
   assert.equal(adjustmentErrorMessage("invalid_method"), "ช่องทางชำระไม่ถูกต้อง");
   assert.equal(adjustmentErrorMessage("reason_required"), "กรุณาระบุเหตุผล");
   assert.equal(adjustmentErrorMessage("forbidden"), "ไม่มีสิทธิ์ทำรายการนี้");
+  assert.equal(
+    adjustmentErrorMessage("P0001: no_shift"),
+    "บิลนี้ขายตอนไม่ได้เปิดกะ เปลี่ยนเป็นเงินสดไม่ได้"
+  );
 });
 
 test("a code embedded in a longer Postgres message is still recognised", () => {

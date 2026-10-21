@@ -9,7 +9,7 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
 import { diffReductions } from "@/lib/held-bill-diff";
-import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
+import { NO_OPEN_SHIFT_MESSAGE, orderInsertShiftError } from "@/lib/shift-errors";
 import type { CartItem, CreateOrderInput } from "@/types/app";
 import type { Json } from "@/types/database";
 
@@ -212,6 +212,8 @@ export async function createOrder(
     .single();
 
   if (orderError?.code === "23505" && heldBill) return { error: "บิลพักนี้ชำระไปแล้ว" };
+  const shiftRefusal = orderError ? orderInsertShiftError(orderError.message) : null;
+  if (shiftRefusal) return { error: shiftRefusal };
   if (orderError || !order) return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
 
   // 8. Build order_items with snapshots

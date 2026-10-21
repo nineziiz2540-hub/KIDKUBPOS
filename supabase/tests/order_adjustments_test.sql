@@ -34,23 +34,27 @@ begin
   values (um, ta, 'QA ex-manager', 'manager', now())
   on conflict (id) do update set tenant_id = excluded.tenant_id, role = 'manager', deactivated_at = now();
 
-  insert into public.shifts (tenant_id, opened_by, status, opening_cash, closed_by, closed_at)
-  values (ta, ua, 'closed', 0, ua, now()) returning id into s0;
+  -- s0's bills are sold while it is open, then it is closed (round B's guard_order_drawer
+  -- rejects inserting a bill into an already-closed shift). One open shift per tenant, so s1
+  -- opens after s0 closes.
+  insert into public.shifts (tenant_id, opened_by, status, opening_cash)
+  values (ta, ua, 'open', 0) returning id into s0;
+  insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
+  values (ta, us, 'completed', 'transfer', 60, 60, s0) returning id into t2;
+  insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
+  values (ta, us, 'completed', 'cash', 50, 50, s0) returning id into c0;
+  update public.shifts set status = 'closed', closed_by = ua, closed_at = now() where id = s0;
   insert into public.shifts (tenant_id, opened_by, status, opening_cash)
   values (ta, ua, 'open', 0) returning id into s1;
 
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
   values (ta, us, 'completed', 'transfer', 85, 85, s1) returning id into t1;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
-  values (ta, us, 'completed', 'transfer', 60, 60, s0) returning id into t2;
-  insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
   values (ta, us, 'completed', 'transfer', 70, 70, s1) returning id into t3;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
   values (ta, us, 'completed', 'transfer', 90, 90, s1) returning id into t4;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
   values (ta, us, 'completed', 'cash', 100, 100, s1) returning id into c1;
-  insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id)
-  values (ta, us, 'completed', 'cash', 50, 50, s0) returning id into c0;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id, cash_received, change_amount)
   values (ta, us, 'completed', 'cash', 65, 65, s1, 100, 35) returning id into c2;
   insert into public.orders (tenant_id, created_by, status, payment_method, subtotal, total, shift_id, cancelled_at, cancelled_by, cancel_reason)

@@ -20,6 +20,17 @@ const MESSAGES: Record<string, string> = {
 /** createOrder's refusal of a cash sale with no open shift; the POS shows NoShiftDialog for it. */
 export const NO_OPEN_SHIFT_MESSAGE = "ยังไม่ได้เปิดกะ กรุณาเปิดกะก่อนรับเงินสด";
 
+/**
+ * The orders drawer guard (migration 20261022130000, guard_order_drawer) refusing a new bill, as
+ * the message createOrder shows; null for any other insert error. Only reachable in a race (the
+ * shift closed between createOrder's own check and the insert) or with no app check at all.
+ */
+export function orderInsertShiftError(raw: string): string | null {
+  if (raw.includes("no_open_shift")) return NO_OPEN_SHIFT_MESSAGE;
+  if (raw.includes("shift_closed")) return "กะถูกปิดไปแล้ว กรุณาเปิดกะใหม่";
+  return null;
+}
+
 export function shiftErrorMessage(raw: string): string {
   for (const [code, message] of Object.entries(MESSAGES)) {
     if (raw.includes(code)) return message;

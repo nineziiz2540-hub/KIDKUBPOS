@@ -7,6 +7,8 @@ const MESSAGES: Record<string, string> = {
   invalid_state: "สถานะบิลเปลี่ยนไปแล้ว กรุณารีเฟรชหน้า",
   same_method: "บิลนี้เป็นช่องทางนี้อยู่แล้ว",
   shift_closed: "แก้ช่องทางชำระได้เฉพาะบิลในกะที่ยังเปิดอยู่",
+  // Round B lock-down (migration 20261022130000): a bill sold with no shift can't become cash.
+  no_shift: "บิลนี้ขายตอนไม่ได้เปิดกะ เปลี่ยนเป็นเงินสดไม่ได้",
   invalid_method: "ช่องทางชำระไม่ถูกต้อง",
   reason_required: "กรุณาระบุเหตุผล",
   forbidden: "ไม่มีสิทธิ์ทำรายการนี้",
