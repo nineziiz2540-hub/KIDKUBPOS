@@ -9,6 +9,7 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
 import { diffReductions } from "@/lib/held-bill-diff";
+import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import type { CartItem, CreateOrderInput } from "@/types/app";
 import type { Json } from "@/types/database";
 
@@ -144,8 +145,13 @@ export async function createOrder(
     };
   }
 
-  // 5. Best-effort: attach the currently open shift (does not block the sale if none is open)
+  // 5. Attach the currently open shift. Cash needs one (the drawer is counted per shift); a
+  // transfer doesn't touch the drawer, so it still goes through without a shift. Checked before
+  // any order/queue number is generated, so a refused cash sale burns nothing.
   const activeShift = await getActiveShift(profile.tenant_id);
+  if (data.paymentMethod === "cash" && !activeShift) {
+    return { error: NO_OPEN_SHIFT_MESSAGE };
+  }
 
   // 6. Generate order number atomically — deferred until after all validation above so a
   // rejected attempt (bad discount value, wrong PIN, etc.) never burns a sequence number.

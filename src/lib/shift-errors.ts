@@ -17,6 +17,9 @@ const MESSAGES: Record<string, string> = {
   forbidden: "ไม่มีสิทธิ์ทำรายการนี้",
 };
 
+/** createOrder's refusal of a cash sale with no open shift; the POS shows NoShiftDialog for it. */
+export const NO_OPEN_SHIFT_MESSAGE = "ยังไม่ได้เปิดกะ กรุณาเปิดกะก่อนรับเงินสด";
+
 export function shiftErrorMessage(raw: string): string {
   for (const [code, message] of Object.entries(MESSAGES)) {
     if (raw.includes(code)) return message;

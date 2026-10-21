@@ -17,6 +17,8 @@ import { ProductGrid } from "./product-grid";
 import { ModifierModal } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
 import { QrPaymentModal } from "./qr-payment-modal";
+import { NoShiftDialog } from "./no-shift-dialog";
+import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
@@ -69,6 +71,7 @@ export function PosScreen({
   );
   const [showQrModal, setShowQrModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
+  const [showNoShift, setShowNoShift] = useState(false);
   const [showMobileCart, setShowMobileCart] = useState(false);
   // Held bill currently loaded in the cart, and the items it had when loaded (for the dirty check).
   const [activeHeld, setActiveHeld] = useState<ActiveHeld | null>(null);
@@ -323,6 +326,12 @@ export function PosScreen({
 
   function handleCheckout() {
     if (requiresApproval && !hasApproverPin) return;
+    if (paymentMethod === "cash" && activeShiftId === null) {
+      setError(null);
+      setShowMobileCart(false);
+      setShowNoShift(true);
+      return;
+    }
     if (paymentMethod === "transfer") {
       setError(null);
       setShowMobileCart(false);
@@ -347,7 +356,20 @@ export function PosScreen({
       if (errorMessage === null || errorMessage === "PIN ไม่ถูกต้อง" || mayHaveSaved) {
         setShowCashModal(false);
       }
+      // The shift was closed (e.g. on another device) after this page loaded.
+      if (errorMessage === NO_OPEN_SHIFT_MESSAGE) {
+        setShowCashModal(false);
+        setError(null);
+        setShowNoShift(true);
+        router.refresh();
+      }
     });
+  }
+
+  function payByTransferInstead() {
+    setShowNoShift(false);
+    setPaymentMethod("transfer");
+    setShowQrModal(true);
   }
 
   const heldDirty = activeHeld !== null && loadedSnapshot !== JSON.stringify(cartItems);
@@ -683,6 +705,13 @@ export function PosScreen({
           onParkCurrentThenResume={(bill) => void parkThenResume(bill)}
           onCancelled={handleHeldCancelled}
           onClose={() => setShowHeldPanel(false)}
+        />
+      )}
+      {showNoShift && (
+        <NoShiftDialog
+          onGoToShifts={() => router.push("/shifts")}
+          onPayByTransfer={payByTransferInstead}
+          onClose={() => setShowNoShift(false)}
         />
       )}
       {showCashModal && (
