@@ -470,9 +470,9 @@ export async function refundOrder(
   // tenant, which can take a noticeable moment. If another device closes the shift fetched into
   // activeShift during that gap, tagging the refund to the stale activeShift.id would send the
   // cash into a shift whose expected_cash/variance were already snapshotted and reconciled by
-  // closeShift — it would never surface anywhere, since the shifts page only shows the currently
-  // active shift's summary. Re-fetch immediately before the write and use this fresh result for
-  // refund_shift_id instead of the earlier activeShift.
+  // shift_close — the closed shift's summary would never show it. Re-fetch immediately before the
+  // write and use this fresh result for refund_shift_id instead of the earlier activeShift.
+  // (Migration B's guard_order_drawer also rejects a cash refund tagged to a closed shift.)
   const shiftAtWrite = await getActiveShift(profile.tenant_id);
   if (refundMethod === "cash" && !shiftAtWrite) {
     return { error: "ต้องเปิดกะก่อนจึงจะคืนเงินสดได้" };

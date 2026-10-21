@@ -3,7 +3,13 @@ import { redirect } from "next/navigation";
 import { Users } from "lucide-react";
 import { getProfile } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { updateStoreName, updateBusinessSettings, updatePromptPayId } from "@/app/actions/settings";
+import {
+  updateStoreName,
+  updateBusinessSettings,
+  updatePromptPayId,
+  updateCashFloatDefault,
+} from "@/app/actions/settings";
+import { CashFloatForm } from "@/components/settings/cash-float-form";
 import { StoreNameForm } from "@/components/settings/store-name-form";
 import { BusinessSettingsForm } from "@/components/settings/business-settings-form";
 import { PromptPayForm } from "@/components/settings/promptpay-form";
@@ -17,7 +23,7 @@ export default async function SettingsPage() {
   const supabase = await createClient();
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id")
+    .select("name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id, cash_float_default")
     .eq("id", profile.tenant_id)
     .single();
 
@@ -56,6 +62,15 @@ export default async function SettingsPage() {
         <PromptPayForm
           action={updatePromptPayId}
           defaultValue={tenant?.promptpay_id ?? ""}
+        />
+      </div>
+
+      {/* Cash drawer float */}
+      <div className="rounded-lg border bg-white p-5 space-y-4">
+        <h2 className="text-base font-semibold text-sidebar">ลิ้นชักเงินสด</h2>
+        <CashFloatForm
+          action={updateCashFloatDefault}
+          defaultValue={Number(tenant?.cash_float_default ?? 1000)}
         />
       </div>
 

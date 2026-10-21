@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/dal";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MAX_FLOAT, parseAmount } from "@/lib/shift-math";
 
 export type SettingsState = { error?: string; success?: boolean } | undefined;
 
@@ -143,6 +144,35 @@ export async function updatePromptPayId(
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
   revalidatePath("/settings");
+  return { success: true };
+}
+
+/** เงินทอนที่เก็บไว้ในลิ้นชักข้ามคืน — pre-fills the float at every shift close. */
+export async function updateCashFloatDefault(
+  prevState: SettingsState,
+  formData: FormData
+): Promise<SettingsState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const raw = formData.get("cash_float_default");
+  const amount = typeof raw === "string" ? parseAmount(raw, MAX_FLOAT) : null;
+  if (amount === null) {
+    return { error: `กรุณากรอกจำนวนเงิน 0 – ${MAX_FLOAT.toLocaleString("en-US")} บาท` };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("tenants")
+    .update({ cash_float_default: amount })
+    .eq("id", profile.tenant_id);
+
+  if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+
+  revalidatePath("/settings");
+  revalidatePath("/shifts");
   return { success: true };
 }
 

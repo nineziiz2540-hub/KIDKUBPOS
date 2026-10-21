@@ -962,14 +962,6 @@ export type Shift = {
   status: "open" | "closed";
 };
 
-export type ShiftSummary = {
-  totalCash: number;
-  totalCashRefunded: number;
-  totalTransfer: number;
-  orderCount: number;
-  expectedCash: number;
-};
-
 export async function getActiveShift(tenantId: string): Promise<Shift | null> {
   const supabase = await createClient();
   const { data } = await supabase
@@ -1243,64 +1235,6 @@ export async function getCashFloatDefault(tenantId: string): Promise<number> {
     .eq("id", tenantId)
     .single();
   return Number(data?.cash_float_default ?? 1000);
-}
-
-export async function getShiftSummary(
-  tenantId: string,
-  shiftId: string
-): Promise<ShiftSummary> {
-  const supabase = await createClient();
-  const { data: orderRows } = await supabase
-    .from("orders")
-    .select("total, payment_method")
-    .eq("tenant_id", tenantId)
-    .eq("shift_id", shiftId)
-    .in("status", ["completed", "refunded"]);
-  // Deliberately NOT excluding 'refunded' here: the cash from a later-refunded order's original
-  // sale genuinely entered this shift's drawer historically. The refund's cash outflow is
-  // subtracted separately below, tagged to whichever shift the refund itself happened in
-  // (refund_shift_id) — which may differ from this shift. Excluding 'refunded' here too would
-  // double-subtract when the refund happens in the same shift as its original sale.
-
-  const rows = (orderRows ?? []) as { total: number; payment_method: string }[];
-  const totalCashGross = rows
-    .filter((r) => r.payment_method === "cash")
-    .reduce((sum, r) => sum + Number(r.total), 0);
-  const totalTransfer = rows
-    .filter((r) => r.payment_method === "transfer")
-    .reduce((sum, r) => sum + Number(r.total), 0);
-
-  const { data: refundRows } = await supabase
-    .from("orders")
-    .select("total")
-    .eq("tenant_id", tenantId)
-    .eq("refund_shift_id", shiftId)
-    .eq("status", "refunded")
-    .eq("refund_method", "cash");
-  const totalCashRefunded = ((refundRows ?? []) as { total: number }[]).reduce(
-    (sum, r) => sum + Number(r.total),
-    0
-  );
-
-  const { data: shiftRow } = await supabase
-    .from("shifts")
-    .select("opening_cash")
-    .eq("id", shiftId)
-    .eq("tenant_id", tenantId)
-    .single();
-  const openingCash = Number(
-    (shiftRow as { opening_cash: number } | null)?.opening_cash ?? 0
-  );
-
-  const totalCash = totalCashGross - totalCashRefunded;
-
-  return {
-    totalCash,
-    totalCashRefunded,
-    totalTransfer,
-    orderCount: rows.length,
-    expectedCash: openingCash + totalCash,
-  };
 }
 
 // ─── Order History ───────────────────────────────────────────────────────────
