@@ -6,7 +6,7 @@ import type { CartItem, ModifierWithOptions, ProductCost, LowStockAlert } from "
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type { Reduction } from "@/lib/held-bill-diff";
 import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
-import { bangkokDayRange } from "@/lib/bangkok-time";
+import { bangkokDayRange, bangkokMonthRange } from "@/lib/bangkok-time";
 import type { HistoryRow } from "@/lib/order-history";
 
 // Re-exported so existing server-side callers can keep importing this
@@ -957,6 +957,7 @@ export async function getTenantPromptPayId(tenantId: string): Promise<string | n
 export type Shift = {
   id: string;
   openedAt: string;
+  openedBy: string;
   openingCash: number;
   status: "open" | "closed";
 };
@@ -973,7 +974,7 @@ export async function getActiveShift(tenantId: string): Promise<Shift | null> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("shifts")
-    .select("id, opened_at, opening_cash, status")
+    .select("id, opened_at, opened_by, opening_cash, status")
     .eq("tenant_id", tenantId)
     .eq("status", "open")
     .maybeSingle();
@@ -983,9 +984,265 @@ export async function getActiveShift(tenantId: string): Promise<Shift | null> {
   return {
     id: data.id,
     openedAt: data.opened_at,
+    openedBy: data.opened_by,
     openingCash: Number(data.opening_cash),
     status: "open",
   };
+}
+
+export type ShiftTotals = {
+  openingCash: number;
+  cashSales: number;
+  cashRefunds: number;
+  transferSales: number;
+  orderCount: number;
+  cashIn: number;
+  cashOut: number;
+  expectedCash: number;
+};
+
+/**
+ * What the drawer of a shift should hold, from the database's shift_totals (the one place the
+ * expected-cash formula lives). Service-only function, so the admin client is used; callers have
+ * already scoped tenantId from the signed-in profile. Throws when the shift isn't the tenant's.
+ */
+export async function getShiftTotals(tenantId: string, shiftId: string): Promise<ShiftTotals> {
+  const { data, error } = await createAdminClient().rpc("shift_totals", {
+    p_tenant_id: tenantId,
+    p_shift_id: shiftId,
+  });
+  const row = data?.[0];
+  if (error || !row) throw error ?? new Error("shift_totals returned no row");
+  return {
+    openingCash: Number(row.opening_cash),
+    cashSales: Number(row.cash_sales),
+    cashRefunds: Number(row.cash_refunds),
+    transferSales: Number(row.transfer_sales),
+    orderCount: Number(row.order_count),
+    cashIn: Number(row.cash_in),
+    cashOut: Number(row.cash_out),
+    expectedCash: Number(row.expected_cash),
+  };
+}
+
+export type CashMovement = {
+  id: string;
+  direction: "in" | "out";
+  reason: string;
+  amount: number;
+  note: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+/** Cash put into / taken out of the drawer during a shift, newest first. */
+export async function getCashMovements(tenantId: string, shiftId: string): Promise<CashMovement[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("cash_movements")
+    .select("id, direction, reason, amount, note, created_by, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("shift_id", shiftId)
+    .order("created_at", { ascending: false });
+  return (data ?? []).map((m) => ({
+    id: m.id,
+    direction: m.direction === "in" ? "in" : "out",
+    reason: m.reason,
+    amount: Number(m.amount),
+    note: m.note,
+    createdBy: m.created_by,
+    createdAt: m.created_at,
+  }));
+}
+
+export type CashCount = {
+  stage: "opening" | "closing";
+  attempt: number;
+  amount: number;
+  expected: number | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+/** Every count attempt of a shift, opening first, in attempt order. */
+export async function getCashCounts(tenantId: string, shiftId: string): Promise<CashCount[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("shift_cash_counts")
+    .select("stage, attempt, amount, expected, created_by, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("shift_id", shiftId)
+    .order("stage", { ascending: false }) // 'opening' before 'closing'
+    .order("attempt", { ascending: true });
+  return (data ?? []).map((c) => ({
+    stage: c.stage === "opening" ? "opening" : "closing",
+    attempt: c.attempt,
+    amount: Number(c.amount),
+    expected: c.expected === null ? null : Number(c.expected),
+    createdBy: c.created_by,
+    createdAt: c.created_at,
+  }));
+}
+
+export type ShiftDetail = {
+  id: string;
+  status: "open" | "closed";
+  openedAt: string;
+  openedBy: string;
+  openingCash: number;
+  openingExpected: number | null;
+  openingDifference: number | null;
+  openingNote: string | null;
+  previousShiftId: string | null;
+  closedAt: string | null;
+  closedBy: string | null;
+  closingCashCounted: number | null;
+  expectedCash: number | null;
+  variance: number | null;
+  floatLeft: number | null;
+  depositAmount: number | null;
+  closingNote: string | null;
+  closingCashSales: number | null;
+  closingCashRefunds: number | null;
+  closingTransferSales: number | null;
+  closingOrderCount: number | null;
+  closingCashIn: number | null;
+  closingCashOut: number | null;
+};
+
+const SHIFT_DETAIL_SELECT =
+  "id, status, opened_at, opened_by, opening_cash, opening_expected, opening_difference, opening_note, previous_shift_id, closed_at, closed_by, closing_cash_counted, expected_cash, variance, float_left, deposit_amount, closing_note, closing_cash_sales, closing_cash_refunds, closing_transfer_sales, closing_order_count, closing_cash_in, closing_cash_out";
+
+type ShiftDbRow = {
+  id: string;
+  status: string;
+  opened_at: string;
+  opened_by: string;
+  opening_cash: number;
+  opening_expected: number | null;
+  opening_difference: number | null;
+  opening_note: string | null;
+  previous_shift_id: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
+  closing_cash_counted: number | null;
+  expected_cash: number | null;
+  variance: number | null;
+  float_left: number | null;
+  deposit_amount: number | null;
+  closing_note: string | null;
+  closing_cash_sales: number | null;
+  closing_cash_refunds: number | null;
+  closing_transfer_sales: number | null;
+  closing_order_count: number | null;
+  closing_cash_in: number | null;
+  closing_cash_out: number | null;
+};
+
+function num(v: number | null): number | null {
+  return v === null ? null : Number(v);
+}
+
+function toShiftDetail(s: ShiftDbRow): ShiftDetail {
+  return {
+    id: s.id,
+    status: s.status === "open" ? "open" : "closed",
+    openedAt: s.opened_at,
+    openedBy: s.opened_by,
+    openingCash: Number(s.opening_cash),
+    openingExpected: num(s.opening_expected),
+    openingDifference: num(s.opening_difference),
+    openingNote: s.opening_note,
+    previousShiftId: s.previous_shift_id,
+    closedAt: s.closed_at,
+    closedBy: s.closed_by,
+    closingCashCounted: num(s.closing_cash_counted),
+    expectedCash: num(s.expected_cash),
+    variance: num(s.variance),
+    floatLeft: num(s.float_left),
+    depositAmount: num(s.deposit_amount),
+    closingNote: s.closing_note,
+    closingCashSales: num(s.closing_cash_sales),
+    closingCashRefunds: num(s.closing_cash_refunds),
+    closingTransferSales: num(s.closing_transfer_sales),
+    closingOrderCount: s.closing_order_count,
+    closingCashIn: num(s.closing_cash_in),
+    closingCashOut: num(s.closing_cash_out),
+  };
+}
+
+export async function getShiftById(tenantId: string, id: string): Promise<ShiftDetail | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("shifts")
+    .select(SHIFT_DETAIL_SELECT)
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  return data ? toShiftDetail(data as ShiftDbRow) : null;
+}
+
+/** Shifts newest first, `limit` at a time; pass the returned nextBefore to get the next page. */
+export async function getShiftHistory(
+  tenantId: string,
+  before?: string,
+  limit = 30
+): Promise<{ rows: ShiftDetail[]; nextBefore: string | null }> {
+  const supabase = await createClient();
+  let query = supabase
+    .from("shifts")
+    .select(SHIFT_DETAIL_SELECT)
+    .eq("tenant_id", tenantId)
+    .order("opened_at", { ascending: false })
+    .limit(limit + 1);
+  if (before) query = query.lt("opened_at", before);
+  const { data, error } = await query;
+  if (error) throw error;
+  const page = ((data ?? []) as ShiftDbRow[]).map(toShiftDetail);
+  const rows = page.slice(0, limit);
+  return {
+    rows,
+    nextBefore: page.length > limit ? (rows.at(-1)?.openedAt ?? null) : null,
+  };
+}
+
+/** Closed shifts opened in one Bangkok month (YYYY-MM), oldest first, for the CSV export. */
+export async function getClosedShiftsInMonth(
+  tenantId: string,
+  month: string
+): Promise<ShiftDetail[]> {
+  const range = bangkokMonthRange(month);
+  if (!range) return [];
+  const supabase = await createClient();
+  const rows: ShiftDetail[] = [];
+  for (let from = 0; ; from += DB_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("shifts")
+      .select(SHIFT_DETAIL_SELECT)
+      .eq("tenant_id", tenantId)
+      .eq("status", "closed")
+      .gte("opened_at", range.start)
+      .lt("opened_at", range.end)
+      .order("opened_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + DB_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as ShiftDbRow[];
+    rows.push(...page.map(toShiftDetail));
+    if (page.length < DB_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+/** The tenant's overnight float setting (เงินทอนที่เก็บไว้ในลิ้นชักข้ามคืน). */
+export async function getCashFloatDefault(tenantId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("tenants")
+    .select("cash_float_default")
+    .eq("id", tenantId)
+    .single();
+  return Number(data?.cash_float_default ?? 1000);
 }
 
 export async function getShiftSummary(
