@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { generatePaymentQr } from "@/app/actions/payment";
 import { Button } from "@/components/ui/button";
@@ -10,27 +10,38 @@ type Props = {
   onCancel: () => void;
 };
 
+type QrState =
+  | { status: "loading" }
+  | { status: "ready"; imageUrl: string }
+  | { status: "error"; message: string };
+
+const QR_SIZE = 280;
+
 export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
-  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [qr, setQr] = useState<QrState>({ status: "loading" });
   const [isConfirming, setIsConfirming] = useState(false);
-  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    startTransition(async () => {
+    // A run that has been superseded (a new total, or React's dev-only double effect) must not
+    // write its result: only the latest run decides what the modal shows.
+    let cancelled = false;
+    (async () => {
       const result = await generatePaymentQr(total);
+      if (cancelled) return;
       if ("error" in result) {
-        setError(result.error);
+        setQr({ status: "error", message: result.error });
         return;
       }
-      const dataUrl = await QRCode.toDataURL(result.qrPayload, {
-        width: 280,
-        margin: 1,
-      });
-      setQrImageUrl(dataUrl);
-    });
+      const imageUrl = await QRCode.toDataURL(result.qrPayload, { width: QR_SIZE, margin: 1 });
+      if (!cancelled) setQr({ status: "ready", imageUrl });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [total]);
 
+  // One fixed layout for every state: the QR area is always QR_SIZE square and the buttons are
+  // always there, so the dialog never changes size (and jumps) while the QR is being made.
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
@@ -41,51 +52,50 @@ export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
           ฿{total.toFixed(2)}
         </p>
 
-        {isPending && (
-          <p className="text-sm text-muted-foreground text-center py-8">
-            กำลังสร้าง QR…
-          </p>
-        )}
-
-        {error && (
-          <div className="space-y-3">
-            <p className="text-sm text-destructive text-center">{error}</p>
-            <Button type="button" onClick={onCancel} className="w-full">
-              ปิด
-            </Button>
-          </div>
-        )}
-
-        {qrImageUrl && !error && (
-          <>
+        <div
+          className="mx-auto flex w-full max-w-[280px] aspect-square items-center justify-center"
+          aria-live="polite"
+        >
+          {qr.status === "loading" && (
+            <p className="text-sm text-muted-foreground text-center">กำลังสร้าง QR…</p>
+          )}
+          {qr.status === "error" && (
+            <p className="text-sm text-destructive text-center">{qr.message}</p>
+          )}
+          {qr.status === "ready" && (
             <img
-              src={qrImageUrl}
+              src={qr.imageUrl}
               alt="PromptPay QR"
-              className="w-full max-w-[280px] mx-auto"
+              width={QR_SIZE}
+              height={QR_SIZE}
+              className="h-full w-full"
             />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                onClick={onCancel}
-                className="flex-1 bg-white border border-input text-sidebar hover:bg-muted"
-              >
-                ยกเลิก
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  if (isConfirming) return;
-                  setIsConfirming(true);
-                  onConfirm();
-                }}
-                disabled={isConfirming}
-                className="flex-1 bg-accent hover:bg-accent/90 text-white"
-              >
-                ยืนยันชำระเงินแล้ว
-              </Button>
-            </div>
-          </>
-        )}
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 bg-white border border-input text-sidebar hover:bg-muted"
+          >
+            {qr.status === "error" ? "ปิด" : "ยกเลิก"}
+          </Button>
+          {qr.status !== "error" && (
+            <Button
+              type="button"
+              onClick={() => {
+                if (isConfirming || qr.status !== "ready") return;
+                setIsConfirming(true);
+                onConfirm();
+              }}
+              disabled={isConfirming || qr.status !== "ready"}
+              className="flex-1 bg-accent hover:bg-accent/90 text-white"
+            >
+              ยืนยันชำระเงินแล้ว
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
