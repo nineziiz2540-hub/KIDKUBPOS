@@ -67,6 +67,22 @@ test("CSV quotes notes with commas, quotes or new lines", () => {
   assert.ok(csv.includes('"ทอนเกิน, ลูกค้า ""โต๊ะ 3""\nแจ้งแล้ว"\r\n'));
 });
 
+test("CSV neutralises typed text that Excel would run as a formula", () => {
+  const csv = buildShiftCsv([row({ openedBy: "@แอบ", note: "=HYPERLINK(\"http://x\")" })]);
+  const line = csv.slice(1).split("\r\n")[1]!;
+  assert.ok(line.includes(",'@แอบ,"), line);
+  assert.ok(line.endsWith(`,"'=HYPERLINK(""http://x"")"`), line);
+  for (const lead of ["+", "-", "\t", "\r"]) {
+    const c = buildShiftCsv([row({ note: `${lead}1` })]);
+    assert.ok(c.includes(`'${lead}1`), JSON.stringify(lead));
+  }
+});
+
+test("CSV keeps negative money as a plain number", () => {
+  const line = buildShiftCsv([row({ variance: -20 })]).slice(1).split("\r\n")[1]!;
+  assert.ok(line.includes(",-20.00,"), line);
+});
+
 test("CSV leaves missing values empty", () => {
   const csv = buildShiftCsv([
     row({ lastNightFloat: null, overnightDifference: null, closedAt: null, closedBy: "" }),

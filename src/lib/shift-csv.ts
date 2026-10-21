@@ -51,6 +51,14 @@ function cell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+/**
+ * Typed text (names, notes) that starts like a formula is prefixed with ' so Excel shows it
+ * instead of running it — staff write the notes and the owner opens the file.
+ */
+function text(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 function money(value: number | null): string {
   return value === null ? "" : value.toFixed(2);
 }
@@ -73,9 +81,9 @@ export function buildShiftCsv(rows: ShiftCsvRow[]): string {
       [
         openedDate,
         formatTime(r.openedAt),
-        r.openedBy,
+        text(r.openedBy),
         closed,
-        r.closedBy,
+        text(r.closedBy),
         money(r.lastNightFloat),
         money(r.openingCount),
         money(r.overnightDifference),
@@ -89,7 +97,7 @@ export function buildShiftCsv(rows: ShiftCsvRow[]): string {
         money(r.variance),
         money(r.floatLeft),
         money(r.deposit),
-        r.note,
+        text(r.note),
       ]
         .map(cell)
         .join(",")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useId, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { finishShift, recordClosingCount } from "@/app/actions/shifts";
 import {
@@ -10,6 +10,7 @@ import {
   depositFor,
   differenceLabel,
   formatMoney,
+  liveSummaryVisible,
   parseAmount,
   planFloat,
   type CountComparison,
@@ -40,6 +41,11 @@ type Props = {
   floatDefault: number;
   openHeld: OpenHeld[];
   personalOutstanding: number;
+  /**
+   * The owner/manager live summary (it shows the expected cash). Rendered only when
+   * liveSummaryVisible(step) — never while someone is counting. Null for staff.
+   */
+  summary: ReactNode;
 };
 
 type Step = "idle" | "held" | "count1" | "count2" | "recount_changed" | "float";
@@ -57,6 +63,7 @@ export function CloseShiftFlow({
   floatDefault,
   openHeld,
   personalOutstanding,
+  summary,
 }: Props) {
   const router = useRouter();
   const countId = useId();
@@ -123,19 +130,24 @@ export function CloseShiftFlow({
     });
   }
 
+  const visibleSummary = liveSummaryVisible(step) ? summary : null;
+
   if (step === "idle") {
     return (
-      <section className="space-y-3 rounded-2xl border bg-white p-5">
-        <h2 className="text-lg font-bold text-sidebar">ปิดกะ</h2>
-        {personalOutstanding > 0 && <PersonalWarning amount={personalOutstanding} />}
-        <button
-          type="button"
-          onClick={begin}
-          className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90"
-        >
-          ปิดกะ
-        </button>
-      </section>
+      <>
+        {visibleSummary}
+        <section className="space-y-3 rounded-2xl border bg-white p-5">
+          <h2 className="text-lg font-bold text-sidebar">ปิดกะ</h2>
+          {personalOutstanding > 0 && <PersonalWarning amount={personalOutstanding} />}
+          <button
+            type="button"
+            onClick={begin}
+            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90"
+          >
+            ปิดกะ
+          </button>
+        </section>
+      </>
     );
   }
 
@@ -146,151 +158,154 @@ export function CloseShiftFlow({
   const floatEdited = parseAmount(floatValue, MAX_FLOAT) !== floatDefault;
 
   return (
-    <section className="space-y-4 rounded-2xl border bg-white p-5">
-      <h2 className="text-lg font-bold text-sidebar">ปิดกะ</h2>
+    <>
+      {visibleSummary}
+      <section className="space-y-4 rounded-2xl border bg-white p-5">
+        <h2 className="text-lg font-bold text-sidebar">ปิดกะ</h2>
 
-      {step === "held" && (
-        <div className="space-y-3">
-          <div className="space-y-1 rounded-xl border border-warning/30 bg-warning/10 p-3 text-base">
-            <p className="font-semibold text-warning">
-              บิลค้างจ่าย {openHeld.length} บิล · {formatMoney(heldTotal)}
+        {step === "held" && (
+          <div className="space-y-3">
+            <div className="space-y-1 rounded-xl border border-warning/30 bg-warning/10 p-3 text-base">
+              <p className="font-semibold text-warning">
+                บิลค้างจ่าย {openHeld.length} บิล · {formatMoney(heldTotal)}
+              </p>
+              <p className="text-muted-foreground">ยังไม่นับเป็นยอดขาย และไม่อยู่ในเงินสดของกะนี้</p>
+              <ul className="pt-1 text-sidebar">
+                {openHeld.map((b) => (
+                  <li key={b.id}>
+                    คิว {b.queueNumber}
+                    {b.customerLabel ? ` · ${b.customerLabel}` : ""} — {formatMoney(b.total)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <p className="text-base font-medium text-sidebar">
+              ยืนยันปิดกะทั้งที่ยังมีบิลค้างจ่าย? บิลเหล่านี้จะยังค้างอยู่ในระบบ
             </p>
-            <p className="text-muted-foreground">ยังไม่นับเป็นยอดขาย และไม่อยู่ในเงินสดของกะนี้</p>
-            <ul className="pt-1 text-sidebar">
-              {openHeld.map((b) => (
-                <li key={b.id}>
-                  คิว {b.queueNumber}
-                  {b.customerLabel ? ` · ${b.customerLabel}` : ""} — {formatMoney(b.total)}
-                </li>
-              ))}
-            </ul>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setStep("idle")}
+                className="h-12 flex-1 rounded-xl border border-input bg-white text-base font-semibold text-sidebar hover:bg-muted"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep("count1")}
+                className="h-12 flex-1 rounded-xl bg-accent text-base font-semibold text-white hover:bg-accent/90"
+              >
+                ปิดกะต่อ
+              </button>
+            </div>
           </div>
-          <p className="text-base font-medium text-sidebar">
-            ยืนยันปิดกะทั้งที่ยังมีบิลค้างจ่าย? บิลเหล่านี้จะยังค้างอยู่ในระบบ
-          </p>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setStep("idle")}
-              className="h-12 flex-1 rounded-xl border border-input bg-white text-base font-semibold text-sidebar hover:bg-muted"
-            >
-              ยกเลิก
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep("count1")}
-              className="h-12 flex-1 rounded-xl bg-accent text-base font-semibold text-white hover:bg-accent/90"
-            >
-              ปิดกะต่อ
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {counting && personalOutstanding > 0 && <PersonalWarning amount={personalOutstanding} />}
+        {counting && personalOutstanding > 0 && <PersonalWarning amount={personalOutstanding} />}
 
-      {step === "count2" && result && (
-        <>
-          <ResultLines result={result} />
-          <p className="rounded-xl bg-warning/10 px-4 py-3 text-lg font-semibold text-warning">
-            {differenceLabel(result.difference)} · นับอีกครั้ง
-          </p>
-        </>
-      )}
-      {step === "recount_changed" && (
-        <p className="rounded-xl bg-warning/10 px-4 py-3 text-lg font-semibold text-warning">
-          มีรายการเงินสดใหม่ระหว่างนับ · นับอีกครั้ง
-        </p>
-      )}
-
-      {counting && (
-        <div className="space-y-3">
-          <label htmlFor={countId} className="text-base font-medium text-sidebar">
-            {step === "count1" ? "นับเงินสดทั้งหมดในลิ้นชัก" : "นับอีกครั้ง"}
-          </label>
-          <AmountInput
-            key={`${step}-${result?.attempt ?? 0}`}
-            id={countId}
-            value={value}
-            onChange={setValue}
-            autoFocus
-            disabled={isPending}
-          />
-          <button
-            type="button"
-            onClick={check}
-            disabled={isPending || value.trim() === ""}
-            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
-          >
-            {isPending ? "กำลังตรวจ…" : "ตรวจยอด"}
-          </button>
-        </div>
-      )}
-
-      {step === "float" && result && plan && (
-        <div className="space-y-4">
-          <ResultLines result={result} />
-          {mismatch ? (
+        {step === "count2" && result && (
+          <>
+            <ResultLines result={result} />
             <p className="rounded-xl bg-warning/10 px-4 py-3 text-lg font-semibold text-warning">
-              {differenceLabel(result.difference)} · บันทึกแล้ว
+              {differenceLabel(result.difference)} · นับอีกครั้ง
             </p>
-          ) : (
-            <p className="rounded-xl bg-success/10 px-4 py-3 text-lg font-semibold text-success">
-              ตรงแล้ว ✓
-            </p>
-          )}
+          </>
+        )}
+        {step === "recount_changed" && (
+          <p className="rounded-xl bg-warning/10 px-4 py-3 text-lg font-semibold text-warning">
+            มีรายการเงินสดใหม่ระหว่างนับ · นับอีกครั้ง
+          </p>
+        )}
 
-          <div className="space-y-1.5">
-            <label htmlFor={floatId} className="text-base font-medium text-sidebar">
-              เก็บไว้เป็นเงินทอนพรุ่งนี้
+        {counting && (
+          <div className="space-y-3">
+            <label htmlFor={countId} className="text-base font-medium text-sidebar">
+              {step === "count1" ? "นับเงินสดทั้งหมดในลิ้นชัก" : "นับอีกครั้ง"}
             </label>
-            <AmountInput id={floatId} value={floatValue} onChange={setFloatValue} disabled={isPending} />
-            {floatEdited && (
-              <p className="text-[15px] text-muted-foreground">
-                ค่าปกติของร้าน {formatMoney(floatDefault)}
+            <AmountInput
+              key={`${step}-${result?.attempt ?? 0}`}
+              id={countId}
+              value={value}
+              onChange={setValue}
+              autoFocus
+              disabled={isPending}
+            />
+            <button
+              type="button"
+              onClick={check}
+              disabled={isPending || value.trim() === ""}
+              className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+            >
+              {isPending ? "กำลังตรวจ…" : "ตรวจยอด"}
+            </button>
+          </div>
+        )}
+
+        {step === "float" && result && plan && (
+          <div className="space-y-4">
+            <ResultLines result={result} />
+            {mismatch ? (
+              <p className="rounded-xl bg-warning/10 px-4 py-3 text-lg font-semibold text-warning">
+                {differenceLabel(result.difference)} · บันทึกแล้ว
+              </p>
+            ) : (
+              <p className="rounded-xl bg-success/10 px-4 py-3 text-lg font-semibold text-success">
+                ตรงแล้ว ✓
               </p>
             )}
-          </div>
-          {plan.shortfall > 0 && (
-            <p className="rounded-xl bg-warning/10 px-4 py-3 text-base font-semibold text-warning">
-              เงินทอนขาดอีก {formatMoney(plan.shortfall)} · เติมก่อนเปิดร้าน
-            </p>
-          )}
-          <div className="flex items-baseline justify-between gap-3 rounded-xl bg-muted px-4 py-3">
-            <p className="text-base font-semibold text-sidebar">นำไปฝากธนาคาร</p>
-            <p className="text-[22px] font-bold tabular-nums text-sidebar">
-              {deposit === null ? "—" : formatMoney(deposit)}
-            </p>
-          </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor={noteId} className="text-base font-medium text-sidebar">
-              หมายเหตุ (ไม่บังคับ)
-            </label>
-            <textarea
-              id={noteId}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-              maxLength={NOTE_MAX}
-              placeholder={mismatch ? "เช่น ทอนเกินลูกค้า" : ""}
-              className="w-full rounded-xl border border-input px-3 py-2 text-base"
-            />
+            <div className="space-y-1.5">
+              <label htmlFor={floatId} className="text-base font-medium text-sidebar">
+                เก็บไว้เป็นเงินทอนพรุ่งนี้
+              </label>
+              <AmountInput id={floatId} value={floatValue} onChange={setFloatValue} disabled={isPending} />
+              {floatEdited && (
+                <p className="text-[15px] text-muted-foreground">
+                  ค่าปกติของร้าน {formatMoney(floatDefault)}
+                </p>
+              )}
+            </div>
+            {plan.shortfall > 0 && (
+              <p className="rounded-xl bg-warning/10 px-4 py-3 text-base font-semibold text-warning">
+                เงินทอนขาดอีก {formatMoney(plan.shortfall)} · เติมก่อนเปิดร้าน
+              </p>
+            )}
+            <div className="flex items-baseline justify-between gap-3 rounded-xl bg-muted px-4 py-3">
+              <p className="text-base font-semibold text-sidebar">นำไปฝากธนาคาร</p>
+              <p className="text-[22px] font-bold tabular-nums text-sidebar">
+                {deposit === null ? "—" : formatMoney(deposit)}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor={noteId} className="text-base font-medium text-sidebar">
+                หมายเหตุ (ไม่บังคับ)
+              </label>
+              <textarea
+                id={noteId}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={2}
+                maxLength={NOTE_MAX}
+                placeholder={mismatch ? "เช่น ทอนเกินลูกค้า" : ""}
+                className="w-full rounded-xl border border-input px-3 py-2 text-base"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={finish}
+              disabled={isPending || deposit === null}
+              className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+            >
+              {isPending ? "กำลังปิดกะ…" : "ยืนยันปิดกะ"}
+            </button>
           </div>
+        )}
 
-          <button
-            type="button"
-            onClick={finish}
-            disabled={isPending || deposit === null}
-            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
-          >
-            {isPending ? "กำลังปิดกะ…" : "ยืนยันปิดกะ"}
-          </button>
-        </div>
-      )}
-
-      {error && <p className="text-base font-medium text-destructive">{error}</p>}
-    </section>
+        {error && <p className="text-base font-medium text-destructive">{error}</p>}
+      </section>
+    </>
   );
 }
 

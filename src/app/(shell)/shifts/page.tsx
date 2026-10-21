@@ -140,8 +140,8 @@ export default async function ShiftsPage({ searchParams }: Props) {
           }))}
         />
         <div className="space-y-6">
-          {canSeeTotals && totals && <ShiftSummaryCard totals={totals} />}
           <CloseShiftFlow
+            summary={canSeeTotals && totals ? <ShiftSummaryCard totals={totals} /> : null}
             shiftId={activeShift.id}
             initialStep={initialStep}
             lastResult={lastResult}

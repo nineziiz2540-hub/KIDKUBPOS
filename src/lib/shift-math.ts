@@ -88,6 +88,14 @@ export function closingStep(
   return attempts.length >= 2 ? "float" : "count2";
 }
 
+/**
+ * Whether the owner/manager live summary (with the expected cash) may show beside the closing
+ * flow at this step. Never while someone is counting: the count comes first, for every role.
+ */
+export function liveSummaryVisible(closingStep: string): boolean {
+  return closingStep === "idle" || closingStep === "float";
+}
+
 /** Keep the shop's float in the drawer (or everything, on a slow day) and deposit the rest. */
 export function planFloat(
   counted: number,

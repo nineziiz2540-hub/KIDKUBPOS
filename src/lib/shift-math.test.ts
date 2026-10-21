@@ -7,6 +7,7 @@ import {
   depositFor,
   differenceLabel,
   formatMoney,
+  liveSummaryVisible,
   parseAmount,
   personalOutstanding,
   planFloat,
@@ -74,6 +75,14 @@ test("closingStep asks for a fresh count when the expected cash changed since th
   assert.equal(closingStep([a(100, 100)], 150), "recount_changed");
   assert.equal(closingStep([a(90, 100), a(90, 100)], 150), "recount_changed");
   assert.equal(closingStep([a(90, 100), a(150, 150)], 150), "float");
+});
+
+test("the live summary (expected cash) is hidden while anyone is counting at closing", () => {
+  assert.equal(liveSummaryVisible("idle"), true);
+  assert.equal(liveSummaryVisible("float"), true);
+  for (const step of ["held", "count1", "count2", "recount_changed"]) {
+    assert.equal(liveSummaryVisible(step), false, step);
+  }
 });
 
 test("planFloat keeps the shop's float and deposits the rest", () => {
