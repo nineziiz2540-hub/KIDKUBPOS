@@ -14,6 +14,64 @@ export type Database = {
   }
   public: {
     Tables: {
+      cash_movements: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string
+          direction: string
+          id: string
+          note: string | null
+          reason: string
+          shift_id: string
+          tenant_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by: string
+          direction: string
+          id?: string
+          note?: string | null
+          reason: string
+          shift_id: string
+          tenant_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string
+          direction?: string
+          id?: string
+          note?: string | null
+          reason?: string
+          shift_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_movements_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_movements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           sort_order: number
@@ -949,17 +1007,88 @@ export type Database = {
           },
         ]
       }
+      shift_cash_counts: {
+        Row: {
+          amount: number
+          attempt: number
+          created_at: string
+          created_by: string
+          expected: number | null
+          id: string
+          shift_id: string
+          stage: string
+          tenant_id: string
+        }
+        Insert: {
+          amount: number
+          attempt: number
+          created_at?: string
+          created_by: string
+          expected?: number | null
+          id?: string
+          shift_id: string
+          stage: string
+          tenant_id: string
+        }
+        Update: {
+          amount?: number
+          attempt?: number
+          created_at?: string
+          created_by?: string
+          expected?: number | null
+          id?: string
+          shift_id?: string
+          stage?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_cash_counts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_cash_counts_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_cash_counts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shifts: {
         Row: {
           closed_at: string | null
           closed_by: string | null
           closing_cash_counted: number | null
+          closing_cash_in: number | null
+          closing_cash_out: number | null
+          closing_cash_refunds: number | null
+          closing_cash_sales: number | null
+          closing_note: string | null
+          closing_order_count: number | null
+          closing_transfer_sales: number | null
           created_at: string
+          deposit_amount: number | null
           expected_cash: number | null
+          float_left: number | null
           id: string
           opened_at: string
           opened_by: string
           opening_cash: number
+          opening_difference: number | null
+          opening_expected: number | null
+          opening_note: string | null
+          previous_shift_id: string | null
           status: string
           tenant_id: string
           variance: number | null
@@ -968,12 +1097,25 @@ export type Database = {
           closed_at?: string | null
           closed_by?: string | null
           closing_cash_counted?: number | null
+          closing_cash_in?: number | null
+          closing_cash_out?: number | null
+          closing_cash_refunds?: number | null
+          closing_cash_sales?: number | null
+          closing_note?: string | null
+          closing_order_count?: number | null
+          closing_transfer_sales?: number | null
           created_at?: string
+          deposit_amount?: number | null
           expected_cash?: number | null
+          float_left?: number | null
           id?: string
           opened_at?: string
           opened_by: string
           opening_cash?: number
+          opening_difference?: number | null
+          opening_expected?: number | null
+          opening_note?: string | null
+          previous_shift_id?: string | null
           status?: string
           tenant_id: string
           variance?: number | null
@@ -982,17 +1124,37 @@ export type Database = {
           closed_at?: string | null
           closed_by?: string | null
           closing_cash_counted?: number | null
+          closing_cash_in?: number | null
+          closing_cash_out?: number | null
+          closing_cash_refunds?: number | null
+          closing_cash_sales?: number | null
+          closing_note?: string | null
+          closing_order_count?: number | null
+          closing_transfer_sales?: number | null
           created_at?: string
+          deposit_amount?: number | null
           expected_cash?: number | null
+          float_left?: number | null
           id?: string
           opened_at?: string
           opened_by?: string
           opening_cash?: number
+          opening_difference?: number | null
+          opening_expected?: number | null
+          opening_note?: string | null
+          previous_shift_id?: string | null
           status?: string
           tenant_id?: string
           variance?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "shifts_previous_shift_id_fkey"
+            columns: ["previous_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "shifts_closed_by_fkey"
             columns: ["closed_by"]
@@ -1044,6 +1206,7 @@ export type Database = {
       }
       tenants: {
         Row: {
+          cash_float_default: number
           created_at: string
           delivery_gp_percent: number
           fixed_cost_monthly: number
@@ -1056,6 +1219,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cash_float_default?: number
           created_at?: string
           delivery_gp_percent?: number
           fixed_cost_monthly?: number
@@ -1068,6 +1232,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cash_float_default?: number
           created_at?: string
           delivery_gp_percent?: number
           fixed_cost_monthly?: number
@@ -1144,6 +1309,69 @@ export type Database = {
         Returns: undefined
       }
       reorder_categories: { Args: { p_ids: string[] }; Returns: undefined }
+      shift_add_cash_movement: {
+        Args: {
+          p_actor_id: string
+          p_amount: number
+          p_direction: string
+          p_note: string | null
+          p_reason: string
+          p_shift_id: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      shift_assert_actor: {
+        Args: { p_actor_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
+      shift_close: {
+        Args: {
+          p_actor_id: string
+          p_float_left: number
+          p_note: string | null
+          p_shift_id: string
+          p_tenant_id: string
+        }
+        Returns: {
+          counted: number
+          deposit: number
+          expected: number
+          float_left: number
+          variance: number
+        }[]
+      }
+      shift_open: {
+        Args: {
+          p_actor_id: string
+          p_counts: number[]
+          p_note: string | null
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      shift_record_closing_count: {
+        Args: {
+          p_actor_id: string
+          p_amount: number
+          p_shift_id: string
+          p_tenant_id: string
+        }
+        Returns: { attempt: number; expected: number }[]
+      }
+      shift_totals: {
+        Args: { p_shift_id: string; p_tenant_id: string }
+        Returns: {
+          cash_in: number
+          cash_out: number
+          cash_refunds: number
+          cash_sales: number
+          expected_cash: number
+          opening_cash: number
+          order_count: number
+          transfer_sales: number
+        }[]
+      }
       reorder_products: {
         Args: { p_category_id: string | null; p_ids: string[] }
         Returns: undefined
