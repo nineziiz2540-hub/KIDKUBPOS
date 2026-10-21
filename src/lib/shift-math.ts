@@ -58,6 +58,11 @@ export function compareCount(counted: number, expected: number | null): CountCom
   return { kind: diff < 0 ? "short" : "over", amount: Math.abs(diff) / 100 };
 }
 
+/** ฿5,230 · ฿85.50 · −฿10 (the sign goes before ฿; a drawer can be "negative" when records are wrong). */
+export function formatMoney(baht: number): string {
+  return toSatang(baht) < 0 ? `−฿${formatBaht(-baht)}` : `฿${formatBaht(baht)}`;
+}
+
 /** ตรง · ขาด ฿20 · เกิน ฿5 */
 export function differenceLabel(c: CountComparison): string {
   if (c.kind === "short") return `ขาด ฿${formatBaht(c.amount)}`;

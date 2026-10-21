@@ -6,6 +6,7 @@ import {
   compareCount,
   depositFor,
   differenceLabel,
+  formatMoney,
   parseAmount,
   personalOutstanding,
   planFloat,
@@ -50,6 +51,14 @@ test("differenceLabel uses the short Thai wording", () => {
   assert.equal(differenceLabel(compareCount(85.5, 85.5)), "ตรง");
   assert.equal(differenceLabel(compareCount(100, 99.5)), "เกิน ฿0.50");
   assert.equal(differenceLabel(compareCount(6690, 5690)), "เกิน ฿1,000");
+});
+
+test("formatMoney puts the minus sign before the baht sign", () => {
+  assert.equal(formatMoney(5230), "฿5,230");
+  assert.equal(formatMoney(85.5), "฿85.50");
+  assert.equal(formatMoney(0), "฿0");
+  assert.equal(formatMoney(-10), "−฿10");
+  assert.equal(formatMoney(-0.5), "−฿0.50");
 });
 
 const a = (amount: number, expected: number): ClosingAttempt => ({ amount, expected });
