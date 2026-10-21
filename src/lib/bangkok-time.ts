@@ -49,6 +49,26 @@ export function bangkokDayRange(date: string): { start: string; end: string } {
   };
 }
 
+const MONTH_RE = /^(\d{4})-(\d{2})$/;
+
+/** The Bangkok calendar month (YYYY-MM) as a UTC [start, end) range, or null if malformed. */
+export function bangkokMonthRange(month: string): { start: string; end: string } | null {
+  const m = MONTH_RE.exec(month);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const monthIndex = Number(m[2]) - 1;
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  return {
+    start: new Date(Date.UTC(year, monthIndex, 1) - BANGKOK_OFFSET_MS).toISOString(),
+    end: new Date(Date.UTC(year, monthIndex + 1, 1) - BANGKOK_OFFSET_MS).toISOString(),
+  };
+}
+
+/** YYYY-MM of an instant in Bangkok. */
+export function bangkokMonth(iso: string): string {
+  return toDateString(new Date(iso).getTime() + BANGKOK_OFFSET_MS).slice(0, 7);
+}
+
 const timeFormat = new Intl.DateTimeFormat("th-TH", {
   timeZone: BANGKOK_TZ,
   hour: "2-digit",

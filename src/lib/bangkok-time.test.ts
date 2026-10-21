@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   bangkokDayRange,
+  bangkokMonth,
+  bangkokMonthRange,
   bangkokToday,
   formatDate,
   formatDateTime,
@@ -57,6 +59,24 @@ test("formatDate full shows the Bangkok weekday and date, even just after Bangko
   assert.ok(s.includes("อังคาร"), s);
   assert.ok(s.includes("20"), s);
   assert.ok(s.includes("ตุลาคม"), s);
+});
+
+test("bangkokMonthRange covers the Bangkok month as a UTC [start, end) range", () => {
+  assert.deepEqual(bangkokMonthRange("2026-10"), {
+    start: "2026-09-30T17:00:00.000Z",
+    end: "2026-10-31T17:00:00.000Z",
+  });
+  assert.deepEqual(bangkokMonthRange("2026-12"), {
+    start: "2026-11-30T17:00:00.000Z",
+    end: "2026-12-31T17:00:00.000Z",
+  });
+  assert.equal(bangkokMonthRange("2026-13"), null);
+  assert.equal(bangkokMonthRange("2026-1"), null);
+});
+
+test("bangkokMonth is the Bangkok calendar month of an instant", () => {
+  assert.equal(bangkokMonth("2026-10-31T17:30:00Z"), "2026-11");
+  assert.equal(bangkokMonth("2026-10-31T16:59:59Z"), "2026-10");
 });
 
 test("formatDateTime includes the Bangkok time", () => {
