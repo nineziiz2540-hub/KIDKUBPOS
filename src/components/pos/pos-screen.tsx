@@ -1,9 +1,14 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
 import { cartSubtotal, lineTotal } from "@/lib/cart-math";
-import { useState, useTransition, useMemo, useRef } from "react";
+import { useEffect, useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createOrder } from "@/app/actions/orders";
+import { checkOrderSaved, createOrder } from "@/app/actions/orders";
+import {
+  attemptFingerprint,
+  CONNECTION_RETRY_MESSAGE,
+  UNRESOLVED_PAYMENT_MESSAGE,
+} from "@/lib/payment-attempt";
 import { holdBill, updateHeldBill, type HeldBillInput } from "@/app/actions/held-bills";
 import type { CancelledHeldBill, HeldBillSummary } from "@/lib/dal";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
@@ -91,6 +96,14 @@ export function PosScreen({
   // Set synchronously on the first confirm tap, so a fast double-tap can't slip a second
   // createOrder in before checkoutPending re-renders the confirm button as disabled.
   const submittingRef = useRef(false);
+  // The payment attempt in progress: its client_ref is reused by every retry of the same cart.
+  const attemptRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
+  // The last try of that attempt got no answer, so it may or may not have been saved.
+  const [uncertain, setUncertain] = useState(false);
+  const paymentWindowOpenRef = useRef(false);
+  useEffect(() => {
+    paymentWindowOpenRef.current = showCashModal || showQrModal;
+  }, [showCashModal, showQrModal]);
 
   const productsWithModifiers = useMemo(
     () => new Set(Object.keys(productModifierRecord)),
@@ -234,6 +247,8 @@ export function PosScreen({
   }
 
   function clearCart() {
+    attemptRef.current = null;
+    setUncertain(false);
     setCartItems([]);
     setError(null);
     setLastOrderNumber(null);
@@ -246,9 +261,59 @@ export function PosScreen({
     resetDiscount();
   }
 
+  type SavedSale = {
+    orderNumber: string;
+    queueNumber: number;
+    cashReceived: number | null;
+    changeAmount: number | null;
+  };
+
+  // A sale is done: show its numbers and empty the cart. Shared by a normal success and by a
+  // payment that ended without an answer and turned out (checkOrderSaved) to be saved.
+  function applySuccess(sale: SavedSale) {
+    attemptRef.current = null;
+    setUncertain(false);
+    setError(null);
+    setLastOrderNumber(sale.orderNumber);
+    setLastQueueNumber(sale.queueNumber);
+    setLastCashTender(
+      sale.cashReceived !== null && sale.changeAmount !== null
+        ? { received: sale.cashReceived, change: sale.changeAmount }
+        : null
+    );
+    setCartItems([]);
+    setCustomer(null);
+    resetDiscount();
+    if (activeHeld) {
+      setActiveHeld(null);
+      setLoadedSnapshot(null);
+      router.refresh();
+    }
+  }
+
+  // Asks whether an attempt that got no answer was saved. Saved → the normal success state; not
+  // saved → the cart stays for another try; no answer at all → today's warning, as a last resort.
+  async function resolveUncertain(clientRef: string) {
+    let res: Awaited<ReturnType<typeof checkOrderSaved>>;
+    try {
+      res = await checkOrderSaved(clientRef);
+    } catch {
+      res = { error: UNRESOLVED_PAYMENT_MESSAGE };
+    }
+    if ("saved" in res && res.saved) {
+      applySuccess(res);
+    } else if ("saved" in res) {
+      setUncertain(false);
+      setError(null);
+    } else {
+      setUncertain(false);
+      setError(UNRESOLVED_PAYMENT_MESSAGE);
+    }
+  }
+
   function submitOrder(
     cashReceived: number | undefined,
-    onSettled?: (errorMessage: string | null, mayHaveSaved: boolean) => void
+    onSettled?: (errorMessage: string | null, noAnswer: boolean) => void
   ) {
     // Re-checked here, not just in handleCheckout: this is the single write path (also reached
     // via the QR/transfer confirm flow), so the approval invariant must hold regardless of how
@@ -256,6 +321,22 @@ export function PosScreen({
     if (requiresApproval && !hasApproverPin) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
+    // One client_ref per payment attempt: a retry of the same cart reuses it, so a sale whose
+    // response was lost is returned instead of being recorded twice (see payment-attempt.ts).
+    const fingerprint = attemptFingerprint({
+      items: cartItems,
+      paymentMethod,
+      orderType,
+      customerId: customer?.id ?? null,
+      discountType,
+      discountValue,
+      heldBillId: activeHeld?.id ?? null,
+      heldBillVersion: activeHeld?.version ?? null,
+    });
+    if (attemptRef.current?.fingerprint !== fingerprint) {
+      attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
+    }
+    const clientRef = attemptRef.current.clientRef;
     setError(null);
     setLastOrderNumber(null);
     setLastQueueNumber(null);
@@ -263,6 +344,7 @@ export function PosScreen({
     setLastHeld(null);
     startCheckout(async () => {
       let result: Awaited<ReturnType<typeof createOrder>>;
+      let noAnswer = false;
       try {
         result = await createOrder({
           items: cartItems,
@@ -276,19 +358,18 @@ export function PosScreen({
           cashReceived,
           heldBillId: activeHeld?.id,
           heldBillVersion: activeHeld?.version,
-          clientRef: crypto.randomUUID(),
+          clientRef,
         });
       } catch {
-        // A dropped connection doesn't mean the sale failed — the server may have saved it
-        // before the response was lost, so warn against blindly re-charging the customer.
-        result = {
-          error: "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบหน้ารายการบิลก่อนกดชำระซ้ำ",
-          mayHaveSaved: true,
-        };
+        // A dropped connection doesn't mean the sale failed — the server may have saved it before
+        // the response was lost. Retrying sends the same client_ref, so it is always safe.
+        noAnswer = true;
+        result = { error: CONNECTION_RETRY_MESSAGE, mayHaveSaved: true };
       } finally {
         submittingRef.current = false;
       }
       if ("error" in result) {
+        setUncertain(noAnswer);
         setError(result.error);
         if (result.error === "PIN ไม่ถูกต้อง" && requiresApproval) {
           const next = pinAttempts + 1;
@@ -299,28 +380,28 @@ export function PosScreen({
             setPinAttempts(next);
           }
         }
+        // The cashier closed the payment window while this was in flight: nobody is there to
+        // tap ลองอีกครั้ง, so find out right away whether it was saved.
+        if (noAnswer && !paymentWindowOpenRef.current) void resolveUncertain(clientRef);
       } else {
-        setLastOrderNumber(result.orderNumber);
-        setLastQueueNumber(result.queueNumber);
-        setLastCashTender(
-          result.cashReceived !== null && result.changeAmount !== null
-            ? { received: result.cashReceived, change: result.changeAmount }
-            : null
-        );
-        setCartItems([]);
-        setCustomer(null);
-        resetDiscount();
-        if (activeHeld) {
-          setActiveHeld(null);
-          setLoadedSnapshot(null);
-          router.refresh();
-        }
+        applySuccess(result);
       }
-      onSettled?.(
-        "error" in result ? result.error : null,
-        "error" in result && result.mayHaveSaved === true
-      );
+      onSettled?.("error" in result ? result.error : null, noAnswer);
     });
+  }
+
+  // Cancel/close of a payment window. A try in flight keeps running and settles on its own; an
+  // attempt that got no answer is resolved (checkOrderSaved) before the cart is offered again.
+  function closePaymentWindow() {
+    setShowCashModal(false);
+    setShowQrModal(false);
+    paymentWindowOpenRef.current = false;
+    if (checkoutPending) return;
+    if (uncertain && attemptRef.current) {
+      void resolveUncertain(attemptRef.current.clientRef);
+    } else {
+      setError(null);
+    }
   }
 
   function handleCheckout() {
@@ -343,16 +424,19 @@ export function PosScreen({
   }
 
   function handleQrConfirm() {
-    submitOrder(undefined, () => setShowQrModal(false));
+    submitOrder(undefined, (errorMessage, noAnswer) => {
+      // No answer: the window stays open on ลองอีกครั้ง. A definite refusal is shown in the cart.
+      if (!noAnswer) setShowQrModal(false);
+    });
   }
 
   function handleCashConfirm(cashReceived: number) {
-    submitOrder(cashReceived, (errorMessage, mayHaveSaved) => {
+    submitOrder(cashReceived, (errorMessage, noAnswer) => {
       // On most failures the modal stays open showing the error, so the cashier can retry
-      // without re-typing the amount. Exceptions: a rejected discount PIN has to be re-entered in
-      // the cart's approval dialog (which this modal would cover), and when the sale may already
-      // be saved, a ready-to-tap confirm button is exactly how a customer gets charged twice.
-      if (errorMessage === null || errorMessage === "PIN ไม่ถูกต้อง" || mayHaveSaved) {
+      // without re-typing the amount — including no answer at all, where ลองอีกครั้ง resends the
+      // same attempt. Exception: a rejected discount PIN has to be re-entered in the cart's
+      // approval dialog, which this modal would cover.
+      if (errorMessage === null || (errorMessage === "PIN ไม่ถูกต้อง" && !noAnswer)) {
         setShowCashModal(false);
       }
       // The shift was closed (e.g. on another device) after this page loaded.
@@ -671,9 +755,9 @@ export function PosScreen({
           total={total}
           promptpayId={promptpayId}
           pending={checkoutPending}
-          error={null}
+          error={uncertain ? error : null}
           onConfirm={handleQrConfirm}
-          onCancel={() => setShowQrModal(false)}
+          onCancel={closePaymentWindow}
         />
       )}
       {showHoldModal && (
@@ -720,11 +804,9 @@ export function PosScreen({
           total={total}
           pending={checkoutPending}
           error={error}
+          retryable={uncertain}
           onConfirm={handleCashConfirm}
-          onCancel={() => {
-            setError(null);
-            setShowCashModal(false);
-          }}
+          onCancel={closePaymentWindow}
         />
       )}
     </div>

@@ -8,6 +8,8 @@ type Props = {
   total: number;
   pending: boolean;
   error: string | null;
+  /** The last try got no answer: the confirm button resends the same attempt as ลองอีกครั้ง. */
+  retryable: boolean;
   onConfirm: (cashReceived: number) => void;
   onCancel: () => void;
 };
@@ -30,7 +32,7 @@ function formatBaht(amount: number): string {
   return amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function CashPaymentModal({ total, pending, error, onConfirm, onCancel }: Props) {
+export function CashPaymentModal({ total, pending, error, retryable, onConfirm, onCancel }: Props) {
   const [typed, setTyped] = useState("");
 
   const received = typed === "" ? null : Number(typed);
@@ -150,7 +152,7 @@ export function CashPaymentModal({ total, pending, error, onConfirm, onCancel }:
             disabled={!canConfirm}
             className="flex-1 h-12 bg-accent hover:bg-accent/90 text-white text-base"
           >
-            {pending ? "กำลังบันทึก…" : "ยืนยันรับเงิน"}
+            {pending ? "กำลังบันทึก…" : retryable ? "ลองอีกครั้ง" : "ยืนยันรับเงิน"}
           </Button>
         </div>
       </div>
