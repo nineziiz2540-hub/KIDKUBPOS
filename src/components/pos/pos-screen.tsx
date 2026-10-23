@@ -26,6 +26,9 @@ import { QrPaymentModal } from "./qr-payment-modal";
 import { NoShiftDialog } from "./no-shift-dialog";
 import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
+import { StatusBanners } from "./status-banners";
+import { useHeartbeat } from "./use-heartbeat";
+import { canAutoReload } from "@/lib/connectivity";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
 
@@ -101,6 +104,10 @@ export function PosScreen({
   // The last try of that attempt got no answer, so it may or may not have been saved.
   const [uncertain, setUncertain] = useState(false);
   const paymentWindowOpenRef = useRef(false);
+  const heartbeat = useHeartbeat();
+  // The heartbeat re-reads the PromptPay ID, so a tab left open never draws a QR to an account the
+  // owner has since changed; until its first answer the page's own value is used.
+  const currentPromptpayId = heartbeat.promptpayId === undefined ? promptpayId : heartbeat.promptpayId;
   useEffect(() => {
     paymentWindowOpenRef.current = showCashModal || showQrModal;
   }, [showCashModal, showQrModal]);
@@ -382,6 +389,7 @@ export function PosScreen({
         }
         // The cashier closed the payment window while this was in flight: nobody is there to
         // tap ลองอีกครั้ง, so find out right away whether it was saved.
+        if (noAnswer) heartbeat.checkNow();
         if (noAnswer && !paymentWindowOpenRef.current) void resolveUncertain(clientRef);
       } else {
         applySuccess(result);
@@ -610,8 +618,39 @@ export function PosScreen({
   // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
   // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
   // dvh tracks Safari's toolbar showing/hiding.
+  // A newer deployment is live: reload into it by itself, but only when nothing on the POS can be
+  // lost. Dialogs owned by child components (discount, note, approval PIN pad) are caught by the
+  // DOM check; otherwise the update bar waits for the cashier's tap.
+  const anyDialogOpen =
+    showQrModal ||
+    showCashModal ||
+    showHoldModal ||
+    showHeldPanel ||
+    showNoShift ||
+    showMobileCart ||
+    pendingProduct !== null;
+  const paymentUnresolved =
+    uncertain || checkoutPending || error === UNRESOLVED_PAYMENT_MESSAGE;
+  useEffect(() => {
+    if (!heartbeat.newVersionAvailable) return;
+    const idle = canAutoReload({
+      cartCount: cartItems.length,
+      heldLoaded: activeHeld !== null,
+      anyDialogOpen,
+      paymentUnresolved,
+    });
+    if (idle && document.querySelector('[role="dialog"], .fixed.inset-0') === null) {
+      window.location.reload();
+    }
+  }, [heartbeat.newVersionAvailable, cartItems.length, activeHeld, anyDialogOpen, paymentUnresolved]);
+
   return (
     <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
+      <StatusBanners
+        offline={heartbeat.connectivity.status === "offline"}
+        updateAvailable={heartbeat.newVersionAvailable}
+        onRefresh={() => window.location.reload()}
+      />
       <PosHeader
         userName={userName}
         todayOrderCount={todayOrderCount}
@@ -753,7 +792,7 @@ export function PosScreen({
       {showQrModal && (
         <QrPaymentModal
           total={total}
-          promptpayId={promptpayId}
+          promptpayId={currentPromptpayId}
           pending={checkoutPending}
           error={uncertain ? error : null}
           onConfirm={handleQrConfirm}
