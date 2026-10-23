@@ -9,25 +9,66 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
 import { diffReductions } from "@/lib/held-bill-diff";
-import { NO_OPEN_SHIFT_MESSAGE, orderInsertShiftError } from "@/lib/shift-errors";
+import { orderCreateErrorMessage, OLD_TAB_MESSAGE } from "@/lib/order-create-errors";
 import type { CartItem, CreateOrderInput } from "@/types/app";
 import type { Json } from "@/types/database";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type SavedOrder = {
+  orderId: string;
+  orderNumber: string;
+  queueNumber: number;
+  cashReceived: number | null;
+  changeAmount: number | null;
+};
+
+function toSavedOrder(row: {
+  id: string;
+  order_number: string | null;
+  queue_number: number | null;
+  cash_received: number | null;
+  change_amount: number | null;
+}): SavedOrder {
+  return {
+    orderId: row.id,
+    orderNumber: row.order_number ?? "",
+    queueNumber: row.queue_number ?? 0,
+    cashReceived: row.cash_received === null ? null : Number(row.cash_received),
+    changeAmount: row.change_amount === null ? null : Number(row.change_amount),
+  };
+}
+
+/**
+ * Records a sale. data.clientRef identifies this payment attempt (the POS keeps it across
+ * retries of the same cart): if a bill with it already exists, that bill is returned as a
+ * success before any other check, so a retry after a lost response can never record the sale
+ * twice. Every write happens in one transaction in order_create (migration 20261023120000).
+ */
 export async function createOrder(
   data: CreateOrderInput
 ): Promise<
   // mayHaveSaved: the sale may already be recorded, so the UI must not offer a one-tap retry.
-  | { error: string; mayHaveSaved?: true }
-  | {
-      orderId: string;
-      orderNumber: string;
-      queueNumber: number;
-      cashReceived: number | null;
-      changeAmount: number | null;
-    }
+  // Only the POS's own catch sets it now (a lost response); every server path below is definite.
+  { error: string; mayHaveSaved?: true } | SavedOrder
 > {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  if (typeof data.clientRef !== "string" || !UUID_RE.test(data.clientRef)) {
+    return { error: OLD_TAB_MESSAGE };
+  }
+
+  // 0. Replay first: a bill already saved under this attempt is the answer, whatever has changed
+  // since (its held bill is now paid, its shift may have closed).
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from("orders")
+    .select("id, order_number, queue_number, cash_received, change_amount")
+    .eq("tenant_id", profile.tenant_id)
+    .eq("client_ref", data.clientRef)
+    .maybeSingle();
+  if (existing) return toSavedOrder(existing);
 
   const supabase = await createClient();
 
@@ -105,7 +146,6 @@ export async function createOrder(
       return { error: "PIN ไม่ถูกต้อง" };
     }
 
-    const admin = createAdminClient();
     const { data: approvers } = await admin
       .from("profiles")
       .select("id, pin_hash")
@@ -122,73 +162,32 @@ export async function createOrder(
     if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
   }
 
-  // 4b. Paying a held bill: it must still be open at the version the cashier loaded. Checked before
-  // any sequence number is generated so a stale/duplicate attempt burns nothing.
-  let heldBill: { id: string; queue_number: number; items: CartItem[] } | null = null;
+  // 4b. Paying a held bill: its items are read only to audit reductions made right before paying.
+  // order_create re-checks it is still open at the loaded version, under a row lock.
+  let reductions: ReturnType<typeof diffReductions> = [];
   if (data.heldBillId !== undefined) {
     if (typeof data.heldBillId !== "string" || typeof data.heldBillVersion !== "number") {
       return { error: "ข้อมูลบิลพักไม่ถูกต้อง" };
     }
-    const { data: row } = await createAdminClient()
+    const { data: row } = await admin
       .from("held_bills")
-      .select("id, queue_number, items, status, version")
+      .select("items")
       .eq("id", data.heldBillId)
       .eq("tenant_id", profile.tenant_id)
       .maybeSingle();
-    if (!row || row.status !== "open" || row.version !== data.heldBillVersion) {
-      return { error: "บิลพักนี้ถูกแก้ไข ชำระ หรือยกเลิกไปแล้ว กรุณาเปิดรายการบิลพักใหม่" };
-    }
-    heldBill = {
-      id: row.id,
-      queue_number: row.queue_number,
-      items: row.items as unknown as CartItem[],
-    };
+    if (!row) return { error: orderCreateErrorMessage("held_bill_stale")! };
+    reductions = diffReductions(row.items as unknown as CartItem[], data.items);
   }
 
-  // 5. Attach the currently open shift. Cash needs one (the drawer is counted per shift); a
-  // transfer doesn't touch the drawer, so it still goes through without a shift. Checked before
-  // any order/queue number is generated, so a refused cash sale burns nothing.
-  const activeShift = await getActiveShift(profile.tenant_id);
-  if (data.paymentMethod === "cash" && !activeShift) {
-    return { error: NO_OPEN_SHIFT_MESSAGE };
-  }
-
-  // 6. Generate order number atomically — deferred until after all validation above so a
-  // rejected attempt (bad discount value, wrong PIN, etc.) never burns a sequence number.
-  const { data: orderNumber, error: seqError } = await supabase.rpc(
-    "generate_order_number",
-    { p_tenant_id: profile.tenant_id }
-  );
-  if (seqError || !orderNumber) return { error: "สร้างเลขออเดอร์ไม่สำเร็จ" };
-
-  // Daily queue number the cashier calls out — also after validation, so rejected attempts
-  // don't leave gaps in the day's queue.
-  // A held bill keeps the queue number the customer was already given.
-  let queueNumber: number;
-  if (heldBill) {
-    queueNumber = heldBill.queue_number;
-  } else {
-    const { data: nextQueue, error: queueError } = await supabase.rpc("next_queue_number", {
-      p_tenant_id: profile.tenant_id,
-    });
-    if (queueError || typeof nextQueue !== "number") return { error: "สร้างเลขคิวไม่สำเร็จ" };
-    queueNumber = nextQueue;
-  }
-
-  // 7. Insert order row. Written via the admin client only when an approval was just verified
-  // above (discount_approved_by non-null) — prevent_direct_discount_approval rejects that exact
-  // write from any caller except service_role, so the trigger and this client choice must be
-  // changed together.
-  // The same applies to held_bill_id (prevent_direct_held_bill_link): only service_role may link an
-  // order to a held bill, and the UNIQUE constraint on it makes a concurrent second payment fail.
-  const insertClient =
-    approverId !== null || heldBill !== null ? createAdminClient() : supabase;
-  const { data: order, error: orderError } = await insertClient
-    .from("orders")
-    .insert({
-      tenant_id: profile.tenant_id,
-      created_by: profile.id,
+  // 5-8. One transaction: order/queue numbers, the order (attached to the open shift — cash needs
+  // one, guard_order_drawer refuses it otherwise), its items, and the held-bill close-out.
+  const { data: rows, error: createError } = await admin.rpc("order_create", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_client_ref: data.clientRef,
+    p_order: {
       payment_method: data.paymentMethod,
+      order_type: data.orderType,
       subtotal,
       // Pre-rounded to satang so the stored total is exactly the one change was computed from
       // (the column is numeric(10,2) and would round it the same way anyway).
@@ -200,111 +199,81 @@ export async function createOrder(
       discount_amount: discountAmount,
       discount_reason: discountReason,
       discount_approved_by: approverId,
-      order_number: orderNumber,
-      order_type: data.orderType,
-      queue_number: queueNumber,
       customer_id: data.customerId ?? null,
       note: data.note ?? null,
-      shift_id: activeShift?.id ?? null,
-      held_bill_id: heldBill?.id ?? null,
-    })
-    .select("id")
-    .single();
-
-  if (orderError?.code === "23505" && heldBill) return { error: "บิลพักนี้ชำระไปแล้ว" };
-  const shiftRefusal = orderError ? orderInsertShiftError(orderError.message) : null;
-  if (shiftRefusal) return { error: shiftRefusal };
-  if (orderError || !order) return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
-
-  // 8. Build order_items with snapshots
-  const orderItems = priced.lines.map((line) => ({
-    order_id: order.id,
-    product_id: line.productId,
-    product_name: line.productName,
-    unit_price: line.unitPrice,
-    quantity: line.quantity,
-    subtotal: line.lineTotal,
-    category_name: line.categoryName,
-    modifiers_snapshot: line.modifiersSnapshot,
-    note: line.note,
-  }));
-
-  const { error: itemsError } = await supabase
-    .from("order_items")
-    .insert(orderItems);
-  if (itemsError) {
-    // The order row above is already committed, so without this the failed sale would leave a
-    // bill with no items that still counts in revenue and the shift's expected cash — and the
-    // cash modal's retry would then record the same sale a second time. Roll it back by hand
-    // (via the admin client: tenant members have no DELETE path on orders). A single INSERT is
-    // all-or-nothing, so no order_items rows exist to clean up. Stock hasn't been deducted yet.
-    const { error: rollbackError } = await createAdminClient()
-      .from("orders")
-      .delete()
-      .eq("id", order.id)
-      .eq("tenant_id", profile.tenant_id);
-    if (rollbackError) {
-      console.error(
-        "[createOrder] order_items insert failed and orphan order rollback also failed:",
-        order.id,
-        rollbackError.message
-      );
-      return {
-        error: `บันทึกบิลไม่สมบูรณ์ (${orderNumber}) กรุณาแจ้งผู้จัดการ อย่ากดชำระซ้ำ`,
-        mayHaveSaved: true,
-      };
-    }
-    return { error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณากดยืนยันอีกครั้ง" };
-  }
-
-  // 8b. Close out the held bill. The order already exists, so this is best-effort: if it fails,
-  // the open-bills list excludes any held bill that has an order, and the UNIQUE link still blocks
-  // a second payment. Reductions made right before paying are audited here too.
-  if (heldBill) {
-    const admin = createAdminClient();
-    const reductions = diffReductions(heldBill.items, data.items);
-    const events: { held_bill_id: string; tenant_id: string; actor_id: string; event_type: string; detail: Json }[] = [];
-    if (reductions.length > 0) {
-      events.push({
-        held_bill_id: heldBill.id,
-        tenant_id: profile.tenant_id,
-        actor_id: profile.id,
-        event_type: "items_reduced",
-        detail: { reductions, at_payment: true } as unknown as Json,
-      });
-    }
-    events.push({
-      held_bill_id: heldBill.id,
-      tenant_id: profile.tenant_id,
-      actor_id: profile.id,
-      event_type: "paid",
-      detail: { order_id: order.id, order_number: orderNumber, total: toSatang(total) / 100 },
-    });
-    const { error: closeError } = await admin
-      .from("held_bills")
-      .update({ status: "paid", updated_by: profile.id, updated_at: new Date().toISOString() })
-      .eq("id", heldBill.id)
-      .eq("tenant_id", profile.tenant_id);
-    const { error: eventsError } = await admin.from("held_bill_events").insert(events);
-    if (closeError || eventsError) {
-      console.error("[createOrder] held bill close-out failed:", heldBill.id, closeError ?? eventsError);
-    }
-    revalidatePath("/pos");
-  }
-
-  // 9. Deduct stock (best-effort — don't block on failure)
-  const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {
-    p_order_id: order.id,
+    },
+    p_items: priced.lines.map((line) => ({
+      product_id: line.productId,
+      product_name: line.productName,
+      unit_price: line.unitPrice,
+      quantity: line.quantity,
+      subtotal: line.lineTotal,
+      category_name: line.categoryName,
+      modifiers_snapshot: line.modifiersSnapshot,
+      note: line.note,
+    })) as unknown as Json,
+    p_held_bill_id: data.heldBillId ?? null,
+    p_held_bill_version: data.heldBillVersion ?? null,
+    p_held_reductions: reductions as unknown as Json,
   });
-  if (deductError) {
-    console.error(
-      "[createOrder] deduct_stock_for_order failed:",
-      deductError.message
-    );
+  const created = rows?.[0];
+  if (createError || !created) {
+    const known = createError ? orderCreateErrorMessage(createError.message) : null;
+    if (!known) console.error("[createOrder] order_create failed:", createError?.message);
+    return { error: known ?? "บันทึกออเดอร์ไม่สำเร็จ" };
   }
 
-  revalidatePath("/orders");
-  return { orderId: order.id, orderNumber, queueNumber, cashReceived, changeAmount };
+  if (created.created) {
+    // 9. Deduct stock (best-effort — don't block on failure). Only for a new bill: a replay's
+    // stock was deducted when it was first saved.
+    const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {
+      p_order_id: created.order_id,
+    });
+    if (deductError) {
+      console.error("[createOrder] deduct_stock_for_order failed:", deductError.message);
+    }
+    if (data.heldBillId !== undefined) revalidatePath("/pos");
+    revalidatePath("/orders");
+  }
+
+  return toSavedOrder({
+    id: created.order_id,
+    order_number: created.order_number,
+    queue_number: created.queue_number,
+    cash_received: created.cash_received,
+    change_amount: created.change_amount,
+  });
+}
+
+/**
+ * Whether the payment attempt `clientRef` was saved — asked by the POS when a payment ended
+ * without an answer (lost connection) and the cashier closes the payment window. Scoped to the
+ * caller's own shop by RLS and by the tenant filter.
+ */
+export async function checkOrderSaved(
+  clientRef: string
+): Promise<({ saved: true } & Omit<SavedOrder, "orderId">) | { saved: false } | { error: string }> {
+  const profile = await getProfile();
+  if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+  if (typeof clientRef !== "string" || !UUID_RE.test(clientRef)) return { saved: false };
+
+  const supabase = await createClient();
+  const { data: row, error } = await supabase
+    .from("orders")
+    .select("id, order_number, queue_number, cash_received, change_amount")
+    .eq("tenant_id", profile.tenant_id)
+    .eq("client_ref", clientRef)
+    .maybeSingle();
+  if (error) return { error: "ตรวจสอบบิลไม่สำเร็จ" };
+  if (!row) return { saved: false };
+  const saved = toSavedOrder(row);
+  return {
+    saved: true,
+    orderNumber: saved.orderNumber,
+    queueNumber: saved.queueNumber,
+    cashReceived: saved.cashReceived,
+    changeAmount: saved.changeAmount,
+  };
 }
 
 export type VoidOrderState = { error?: string; success?: boolean } | undefined;

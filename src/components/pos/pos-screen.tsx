@@ -276,6 +276,7 @@ export function PosScreen({
           cashReceived,
           heldBillId: activeHeld?.id,
           heldBillVersion: activeHeld?.version,
+          clientRef: crypto.randomUUID(),
         });
       } catch {
         // A dropped connection doesn't mean the sale failed — the server may have saved it

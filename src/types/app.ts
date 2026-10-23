@@ -34,6 +34,8 @@ export type CreateOrderInput = {
   /** Set when paying a parked bill; version must match what the cashier loaded. */
   heldBillId?: string;
   heldBillVersion?: number;
+  /** Id of this payment attempt, kept across retries; the same id never records a second bill. */
+  clientRef: string;
 };
 
 export type ProductCost = {
