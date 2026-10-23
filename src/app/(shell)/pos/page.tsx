@@ -6,6 +6,7 @@ import {
   getActiveShift,
   getOpenHeldBills,
   getCancelledHeldBillsToday,
+  getTenantPromptPayId,
 } from "@/lib/dal";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
@@ -105,10 +106,11 @@ export default async function PosPage() {
     .eq("status", "completed")
     .gte("created_at", todayStart.toISOString());
 
-  const [activeShift, heldBills, cancelledHeldToday] = await Promise.all([
+  const [activeShift, heldBills, cancelledHeldToday, promptpayId] = await Promise.all([
     getActiveShift(profile.tenant_id),
     getOpenHeldBills(profile.tenant_id),
     getCancelledHeldBillsToday(profile.tenant_id),
+    getTenantPromptPayId(profile.tenant_id),
   ]);
 
   return (
@@ -122,6 +124,7 @@ export default async function PosPage() {
       activeShiftId={activeShift?.id ?? null}
       heldBills={heldBills}
       cancelledHeldToday={cancelledHeldToday}
+      promptpayId={promptpayId}
     />
   );
 }

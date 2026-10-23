@@ -36,6 +36,8 @@ type Props = {
   activeShiftId: string | null;
   heldBills: HeldBillSummary[];
   cancelledHeldToday: CancelledHeldBill[];
+  /** The shop's PromptPay ID; the QR is drawn on the device from it. */
+  promptpayId: string | null;
 };
 
 type ActiveHeld = { id: string; version: number; queueNumber: number; customerLabel: string | null };
@@ -51,6 +53,7 @@ export function PosScreen({
   activeShiftId,
   heldBills,
   cancelledHeldToday,
+  promptpayId,
 }: Props) {
   const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -665,6 +668,9 @@ export function PosScreen({
       {showQrModal && (
         <QrPaymentModal
           total={total}
+          promptpayId={promptpayId}
+          pending={checkoutPending}
+          error={null}
           onConfirm={handleQrConfirm}
           onCancel={() => setShowQrModal(false)}
         />

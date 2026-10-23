@@ -1,11 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { generatePaymentQr } from "@/app/actions/payment";
+import { buildPromptPayPayload } from "@/lib/promptpay";
 import { Button } from "@/components/ui/button";
 
 type Props = {
   total: number;
+  /** The shop's PromptPay ID, loaded with the POS page; null when the shop hasn't set one. */
+  promptpayId: string | null;
+  /** A payment attempt is in flight. Owned by the parent so a failed confirm can be retried. */
+  pending: boolean;
+  /** Why the last confirm failed; the confirm button then reads ลองอีกครั้ง. */
+  error: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -16,29 +22,36 @@ type QrState =
   | { status: "error"; message: string };
 
 const QR_SIZE = 280;
+const NO_PROMPTPAY = "ร้านยังไม่ได้ตั้งค่า PromptPay ID กรุณาไปที่หน้าตั้งค่า";
 
-export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
-  const [qr, setQr] = useState<QrState>({ status: "loading" });
-  const [isConfirming, setIsConfirming] = useState(false);
+export function QrPaymentModal({ total, promptpayId, pending, error, onConfirm, onCancel }: Props) {
+  // Drawn entirely on the device: no request can leave this on "กำลังสร้าง QR…".
+  const [image, setImage] = useState<{ key: string; state: QrState } | null>(null);
+  const key = promptpayId === null ? "" : buildPromptPayPayload(promptpayId, total);
 
   useEffect(() => {
-    // A run that has been superseded (a new total, or React's dev-only double effect) must not
-    // write its result: only the latest run decides what the modal shows.
+    if (key === "") return;
+    // A run that has been superseded (a new total or ID, or React's dev-only double effect) must
+    // not write its result: only the latest run decides what the modal shows.
     let cancelled = false;
-    (async () => {
-      const result = await generatePaymentQr(total);
-      if (cancelled) return;
-      if ("error" in result) {
-        setQr({ status: "error", message: result.error });
-        return;
-      }
-      const imageUrl = await QRCode.toDataURL(result.qrPayload, { width: QR_SIZE, margin: 1 });
-      if (!cancelled) setQr({ status: "ready", imageUrl });
-    })();
+    QRCode.toDataURL(key, { width: QR_SIZE, margin: 1 })
+      .then((imageUrl) => {
+        if (!cancelled) setImage({ key, state: { status: "ready", imageUrl } });
+      })
+      .catch(() => {
+        if (!cancelled) setImage({ key, state: { status: "error", message: "สร้าง QR ไม่สำเร็จ" } });
+      });
     return () => {
       cancelled = true;
     };
-  }, [total]);
+  }, [key]);
+
+  const qr: QrState =
+    promptpayId === null
+      ? { status: "error", message: NO_PROMPTPAY }
+      : image?.key === key
+        ? image.state
+        : { status: "loading" };
 
   // One fixed layout for every state: the QR area is always QR_SIZE square and the buttons are
   // always there, so the dialog never changes size (and jumps) while the QR is being made.
@@ -73,6 +86,12 @@ export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
           )}
         </div>
 
+        {error && (
+          <p className="text-sm font-medium text-destructive text-center" role="alert">
+            {error}
+          </p>
+        )}
+
         <div className="flex gap-2">
           <Button
             type="button"
@@ -85,14 +104,13 @@ export function QrPaymentModal({ total, onConfirm, onCancel }: Props) {
             <Button
               type="button"
               onClick={() => {
-                if (isConfirming || qr.status !== "ready") return;
-                setIsConfirming(true);
+                if (pending || qr.status !== "ready") return;
                 onConfirm();
               }}
-              disabled={isConfirming || qr.status !== "ready"}
+              disabled={pending || qr.status !== "ready"}
               className="flex-1 bg-accent hover:bg-accent/90 text-white"
             >
-              ยืนยันชำระเงินแล้ว
+              {error ? "ลองอีกครั้ง" : "ยืนยันชำระเงินแล้ว"}
             </Button>
           )}
         </div>
