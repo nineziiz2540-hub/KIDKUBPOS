@@ -1,34 +1,25 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { CartItem } from "@/types/app";
-import { toSatang } from "@/lib/cash";
-import { normalizeNote } from "@/lib/notes";
+import {
+  MAX_LINES,
+  MAX_OPTIONS_PER_LINE,
+  MAX_QTY,
+  priceLines,
+  type CatalogModifier,
+  type CatalogOption,
+  type PricedLine,
+} from "@/lib/order-pricing-core";
 
-const MAX_LINES = 100;
-const MAX_QTY = 999;
-const MAX_OPTIONS_PER_LINE = 20;
-
-export type PricedLine = {
-  productId: string;
-  productName: string;
-  categoryName: string | null;
-  quantity: number;
-  unitPrice: number;
-  lineTotal: number;
-  modifiersSnapshot: { group: string; option: string; priceDelta: number }[] | null;
-  note: string | null;
-};
-
-const STALE = "ราคาหรือเมนูมีการเปลี่ยนแปลง กรุณารีเฟรชหน้า POS แล้วลองใหม่";
+export type { PricedLine };
 
 /**
  * Re-prices a cart entirely from the database. createOrder used to trust each CartItem's
  * totalPrice from the client, so anyone signed in could call the server action directly and
- * record a ฿1 latte. Here every product/option is looked up (tenant-scoped), option links and
- * required/single-select rules are enforced, and totals are recomputed in integer satang. The
- * client's own totalPrice must match the recomputed one — a mismatch means either tampering or a
- * POS tab showing stale prices, and in both cases charging a different amount than the cashier saw
- * would be wrong, so the sale is rejected instead.
+ * record a ฿1 latte. Here every product/option is looked up (tenant-scoped) and handed to
+ * priceLines (src/lib/order-pricing-core.ts), which enforces option links and required/
+ * single-select rules, recomputes totals in integer satang and rejects a client total that
+ * differs.
  */
 export async function priceCartItems(
   supabase: SupabaseClient<Database>,
@@ -77,10 +68,7 @@ export async function priceCartItems(
   }
 
   const allModifierIds = [...new Set((links ?? []).map((l) => l.modifier_id))];
-  const modifierMap = new Map<
-    string,
-    { id: string; name: string; is_required: boolean; is_multi_select: boolean }
-  >();
+  const modifierMap = new Map<string, CatalogModifier>();
   if (allModifierIds.length > 0) {
     const { data: modifiers, error: modifiersError } = await supabase
       .from("modifiers")
@@ -91,10 +79,7 @@ export async function priceCartItems(
     for (const m of modifiers ?? []) modifierMap.set(m.id, m);
   }
 
-  const optionMap = new Map<
-    string,
-    { id: string; name: string; price_delta: number | null; modifier_id: string }
-  >();
+  const optionMap = new Map<string, CatalogOption>();
   if (optionIds.length > 0) {
     const { data: options, error: optionsError } = await supabase
       .from("modifier_options")
@@ -104,60 +89,10 @@ export async function priceCartItems(
     for (const o of options ?? []) optionMap.set(o.id, o);
   }
 
-  const lines: PricedLine[] = [];
-  let subtotalSatang = 0;
-
-  for (const item of items) {
-    const normalizedNote = normalizeNote(item.note);
-    if (!normalizedNote.ok) return { error: "หมายเหตุไม่ถูกต้อง (ไม่เกิน 200 ตัวอักษร)" };
-    const product = productMap.get(item.productId);
-    if (!product || !product.is_active || product.archived_at !== null) return { error: STALE };
-
-    const linked = linkedModifiers.get(product.id) ?? new Set<string>();
-    const chosenPerModifier = new Map<string, number>();
-    const snapshot: PricedLine["modifiersSnapshot"] = [];
-    let unitSatang = toSatang(Number(product.price));
-
-    const seen = new Set<string>();
-    for (const sel of item.selectedModifiers) {
-      if (seen.has(sel.optionId)) return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
-      seen.add(sel.optionId);
-      const option = optionMap.get(sel.optionId);
-      // modifierMap only holds this tenant's modifiers linked to cart products, so an option from
-      // another tenant or an unlinked modifier fails here too.
-      const modifier = option ? modifierMap.get(option.modifier_id) : undefined;
-      if (!option || !modifier || !linked.has(modifier.id)) return { error: STALE };
-      chosenPerModifier.set(modifier.id, (chosenPerModifier.get(modifier.id) ?? 0) + 1);
-      const delta = Number(option.price_delta ?? 0);
-      unitSatang += toSatang(delta);
-      snapshot.push({ group: modifier.name, option: option.name, priceDelta: delta });
-    }
-
-    for (const modifierId of linked) {
-      const modifier = modifierMap.get(modifierId);
-      if (!modifier) continue;
-      const count = chosenPerModifier.get(modifierId) ?? 0;
-      if (modifier.is_required && count === 0) return { error: STALE };
-      if (!modifier.is_multi_select && count > 1) return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
-    }
-
-    if (unitSatang < 0) return { error: STALE };
-    const lineSatang = unitSatang * item.quantity;
-    if (toSatang(item.totalPrice) !== lineSatang) return { error: STALE };
-
-    subtotalSatang += lineSatang;
-    const category = product.categories as { name: string } | null;
-    lines.push({
-      productId: product.id,
-      productName: product.name,
-      categoryName: category?.name ?? null,
-      quantity: item.quantity,
-      unitPrice: unitSatang / 100,
-      lineTotal: lineSatang / 100,
-      modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
-      note: normalizedNote.note,
-    });
-  }
-
-  return { lines, subtotal: subtotalSatang / 100 };
+  return priceLines(items, {
+    products: productMap,
+    linkedModifiers,
+    modifiers: modifierMap,
+    options: optionMap,
+  });
 }

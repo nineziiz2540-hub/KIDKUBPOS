@@ -1,5 +1,6 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
+import { unitPrice } from "@/lib/cart-math";
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { CartItem, ModifierWithOptions, PosProduct, SelectedModifier } from "@/types/app";
@@ -67,7 +68,6 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
         }
       }
     }
-    const unitPrice = product.price + totalDelta;
     onAddToCart({
       cartItemKey: `${product.id}-${Date.now()}`,
       productId: product.id,
@@ -75,7 +75,7 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
       basePrice: product.price,
       quantity: 1,
       selectedModifiers,
-      totalPrice: unitPrice,
+      totalPrice: unitPrice(product.price, selectedModifiers),
       note: note.trim() === "" ? null : note.trim(),
     });
   }

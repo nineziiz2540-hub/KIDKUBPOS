@@ -1,5 +1,6 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
+import { cartSubtotal, lineTotal } from "@/lib/cart-math";
 import { useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createOrder } from "@/app/actions/orders";
@@ -98,7 +99,7 @@ export function PosScreen({
     [productModifierRecord]
   );
 
-  const subtotal = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
+  const subtotal = cartSubtotal(cartItems);
   const itemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const parsedDiscountValue = Number(discountValue);
   const { discountAmount, requiresApproval, total } = computeDiscount(
@@ -166,13 +167,10 @@ export function PosScreen({
       if (existing) {
         return prev.map((i) => {
           if (i.cartItemKey !== product.id) return i;
-          const unitPrice =
-            i.basePrice +
-            i.selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
           return {
             ...i,
             quantity: i.quantity + 1,
-            totalPrice: unitPrice * (i.quantity + 1),
+            totalPrice: lineTotal(i.basePrice, i.selectedModifiers, i.quantity + 1),
           };
         });
       }
@@ -222,10 +220,7 @@ export function PosScreen({
       setCartItems((prev) =>
         prev.map((i) => {
           if (i.cartItemKey !== key) return i;
-          const unitPrice =
-            i.basePrice +
-            i.selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
-          return { ...i, quantity: qty, totalPrice: unitPrice * qty };
+          return { ...i, quantity: qty, totalPrice: lineTotal(i.basePrice, i.selectedModifiers, qty) };
         })
       );
     }
@@ -470,12 +465,11 @@ export function PosScreen({
           ?.options.find((o) => o.id === m.optionId);
         return option ? { ...m, priceDelta: option.priceDelta } : m;
       });
-      const unit = product.price + selectedModifiers.reduce((s, m) => s + m.priceDelta, 0);
       return {
         ...item,
         basePrice: product.price,
         selectedModifiers,
-        totalPrice: unit * item.quantity,
+        totalPrice: lineTotal(product.price, selectedModifiers, item.quantity),
       };
     });
   }
@@ -690,7 +684,7 @@ export function PosScreen({
           bills={heldBills.map((bill) => {
             // Show what the cashier will actually charge: the same current-menu prices resumeHeld uses.
             const items = repriceFromMenu(bill.items);
-            const sub = items.reduce((s, i) => s + i.totalPrice, 0);
+            const sub = cartSubtotal(items);
             return {
               ...bill,
               items,
