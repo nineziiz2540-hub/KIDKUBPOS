@@ -56,13 +56,13 @@ export function CashPaymentModal({ total, pending, error, retryable, onConfirm, 
         setTyped((t) => applyKey(t, e.key));
       } else if (e.key === "Backspace") {
         setTyped((t) => applyKey(t, "back"));
-      } else if (e.key === "Escape" && !pending) {
+      } else if (e.key === "Escape") {
         onCancel();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pending, onCancel]);
+  }, [onCancel]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -140,8 +140,9 @@ export function CashPaymentModal({ total, pending, error, retryable, onConfirm, 
         <div className="flex gap-2">
           <Button
             type="button"
+            // Never disabled: a stalled try must not trap the cashier. Closing while it is in flight
+            // lets it settle in the background (see closePaymentWindow in pos-screen.tsx).
             onClick={onCancel}
-            disabled={pending}
             className="flex-1 h-12 bg-white border border-input text-sidebar hover:bg-muted"
           >
             ยกเลิก

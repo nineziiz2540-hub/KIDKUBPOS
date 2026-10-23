@@ -9,7 +9,8 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems } from "@/lib/order-pricing";
 import { diffReductions } from "@/lib/held-bill-diff";
-import { orderCreateErrorMessage, OLD_TAB_MESSAGE } from "@/lib/order-create-errors";
+import { createFailureOutcome, orderCreateErrorMessage, OLD_TAB_MESSAGE } from "@/lib/order-create-errors";
+import { CONNECTION_RETRY_MESSAGE } from "@/lib/payment-attempt";
 import type { CartItem, CreateOrderInput } from "@/types/app";
 import type { Json } from "@/types/database";
 
@@ -48,8 +49,9 @@ function toSavedOrder(row: {
 export async function createOrder(
   data: CreateOrderInput
 ): Promise<
-  // mayHaveSaved: the sale may already be recorded, so the UI must not offer a one-tap retry.
-  // Only the POS's own catch sets it now (a lost response); every server path below is definite.
+  // mayHaveSaved: the sale may already be recorded; the POS treats it as "no answer" and offers
+  // only a retry of the same attempt (same client_ref, so it can't record twice). Set by the POS's own catch (a lost response), and here when the database connection failed in a
+  // way that may have committed and the bill could not be looked up again.
   { error: string; mayHaveSaved?: true } | SavedOrder
 > {
   const profile = await getProfile();
@@ -218,9 +220,22 @@ export async function createOrder(
   });
   const created = rows?.[0];
   if (createError || !created) {
-    const known = createError ? orderCreateErrorMessage(createError.message) : null;
-    if (!known) console.error("[createOrder] order_create failed:", createError?.message);
-    return { error: known ?? "บันทึกออเดอร์ไม่สำเร็จ" };
+    const raw = createError?.message ?? "no row returned";
+    const known = orderCreateErrorMessage(raw);
+    if (known) return { error: known };
+    console.error("[createOrder] order_create failed:", raw);
+    // Not one of ours (e.g. the connection to the database dropped): the transaction may still
+    // have committed, so look the bill up again before giving a definite answer.
+    const { data: recheck, error: recheckError } = await admin
+      .from("orders")
+      .select("id, order_number, queue_number, cash_received, change_amount")
+      .eq("tenant_id", profile.tenant_id)
+      .eq("client_ref", data.clientRef)
+      .maybeSingle();
+    const outcome = createFailureOutcome(raw, recheckError ? null : recheck !== null);
+    if (outcome === "replay" && recheck) return toSavedOrder(recheck);
+    if (outcome === "maybe") return { error: CONNECTION_RETRY_MESSAGE, mayHaveSaved: true };
+    return { error: "บันทึกออเดอร์ไม่สำเร็จ" };
   }
 
   if (created.created) {

@@ -7,6 +7,8 @@ import {
   isNewVersion,
   nextConnectivity,
   OFFLINE_AFTER_FAILURES,
+  parseHeartbeatBody,
+  RESULT_HOLD_MS,
 } from "./connectivity.ts";
 
 test("one failed check is not enough to cry wolf", () => {
@@ -47,7 +49,7 @@ test("a JSON answer is online", () => {
 });
 
 test("auto-reload only when the POS is fully idle", () => {
-  const idle = { cartCount: 0, heldLoaded: false, anyDialogOpen: false, paymentUnresolved: false };
+  const idle = { cartCount: 0, heldLoaded: false, anyDialogOpen: false, paymentUnresolved: false, resultAgeMs: null, online: true };
   assert.equal(canAutoReload(idle), true);
   assert.equal(canAutoReload({ ...idle, cartCount: 1 }), false);
   assert.equal(canAutoReload({ ...idle, heldLoaded: true }), false);
@@ -60,4 +62,28 @@ test("a different build is a new version, but never against a dev build", () => 
   assert.equal(isNewVersion("dpl_a", "dpl_a"), false);
   assert.equal(isNewVersion("dev", "dpl_b"), false);
   assert.equal(isNewVersion("dpl_a", "dev"), false);
+});
+
+// ── Final review fixes ──────────────────────────────────────────────────────
+
+test("auto-reload waits while a sale's result is still on screen", () => {
+  const idle = { cartCount: 0, heldLoaded: false, anyDialogOpen: false, paymentUnresolved: false };
+  assert.equal(canAutoReload({ ...idle, resultAgeMs: 5_000, online: true }), false);
+  assert.equal(canAutoReload({ ...idle, resultAgeMs: RESULT_HOLD_MS, online: true }), true);
+  assert.equal(canAutoReload({ ...idle, resultAgeMs: null, online: true }), true);
+});
+
+test("auto-reload never happens while offline", () => {
+  const idle = { cartCount: 0, heldLoaded: false, anyDialogOpen: false, paymentUnresolved: false };
+  assert.equal(canAutoReload({ ...idle, resultAgeMs: null, online: false }), false);
+});
+
+test("a heartbeat without promptpayId leaves the last known value alone", () => {
+  assert.deepEqual(parseHeartbeatBody({ version: "v1" }), { version: "v1", promptpayId: undefined });
+  assert.deepEqual(parseHeartbeatBody({ version: "v1", promptpayId: null }), { version: "v1", promptpayId: null });
+  assert.deepEqual(parseHeartbeatBody({ version: "v1", promptpayId: "0812345678" }), {
+    version: "v1",
+    promptpayId: "0812345678",
+  });
+  assert.deepEqual(parseHeartbeatBody("junk"), { version: undefined, promptpayId: undefined });
 });

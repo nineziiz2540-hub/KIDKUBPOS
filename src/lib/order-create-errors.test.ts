@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OLD_TAB_MESSAGE, orderCreateErrorMessage } from "./order-create-errors.ts";
+import { createFailureOutcome, OLD_TAB_MESSAGE, orderCreateErrorMessage } from "./order-create-errors.ts";
 import { NO_OPEN_SHIFT_MESSAGE } from "./shift-errors.ts";
 
 test("a stale held bill asks to reopen the held-bill list", () => {
@@ -33,4 +33,22 @@ test("a code wrapped in a Postgres message is still found", () => {
 
 test("anything else is not ours to explain", () => {
   assert.equal(orderCreateErrorMessage('insert or update on table "order_items" violates foreign key'), null);
+});
+
+// ── Final review fixes ──────────────────────────────────────────────────────
+
+test("a known refusal is definite", () => {
+  assert.equal(createFailureOutcome("held_bill_stale", null), "known");
+});
+
+test("an unknown failure whose bill turns out saved is a replay", () => {
+  assert.equal(createFailureOutcome("fetch failed", true), "replay");
+});
+
+test("an unknown failure with no bill found is definite", () => {
+  assert.equal(createFailureOutcome("fetch failed", false), "failed");
+});
+
+test("an unknown failure whose re-check also failed may have saved", () => {
+  assert.equal(createFailureOutcome("fetch failed", null), "maybe");
 });

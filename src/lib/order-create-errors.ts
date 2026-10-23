@@ -12,6 +12,22 @@ const MESSAGES: Record<string, string> = {
   invalid_client_ref: OLD_TAB_MESSAGE,
 };
 
+/**
+ * What a failed order_create call means. A known code is a definite refusal. Anything else (a
+ * dropped connection to the database, a timeout) may have committed, so createOrder looks the
+ * bill up again by client_ref: found → a replay, not found → it really failed, and if even that
+ * lookup failed → it may have been saved and the POS must treat it as "no answer".
+ */
+export function createFailureOutcome(
+  raw: string,
+  savedOnRecheck: boolean | null
+): "known" | "replay" | "failed" | "maybe" {
+  if (orderCreateErrorMessage(raw) !== null) return "known";
+  if (savedOnRecheck === true) return "replay";
+  if (savedOnRecheck === false) return "failed";
+  return "maybe";
+}
+
 /** The message for an order_create error, or null when it isn't one of its known codes. */
 export function orderCreateErrorMessage(raw: string): string | null {
   for (const [code, message] of Object.entries(MESSAGES)) {

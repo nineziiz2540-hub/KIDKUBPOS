@@ -6,8 +6,11 @@ import { useRouter } from "next/navigation";
 import { checkOrderSaved, createOrder } from "@/app/actions/orders";
 import {
   attemptFingerprint,
+  cartWarning,
   CONNECTION_RETRY_MESSAGE,
+  PAYMENT_DEADLINE_MS,
   UNRESOLVED_PAYMENT_MESSAGE,
+  withDeadline,
 } from "@/lib/payment-attempt";
 import { holdBill, updateHeldBill, type HeldBillInput } from "@/app/actions/held-bills";
 import type { CancelledHeldBill, HeldBillSummary } from "@/lib/dal";
@@ -28,7 +31,7 @@ import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
 import { useHeartbeat } from "./use-heartbeat";
-import { canAutoReload } from "@/lib/connectivity";
+import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
 
@@ -95,7 +98,7 @@ export function PosScreen({
   const [holdError, setHoldError] = useState<string | null>(null);
   const [showHeldPanel, setShowHeldPanel] = useState(false);
   const [holdPending, startHold] = useTransition();
-  const [checkoutPending, startCheckout] = useTransition();
+  const [checkoutPending, setCheckoutPending] = useState(false);
   // Set synchronously on the first confirm tap, so a fast double-tap can't slip a second
   // createOrder in before checkoutPending re-renders the confirm button as disabled.
   const submittingRef = useRef(false);
@@ -103,6 +106,12 @@ export function PosScreen({
   const attemptRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
   // The last try of that attempt got no answer, so it may or may not have been saved.
   const [uncertain, setUncertain] = useState(false);
+  // An attempt nobody could confirm (even checkOrderSaved got no answer). Its warning stays in the
+  // cart until a sale succeeds or the cart is cleared, and it is re-checked before a new attempt.
+  const [unresolvedRef, setUnresolvedRef] = useState<string | null>(null);
+  // When the current result (order number, change, parked bill) appeared; holds off auto-reload.
+  const [resultShownAt, setResultShownAt] = useState<number | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const paymentWindowOpenRef = useRef(false);
   const heartbeat = useHeartbeat();
   // The heartbeat re-reads the PromptPay ID, so a tab left open never draws a QR to an account the
@@ -256,6 +265,8 @@ export function PosScreen({
   function clearCart() {
     attemptRef.current = null;
     setUncertain(false);
+    setUnresolvedRef(null);
+    setResultShownAt(null);
     setCartItems([]);
     setError(null);
     setLastOrderNumber(null);
@@ -280,7 +291,9 @@ export function PosScreen({
   function applySuccess(sale: SavedSale) {
     attemptRef.current = null;
     setUncertain(false);
+    setUnresolvedRef(null);
     setError(null);
+    setResultShownAt(Date.now());
     setLastOrderNumber(sale.orderNumber);
     setLastQueueNumber(sale.queueNumber);
     setLastCashTender(
@@ -298,25 +311,55 @@ export function PosScreen({
     }
   }
 
-  // Asks whether an attempt that got no answer was saved. Saved → the normal success state; not
-  // saved → the cart stays for another try; no answer at all → today's warning, as a last resort.
-  async function resolveUncertain(clientRef: string) {
+  // Asks whether an attempt that got no answer was saved. Saved → the normal success state, or, if
+  // the cashier has changed the cart since, a notice that leaves the new cart alone; not saved →
+  // the cart stays for another try; no answer at all → the warning stays (unresolvedRef).
+  async function resolveUncertain(clientRef: string): Promise<"saved" | "not-saved" | "unknown"> {
     let res: Awaited<ReturnType<typeof checkOrderSaved>>;
     try {
-      res = await checkOrderSaved(clientRef);
+      res = await withDeadline(checkOrderSaved(clientRef), PAYMENT_DEADLINE_MS);
     } catch {
       res = { error: UNRESOLVED_PAYMENT_MESSAGE };
     }
+    setUncertain(false);
     if ("saved" in res && res.saved) {
-      applySuccess(res);
-    } else if ("saved" in res) {
-      setUncertain(false);
-      setError(null);
-    } else {
-      setUncertain(false);
-      setError(UNRESOLVED_PAYMENT_MESSAGE);
+      if (
+        attemptRef.current?.clientRef === clientRef &&
+        attemptRef.current.fingerprint === fingerprintRef.current
+      ) {
+        applySuccess(res);
+      } else {
+        setUnresolvedRef(null);
+        setError(`บิลก่อนหน้าบันทึกแล้ว (${res.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
+      }
+      return "saved";
     }
+    if ("saved" in res) {
+      setUnresolvedRef((ref) => (ref === clientRef ? null : ref));
+      setError(null);
+      return "not-saved";
+    }
+    setUnresolvedRef(clientRef);
+    setError(null);
+    return "unknown";
   }
+
+  // The current cart as a payment attempt; mirrored in a ref so an answer that arrives later can
+  // tell whether the cashier has changed the cart since.
+  const currentFingerprint = attemptFingerprint({
+    items: cartItems,
+    paymentMethod,
+    orderType,
+    customerId: customer?.id ?? null,
+    discountType,
+    discountValue,
+    heldBillId: activeHeld?.id ?? null,
+    heldBillVersion: activeHeld?.version ?? null,
+  });
+  const fingerprintRef = useRef(currentFingerprint);
+  useEffect(() => {
+    fingerprintRef.current = currentFingerprint;
+  }, [currentFingerprint]);
 
   function submitOrder(
     cashReceived: number | undefined,
@@ -330,16 +373,7 @@ export function PosScreen({
     submittingRef.current = true;
     // One client_ref per payment attempt: a retry of the same cart reuses it, so a sale whose
     // response was lost is returned instead of being recorded twice (see payment-attempt.ts).
-    const fingerprint = attemptFingerprint({
-      items: cartItems,
-      paymentMethod,
-      orderType,
-      customerId: customer?.id ?? null,
-      discountType,
-      discountValue,
-      heldBillId: activeHeld?.id ?? null,
-      heldBillVersion: activeHeld?.version ?? null,
-    });
+    const fingerprint = currentFingerprint;
     if (attemptRef.current?.fingerprint !== fingerprint) {
       attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
     }
@@ -349,11 +383,16 @@ export function PosScreen({
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
-    startCheckout(async () => {
+    setResultShownAt(null);
+    // Not a transition: Next.js runs server actions one at a time, and a transition stays pending
+    // for as long as a stalled createOrder does — the window would read "กำลังบันทึก…" long after
+    // PAYMENT_DEADLINE_MS gave up on it. This flag tracks only this try.
+    setCheckoutPending(true);
+    void (async () => {
       let result: Awaited<ReturnType<typeof createOrder>>;
       let noAnswer = false;
       try {
-        result = await createOrder({
+        const call = createOrder({
           items: cartItems,
           paymentMethod,
           orderType,
@@ -367,6 +406,15 @@ export function PosScreen({
           heldBillVersion: activeHeld?.version,
           clientRef,
         });
+        // A stalled connection must not trap the cashier: after PAYMENT_DEADLINE_MS it counts as no
+        // answer (a retry reuses the client_ref, so giving up is safe). If the call still succeeds
+        // later and the cart is still this attempt, show that sale.
+        call
+          .then((late) => {
+            if (!("error" in late) && attemptRef.current?.clientRef === clientRef) applySuccess(late);
+          })
+          .catch(() => {});
+        result = await withDeadline(call, PAYMENT_DEADLINE_MS);
       } catch {
         // A dropped connection doesn't mean the sale failed — the server may have saved it before
         // the response was lost. Retrying sends the same client_ref, so it is always safe.
@@ -375,6 +423,8 @@ export function PosScreen({
       } finally {
         submittingRef.current = false;
       }
+      // The server itself may say it can't tell (database connection lost): same as no answer.
+      if ("error" in result && result.mayHaveSaved) noAnswer = true;
       if ("error" in result) {
         setUncertain(noAnswer);
         setError(result.error);
@@ -395,7 +445,7 @@ export function PosScreen({
         applySuccess(result);
       }
       onSettled?.("error" in result ? result.error : null, noAnswer);
-    });
+    })().finally(() => setCheckoutPending(false));
   }
 
   // Cancel/close of a payment window. A try in flight keeps running and settles on its own; an
@@ -412,8 +462,11 @@ export function PosScreen({
     }
   }
 
-  function handleCheckout() {
+  async function handleCheckout() {
     if (requiresApproval && !hasApproverPin) return;
+    // An earlier attempt nobody could confirm: find out first, before this cart gets a new
+    // client_ref and the same customer is charged twice.
+    if (unresolvedRef !== null && (await resolveUncertain(unresolvedRef)) === "saved") return;
     if (paymentMethod === "cash" && activeShiftId === null) {
       setError(null);
       setShowMobileCart(false);
@@ -490,6 +543,7 @@ export function PosScreen({
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld({ queueNumber, customerLabel, saved });
+    setResultShownAt(Date.now());
     router.refresh();
   }
 
@@ -615,9 +669,6 @@ export function PosScreen({
         .filter((m): m is ModifierWithOptions => m !== undefined)
     : [];
 
-  // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
-  // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
-  // dvh tracks Safari's toolbar showing/hiding.
   // A newer deployment is live: reload into it by itself, but only when nothing on the POS can be
   // lost. Dialogs owned by child components (discount, note, approval PIN pad) are caught by the
   // DOM check; otherwise the update bar waits for the cashier's tap.
@@ -629,21 +680,51 @@ export function PosScreen({
     showNoShift ||
     showMobileCart ||
     pendingProduct !== null;
-  const paymentUnresolved =
-    uncertain || checkoutPending || error === UNRESOLVED_PAYMENT_MESSAGE;
+  const paymentUnresolved = uncertain || checkoutPending || unresolvedRef !== null;
+  const online = heartbeat.connectivity.status === "online";
   useEffect(() => {
     if (!heartbeat.newVersionAvailable) return;
+    const resultAgeMs = resultShownAt === null ? null : Date.now() - resultShownAt;
     const idle = canAutoReload({
       cartCount: cartItems.length,
       heldLoaded: activeHeld !== null,
       anyDialogOpen,
       paymentUnresolved,
+      resultAgeMs,
+      online,
     });
     if (idle && document.querySelector('[role="dialog"], .fixed.inset-0') === null) {
       window.location.reload();
+      return;
     }
-  }, [heartbeat.newVersionAvailable, cartItems.length, activeHeld, anyDialogOpen, paymentUnresolved]);
+    // Only the result on screen is holding it back: look again once it has been read.
+    if (resultAgeMs !== null && resultAgeMs < RESULT_HOLD_MS) {
+      const timer = setTimeout(() => setReloadTick((n) => n + 1), RESULT_HOLD_MS - resultAgeMs);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    heartbeat.newVersionAvailable,
+    cartItems.length,
+    activeHeld,
+    anyDialogOpen,
+    paymentUnresolved,
+    resultShownAt,
+    online,
+    reloadTick,
+  ]);
 
+  // Back online with an attempt nobody could confirm: settle it now, before anyone pays again.
+  useEffect(() => {
+    if (!online || unresolvedRef === null) return;
+    const timer = setTimeout(() => void resolveUncertain(unresolvedRef), 0);
+    return () => clearTimeout(timer);
+    // resolveUncertain is recreated each render; re-running on it would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, unresolvedRef]);
+
+  // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
+  // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
+  // dvh tracks Safari's toolbar showing/hiding.
   return (
     <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
       <StatusBanners
@@ -697,7 +778,7 @@ export function PosScreen({
             onApproverPinComplete={handleApproverPinCapture}
             onCancelDiscount={resetDiscount}
             pending={checkoutPending}
-            error={error}
+            error={cartWarning(error, unresolvedRef)}
             lastOrderNumber={lastOrderNumber}
             lastQueueNumber={lastQueueNumber}
             lastCashTender={lastCashTender}
@@ -765,7 +846,7 @@ export function PosScreen({
                 onApproverPinComplete={handleApproverPinCapture}
                 onCancelDiscount={resetDiscount}
                 pending={checkoutPending}
-                error={error}
+                error={cartWarning(error, unresolvedRef)}
                 lastOrderNumber={lastOrderNumber}
                 lastQueueNumber={lastQueueNumber}
                 lastCashTender={lastCashTender}

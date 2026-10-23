@@ -35,14 +35,48 @@ export function classifyHeartbeat(res: {
   return "online";
 }
 
-/** Reload for a new version only when nothing on the POS can be lost. */
+/** How long a finished sale's numbers and change stay on screen before an auto-reload may clear them. */
+export const RESULT_HOLD_MS = 60_000;
+
+/**
+ * Reload for a new version only when nothing on the POS can be lost or missed: a sale's result
+ * (order number, change) younger than RESULT_HOLD_MS is still being read, and reloading while
+ * offline would land on a page that can't load.
+ */
 export function canAutoReload(s: {
   cartCount: number;
   heldLoaded: boolean;
   anyDialogOpen: boolean;
   paymentUnresolved: boolean;
+  /** Age of the result on screen; null when none is shown. */
+  resultAgeMs: number | null;
+  online: boolean;
 }): boolean {
-  return s.cartCount === 0 && !s.heldLoaded && !s.anyDialogOpen && !s.paymentUnresolved;
+  return (
+    s.cartCount === 0 &&
+    !s.heldLoaded &&
+    !s.anyDialogOpen &&
+    !s.paymentUnresolved &&
+    (s.resultAgeMs === null || s.resultAgeMs >= RESULT_HOLD_MS) &&
+    s.online
+  );
+}
+
+/**
+ * The heartbeat's JSON. `promptpayId` is undefined when the server left it out (its read failed),
+ * so the POS keeps the last value it had instead of blanking the QR.
+ */
+export function parseHeartbeatBody(body: unknown): {
+  version: string | undefined;
+  promptpayId: string | null | undefined;
+} {
+  if (typeof body !== "object" || body === null) return { version: undefined, promptpayId: undefined };
+  const b = body as { version?: unknown; promptpayId?: unknown };
+  return {
+    version: typeof b.version === "string" ? b.version : undefined,
+    promptpayId:
+      !("promptpayId" in b) ? undefined : typeof b.promptpayId === "string" ? b.promptpayId : null,
+  };
 }
 
 /** Whether the server runs a different build than this page; a dev build never counts. */

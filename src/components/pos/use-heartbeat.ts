@@ -8,6 +8,7 @@ import {
   INITIAL_CONNECTIVITY,
   isNewVersion,
   nextConnectivity,
+  parseHeartbeatBody,
   type Connectivity,
 } from "@/lib/connectivity";
 
@@ -46,11 +47,12 @@ export function useHeartbeat(): {
       }
       setConnectivity((s) => nextConnectivity(s, "success"));
       if (kind === "online") {
-        const body = (await res.json()) as { version?: unknown; promptpayId?: unknown };
-        if (typeof body.version === "string" && isNewVersion(BUILD_VERSION, body.version)) {
+        const body = parseHeartbeatBody(await res.json());
+        if (body.version !== undefined && isNewVersion(BUILD_VERSION, body.version)) {
           setNewVersionAvailable(true);
         }
-        setPromptpayId(typeof body.promptpayId === "string" ? body.promptpayId : null);
+        // Absent means the server couldn't read it: keep the last value, never blank the QR.
+        if (body.promptpayId !== undefined) setPromptpayId(body.promptpayId);
       }
     } catch {
       setConnectivity((s) => nextConnectivity(s, "failure"));
