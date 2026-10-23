@@ -570,6 +570,7 @@ export type Database = {
           cancelled_by: string | null
           cash_received: number | null
           change_amount: number | null
+          client_ref: string | null
           created_at: string
           created_by: string
           customer_id: string | null
@@ -612,6 +613,7 @@ export type Database = {
           cancelled_by?: string | null
           cash_received?: number | null
           change_amount?: number | null
+          client_ref?: string | null
           created_at?: string
           created_by: string
           customer_id?: string | null
@@ -654,6 +656,7 @@ export type Database = {
           cancelled_by?: string | null
           cash_received?: number | null
           change_amount?: number | null
+          client_ref?: string | null
           created_at?: string
           created_by?: string
           customer_id?: string | null
@@ -1268,6 +1271,26 @@ export type Database = {
       }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
       next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
+      order_create: {
+        Args: {
+          p_actor_id: string
+          p_client_ref: string
+          p_held_bill_id: string | null
+          p_held_bill_version: number | null
+          p_held_reductions: Json
+          p_items: Json
+          p_order: Json
+          p_tenant_id: string
+        }
+        Returns: {
+          cash_received: number
+          change_amount: number
+          created: boolean
+          order_id: string
+          order_number: string
+          queue_number: number
+        }[]
+      }
       order_change_payment_method: {
         Args: {
           p_actor_id: string
