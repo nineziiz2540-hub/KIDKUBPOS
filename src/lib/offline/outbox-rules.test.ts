@@ -3,9 +3,18 @@ import assert from "node:assert/strict";
 import {
   afterFailure,
   backoffMs,
+  checkable,
   counts,
   deviceNumberedMode,
+  hasSenderWork,
   MAX_GENERIC_TRIES,
+  MISSING_OFFLINE_MESSAGE,
+  missingOfflineToReview,
+  needsCounterRaise,
+  nextWork,
+  ORPHAN_AFTER_MS,
+  recoverOrphans,
+  saleBusinessDate,
   sendable,
   startupRecovery,
   type OutboxEntry,
@@ -135,4 +144,140 @@ test("counts", () => {
     st("f", "pending", { tenantId: "t2" }),
   ];
   assert.deepEqual(counts(list, "t1"), { pending: 2, review: 1, checkOnly: 1 });
+});
+
+const offline = (o: Partial<NonNullable<OutboxEntry["offline"]>> = {}) => ({
+  tenantId: "t1",
+  sellerId: "u1",
+  soldAt: "2026-11-05T10:00:00.000Z",
+  queueNumber: 7,
+  shiftId: null,
+  ...o,
+});
+
+test("ORPHAN_AFTER_MS is the payment deadline plus 30 s", () => {
+  assert.equal(ORPHAN_AFTER_MS, 45_000);
+});
+
+test("recoverOrphans touches only old attempts of this shop and returns only changes", () => {
+  const now = 1_000_000;
+  const old = now - ORPHAN_AFTER_MS - 1;
+  const out = recoverOrphans(
+    [
+      st("old", "attempt", { createdAt: old }),
+      st("young", "attempt", { createdAt: now - 1000 }),
+      st("edge", "attempt", { createdAt: now - ORPHAN_AFTER_MS }),
+      st("other", "attempt", { tenantId: "t2", createdAt: old }),
+      st("pend", "pending", { createdAt: old }),
+    ],
+    now,
+    "t1",
+  );
+  assert.deepEqual(
+    out.map((e) => [e.clientRef, e.state]),
+    [["old", "check-only"]],
+  );
+});
+
+test("checkable: old check-only entries of this shop, oldest first", () => {
+  const now = 1_000_000;
+  const old = now - ORPHAN_AFTER_MS - 1;
+  const out = checkable(
+    [
+      st("b", "check-only", { createdAt: old }),
+      st("a", "check-only", { createdAt: old - 5 }),
+      st("young", "check-only", { createdAt: now - 10 }),
+      st("other", "check-only", { tenantId: "t2", createdAt: old }),
+      st("att", "attempt", { createdAt: old }),
+    ],
+    now,
+    "t1",
+  );
+  assert.deepEqual(out.map((e) => e.clientRef), ["a", "b"]);
+});
+
+test("needsCounterRaise: review with device data and no marker, this shop only", () => {
+  const out = needsCounterRaise(
+    [
+      st("r", "review", { offline: offline() }),
+      st("done", "review", { offline: offline(), counterRaised: true }),
+      st("noDevice", "review", { offline: null }),
+      st("other", "review", { tenantId: "t2", offline: offline() }),
+      st("pend", "pending", { offline: offline() }),
+      st("flagFalse", "review", { offline: offline(), counterRaised: false, createdAt: 1 }),
+    ],
+    "t1",
+  );
+  assert.deepEqual(out.map((e) => e.clientRef), ["flagFalse", "r"]);
+});
+
+test("saleBusinessDate uses the Bangkok date of the sale time, else createdAt", () => {
+  // 18:30Z is 01:30 the next day in Bangkok.
+  assert.equal(
+    saleBusinessDate(st("a", "review", { offline: offline({ soldAt: "2026-11-05T18:30:00.000Z" }) })),
+    "2026-11-06",
+  );
+  // The sale time wins over when the entry was put.
+  assert.equal(
+    saleBusinessDate(
+      st("a", "review", {
+        createdAt: Date.parse("2026-11-09T05:00:00Z"),
+        offline: offline({ soldAt: "2026-11-05T05:00:00.000Z" }),
+      }),
+    ),
+    "2026-11-05",
+  );
+  assert.equal(
+    saleBusinessDate(st("a", "review", { offline: null, createdAt: Date.parse("2026-11-05T17:00:00Z") })),
+    "2026-11-06",
+  );
+  assert.equal(
+    saleBusinessDate(
+      st("a", "review", { offline: offline({ soldAt: "garbage" }), createdAt: Date.parse("2026-11-05T01:00:00Z") }),
+    ),
+    "2026-11-05",
+  );
+});
+
+test("missingOfflineToReview moves the entry to review other with a reason", () => {
+  const r = missingOfflineToReview(st("a", "pending"));
+  assert.equal(r.state, "review");
+  assert.equal(r.reviewCode, "other");
+  assert.equal(r.lastError, MISSING_OFFLINE_MESSAGE);
+  assert.ok(r.lastError);
+});
+
+test("nextWork order: due pending, then check-only, then counter raise; skips tried", () => {
+  const now = 1_000_000;
+  const old = now - ORPHAN_AFTER_MS - 1;
+  const list = [
+    st("p2", "pending", { createdAt: 20 }),
+    st("p1", "pending", { createdAt: 10 }),
+    st("wait", "pending", { createdAt: 1, nextTryAt: now + 1 }),
+    st("c", "check-only", { createdAt: old }),
+    st("r", "review", { offline: offline() }),
+  ];
+  assert.deepEqual(nextWork(list, now, "t1", new Set()), { kind: "send", entry: list[1] });
+  const noPending = list.slice(2);
+  assert.deepEqual(nextWork(noPending, now, "t1", new Set()), { kind: "check", entry: list[3] });
+  assert.deepEqual(nextWork(noPending, now, "t1", new Set(["c"])), { kind: "raise", entry: list[4] });
+  assert.equal(nextWork(noPending, now, "t1", new Set(["c", "r"])), null);
+  // Another shop's entries are never work.
+  assert.equal(
+    nextWork([st("x", "pending", { tenantId: "t2" }), st("y", "review", { tenantId: "t2", offline: offline() })], now, "t1", new Set()),
+    null,
+  );
+  // A pending bill is sent again even if tried earlier in the burst (it is gated by nextTryAt).
+  const p1 = list[1]!;
+  assert.deepEqual(nextWork([p1], now, "t1", new Set(["p1"])), { kind: "send", entry: p1 });
+});
+
+test("hasSenderWork", () => {
+  assert.equal(hasSenderWork([], "t1"), false);
+  assert.equal(hasSenderWork([st("a", "pending")], "t1"), true);
+  assert.equal(hasSenderWork([st("a", "check-only")], "t1"), true);
+  assert.equal(hasSenderWork([st("a", "attempt")], "t1"), true);
+  assert.equal(hasSenderWork([st("a", "review", { offline: offline(), counterRaised: true })], "t1"), false);
+  assert.equal(hasSenderWork([st("a", "review", { offline: offline() })], "t1"), true);
+  assert.equal(hasSenderWork([st("a", "pending", { tenantId: "t2" })], "t1"), false);
 });

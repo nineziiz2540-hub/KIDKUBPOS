@@ -1,6 +1,8 @@
 // Pure rules for the offline outbox (bills saved on the device, sent later).
 import type { CreateOrderInput, OfflineSale } from "../../types/app.ts";
 import type { ReviewCode } from "./sync-outcome.ts";
+import { bangkokToday } from "../bangkok-time.ts";
+import { PAYMENT_DEADLINE_MS } from "../payment-attempt.ts";
 
 export type OutboxState = "attempt" | "check-only" | "pending" | "review";
 
@@ -27,9 +29,23 @@ export type OutboxEntry = {
   lastError: string | null;
   reviewCode: ReviewCode | null;
   serverQueueNumber: number | null;
+  /**
+   * Review entries only: true once the server's queue counter for the sale's day was raised to
+   * this bill's device number (spec call 2). Missing = not yet; the sender keeps trying.
+   */
+  counterRaised?: boolean;
 };
 
 export const MAX_GENERIC_TRIES = 20;
+
+/**
+ * How old an `attempt` / `check-only` entry must be before the sender touches it. A younger one
+ * may belong to a payment still running in another tab (its window waits PAYMENT_DEADLINE_MS).
+ */
+export const ORPHAN_AFTER_MS = PAYMENT_DEADLINE_MS + 30_000;
+
+/** Shown in the review list for a pending entry that somehow lost its device data. */
+export const MISSING_OFFLINE_MESSAGE = "ข้อมูลบิลที่ขายตอนเน็ตหลุดไม่ถูกต้อง";
 const GENERIC_ERROR = "บันทึกออเดอร์ไม่สำเร็จ";
 
 /** After a crash or reload an unanswered attempt may have saved: ask before re-sending. */
@@ -85,4 +101,82 @@ export function counts(
     review: mine.filter((e) => e.state === "review").length,
     checkOnly: mine.filter((e) => e.state === "check-only").length,
   };
+}
+
+function isOrphan(e: OutboxEntry, now: number): boolean {
+  return now - e.createdAt > ORPHAN_AFTER_MS;
+}
+
+/**
+ * startupRecovery for this shop's attempts old enough that no tab can still be waiting on them.
+ * Returns only the entries that changed (to write back).
+ */
+export function recoverOrphans(entries: OutboxEntry[], now: number, tenantId: string): OutboxEntry[] {
+  return startupRecovery(
+    entries.filter((e) => e.tenantId === tenantId && e.state === "attempt" && isOrphan(e, now)),
+  );
+}
+
+/** This shop's check-only entries the sender may ask about now, oldest first. */
+export function checkable(entries: OutboxEntry[], now: number, tenantId: string): OutboxEntry[] {
+  return entries
+    .filter((e) => e.tenantId === tenantId && e.state === "check-only" && isOrphan(e, now))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** This shop's review entries whose device queue number the server's counter hasn't yet covered. */
+export function needsCounterRaise(entries: OutboxEntry[], tenantId: string): OutboxEntry[] {
+  return entries
+    .filter(
+      (e) =>
+        e.tenantId === tenantId && e.state === "review" && e.offline !== null && e.counterRaised !== true,
+    )
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** The Bangkok business date of the sale: its sale time when known, else when it was put. */
+export function saleBusinessDate(e: OutboxEntry): string {
+  const sold = e.offline ? Date.parse(e.offline.soldAt) : Number.NaN;
+  return bangkokToday(new Date(Number.isNaN(sold) ? e.createdAt : sold));
+}
+
+/** A pending entry without device data can't be sent: it goes to review instead. */
+export function missingOfflineToReview(e: OutboxEntry): OutboxEntry {
+  return { ...e, state: "review", reviewCode: "other", lastError: MISSING_OFFLINE_MESSAGE };
+}
+
+export type OutboxWork =
+  | { kind: "send"; entry: OutboxEntry }
+  | { kind: "check"; entry: OutboxEntry }
+  | { kind: "raise"; entry: OutboxEntry };
+
+/**
+ * The sender's next job, from a fresh read of the store: the oldest due pending bill first, then
+ * check-only entries, then counter raises. `tried` holds refs already handled in this burst, so a
+ * check or raise that got no answer is not repeated until the next burst.
+ */
+export function nextWork(
+  entries: OutboxEntry[],
+  now: number,
+  tenantId: string,
+  tried: ReadonlySet<string>,
+): OutboxWork | null {
+  const send = sendable(entries, now, tenantId)[0];
+  if (send) return { kind: "send", entry: send };
+  const check = checkable(entries, now, tenantId).find((e) => !tried.has(e.clientRef));
+  if (check) return { kind: "check", entry: check };
+  const raise = needsCounterRaise(entries, tenantId).find((e) => !tried.has(e.clientRef));
+  if (raise) return { kind: "raise", entry: raise };
+  return null;
+}
+
+/**
+ * Whether the sender should keep waking up (its 5 s interval) for this shop. An attempt counts:
+ * a young one may turn into an orphan to recover.
+ */
+export function hasSenderWork(entries: OutboxEntry[], tenantId: string): boolean {
+  return (
+    entries.some((e) => e.tenantId === tenantId && e.state !== "review") ||
+    needsCounterRaise(entries, tenantId).length > 0
+  );
 }
