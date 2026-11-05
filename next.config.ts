@@ -5,6 +5,10 @@ const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
   swDest: "public/sw.js",
   disable: process.env.NODE_ENV === "development",
+  // Serwist's default (true) reloads every page whenever the browser goes back online: a Wi-Fi blip
+  // on the iPad wiped the POS cart in progress. Pages handle reconnecting themselves (the POS
+  // heartbeat in src/components/pos/use-heartbeat.ts).
+  reloadOnOnline: false,
 });
 
 const nextConfig: NextConfig = {
