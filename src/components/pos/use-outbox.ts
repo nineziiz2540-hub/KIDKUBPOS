@@ -54,6 +54,11 @@ export type UseOutbox = {
   progress: { sent: number; total: number } | null;
   /** Bills sent since pending was last empty, for the green bar; null again after 5 s. */
   justFinished: number | null;
+  /**
+   * True once the first read of the store has settled (also when storage is unavailable). Before
+   * that, `deviceNumbered` can't know about bills already waiting, so the POS doesn't take payments.
+   */
+  loaded: boolean;
   put(e: OutboxEntry): Promise<void>;
   remove(clientRef: string): Promise<void>;
   markCheckOnly(clientRef: string): Promise<void>;
@@ -81,6 +86,7 @@ export function useOutbox({
   const [entries, setEntries] = useState<OutboxEntry[]>([]);
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [justFinished, setJustFinished] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   // Everything the sender reads lives in refs, so its callbacks keep one identity.
   const tenantRef = useRef(tenantId);
@@ -111,6 +117,8 @@ export function useOutbox({
     } catch {
       all = [];
     }
+    // The first read has settled (even a failed or superseded one): the POS may take payments.
+    if (mountedRef.current) setLoaded(true);
     if (seq !== refreshSeqRef.current || !mountedRef.current) return;
     setEntries([...all].sort((a, b) => a.createdAt - b.createdAt));
   }, []);
@@ -399,7 +407,15 @@ export function useOutbox({
       await outboxUpdateIf(clientRef, (cur) => {
         found = true;
         return cur.state === "attempt" || cur.state === "check-only"
-          ? { ...cur, state: "pending", offline, tries: 0, nextTryAt: 0 }
+          ? {
+              ...cur,
+              state: "pending",
+              offline,
+              // The device number the customer was given, as a fresh pending entry would carry it.
+              display: { ...cur.display, queueNumber: offline.queueNumber },
+              tries: 0,
+              nextTryAt: 0,
+            }
           : null;
       });
       if (!found) throw new Error(ENTRY_MISSING);
@@ -415,11 +431,12 @@ export function useOutbox({
       deviceNumbered,
       progress,
       justFinished,
+      loaded,
       put,
       remove,
       markCheckOnly,
       finalize,
     }),
-    [mine, counts, deviceNumbered, progress, justFinished, put, remove, markCheckOnly, finalize],
+    [mine, counts, deviceNumbered, progress, justFinished, loaded, put, remove, markCheckOnly, finalize],
   );
 }

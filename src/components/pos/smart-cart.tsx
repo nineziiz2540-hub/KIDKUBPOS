@@ -75,6 +75,8 @@ type Props = {
   lastOffline: OfflineResult | null;
   /** What needs the server right now (feature-gates.ts): disabled ones show why. */
   gates: { pinDiscount: Gate; hold: Gate; member: Gate };
+  /** False until the device's outbox has been read once: paying waits for it. */
+  paymentReady: boolean;
 };
 
 function reasonOf(g: Gate): string | null {
@@ -120,6 +122,7 @@ export function SmartCart({
   lastHeld,
   lastOffline,
   gates,
+  paymentReady,
 }: Props) {
   const reasonId = useId();
   const pinReason = reasonOf(gates.pinDiscount);
@@ -471,7 +474,8 @@ export function SmartCart({
               holdPending ||
               discountExceedsSubtotal ||
               (requiresApproval && !hasApproverPin) ||
-              pinDiscountBlocked
+              pinDiscountBlocked ||
+              !paymentReady
             }
             className="flex-1 h-14 rounded-xl bg-accent hover:bg-accent/90 text-white text-xl font-bold"
           >

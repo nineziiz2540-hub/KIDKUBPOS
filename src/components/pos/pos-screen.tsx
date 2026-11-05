@@ -61,9 +61,9 @@ const ENTRY_MISSING = "outbox_entry_missing";
 
 /**
  * Date.now() for code that runs only in event handlers and async callbacks. The React Compiler lint
- * (react-hooks/purity) flags a direct Date.now() in applySuccess / showOfflineResult since this
- * round's changes, although neither is ever called during render (a false positive; resetAfterPark's
- * identical call isn't flagged).
+ * (react-hooks/purity) treats closures passed as custom-hook arguments as possibly run during
+ * render (useOutbox's onChecked → handleChecked → applySuccess), so it flags a direct Date.now()
+ * there. Nothing impure actually runs during render.
  */
 function eventTime(): number {
   return Date.now();
@@ -446,7 +446,10 @@ export function PosScreen({
         applySuccess(res);
       } else {
         setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
-        setError(`บิลก่อนหน้าบันทึกแล้ว (${res.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
+        // Already on screen as this sale's result (e.g. its late answer arrived): no notice.
+        if (res.orderNumber !== lastOrderNumberRef.current) {
+          setError(`บิลก่อนหน้าบันทึกแล้ว (${res.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
+        }
       }
       return "saved";
     }
@@ -486,7 +489,7 @@ export function PosScreen({
       attemptRef.current.fingerprint === fingerprintRef.current
     ) {
       applySuccess(saved);
-    } else if (clientRef === unresolvedRef) {
+    } else if (clientRef === unresolvedRef && saved.orderNumber !== lastOrderNumberRef.current) {
       setError(`บิลก่อนหน้าบันทึกแล้ว (${saved.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
     }
   }
@@ -507,6 +510,12 @@ export function PosScreen({
   useEffect(() => {
     fingerprintRef.current = currentFingerprint;
   }, [currentFingerprint]);
+  // The bill number on screen, for answers that arrive later (a check must not announce as
+  // "previous" the very sale whose result is already showing).
+  const lastOrderNumberRef = useRef(lastOrderNumber);
+  useEffect(() => {
+    lastOrderNumberRef.current = lastOrderNumber;
+  }, [lastOrderNumber]);
 
   /** This cart as a sale for createOrder and the outbox. It never carries the manager PIN. */
   function saleInput(clientRef: string, cashReceived: number | undefined): SaleInput {
@@ -560,6 +569,23 @@ export function PosScreen({
     paymentWindowOpenRef.current = false;
   }
 
+  // A device-numbered cash sale with no shift the device knows is open: the cash window gives way
+  // to NoShiftDialog. If a try of this attempt got no answer, it may have been saved, so it is
+  // kept as check-only (the cart's warning, re-checked before the next payment) instead of being
+  // left behind by the window that offered ลองอีกครั้ง.
+  function leaveCashForNoShift() {
+    if (uncertain && attemptRef.current) {
+      const ref = attemptRef.current.clientRef;
+      setLocalUnresolved(ref);
+      outbox.markCheckOnly(ref).catch(() => {});
+    }
+    setUncertain(false);
+    setShowCashModal(false);
+    paymentWindowOpenRef.current = false;
+    setError(null);
+    setShowNoShift(true);
+  }
+
   /** "A PIN discount waits for the connection" (spec 6b), in the payment window. */
   function pinDiscountMessage(): string {
     return `ส่วนลดที่ต้องใช้ PIN — ${reasonOf(pinDiscountGate) ?? "ใช้ไม่ได้ตอนเน็ตหลุด"}`;
@@ -575,10 +601,7 @@ export function PosScreen({
     }
     // Cash needs a shift the device knows is open.
     if (paymentMethod === "cash" && snapshot.shiftId === null) {
-      setShowCashModal(false);
-      paymentWindowOpenRef.current = false;
-      setError(null);
-      setShowNoShift(true);
+      leaveCashForNoShift();
       return;
     }
     if (submittingRef.current) return;
@@ -647,6 +670,11 @@ export function PosScreen({
     const last = lastTryRef.current;
     if (!last || attemptRef.current?.clientRef !== last.clientRef) return;
     if (requiresApproval) return; // the button is disabled for these (spec 6b)
+    // Same rule as sellOnDevice: a stored cash bill needs a shift the device knows is open.
+    if (last.input.paymentMethod === "cash" && snapshot.shiftId === null) {
+      leaveCashForNoShift();
+      return;
+    }
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSaveError(null);
@@ -822,6 +850,9 @@ export function PosScreen({
   }
 
   async function handleCheckout() {
+    // Until the outbox has been read, nobody knows whether bills are already waiting (which
+    // would make this a device-numbered sale): wait for it, never guess either way.
+    if (!outbox.loaded) return;
     if (requiresApproval && !hasApproverPin) return;
     // Offline or bills still waiting: a discount that needs a PIN waits (the button says why).
     if (deviceNumbered && requiresApproval) return;
@@ -1190,6 +1221,7 @@ export function PosScreen({
             lastHeld={lastHeld}
             lastOffline={lastOffline}
             gates={cartGates}
+            paymentReady={outbox.loaded}
           />
         </div>
       </div>
@@ -1260,6 +1292,7 @@ export function PosScreen({
                 lastHeld={lastHeld}
                 lastOffline={lastOffline}
                 gates={cartGates}
+                paymentReady={outbox.loaded}
               />
             </div>
           </div>
