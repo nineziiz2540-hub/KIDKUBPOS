@@ -31,6 +31,7 @@ import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
 import { useHeartbeat } from "./use-heartbeat";
+import { useDeviceSnapshot } from "./use-device-snapshot";
 import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
@@ -49,6 +50,13 @@ type Props = {
   cancelledHeldToday: CancelledHeldBill[];
   /** The shop's PromptPay ID; the QR is drawn on the device from it. */
   promptpayId: string | null;
+  tenantId: string;
+  /** The signed-in user (profile.id); recorded on offline sales. */
+  sellerId: string;
+  /** Server Date.now() when this page was rendered. */
+  renderedAt: number;
+  todayQueueLast: number;
+  todayQueueDate: string;
 };
 
 type ActiveHeld = { id: string; version: number; queueNumber: number; customerLabel: string | null };
@@ -65,6 +73,10 @@ export function PosScreen({
   heldBills,
   cancelledHeldToday,
   promptpayId,
+  tenantId,
+  renderedAt,
+  todayQueueLast,
+  todayQueueDate,
 }: Props) {
   const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -114,9 +126,20 @@ export function PosScreen({
   const [reloadTick, setReloadTick] = useState(0);
   const paymentWindowOpenRef = useRef(false);
   const heartbeat = useHeartbeat();
-  // The heartbeat re-reads the PromptPay ID, so a tab left open never draws a QR to an account the
-  // owner has since changed; until its first answer the page's own value is used.
-  const currentPromptpayId = heartbeat.promptpayId === undefined ? promptpayId : heartbeat.promptpayId;
+  // The device snapshot starts from this page and follows the heartbeat, so a tab left open never
+  // draws a QR to an account the owner has since changed, and keeps the latest shift and queue
+  // for offline sales.
+  const snapshot = useDeviceSnapshot({
+    tenantId,
+    page: {
+      at: renderedAt,
+      shiftId: activeShiftId,
+      promptpayId,
+      queue: { date: todayQueueDate, last: todayQueueLast },
+    },
+    heartbeat,
+  });
+  const currentPromptpayId = snapshot.promptpayId;
   useEffect(() => {
     paymentWindowOpenRef.current = showCashModal || showQrModal;
   }, [showCashModal, showQrModal]);
@@ -296,6 +319,7 @@ export function PosScreen({
     setResultShownAt(Date.now());
     setLastOrderNumber(sale.orderNumber);
     setLastQueueNumber(sale.queueNumber);
+    snapshot.observe(sale.queueNumber);
     setLastCashTender(
       sale.cashReceived !== null && sale.changeAmount !== null
         ? { received: sale.cashReceived, change: sale.changeAmount }
@@ -575,6 +599,7 @@ export function PosScreen({
               return;
             }
             setShowHoldModal(false);
+            snapshot.observe(res.queueNumber);
             const label = customerLabel.trim();
             resetAfterPark(res.queueNumber, label === "" ? null : label, false);
           }

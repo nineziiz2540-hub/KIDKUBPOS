@@ -11,6 +11,15 @@ import {
   parseHeartbeatBody,
   type Connectivity,
 } from "@/lib/connectivity";
+import type { QueueState } from "@/lib/offline/device-queue";
+
+/** What one online answer actually carried; undefined = the server didn't read it. */
+export type HeartbeatAnswer = {
+  at: number;
+  promptpayId: string | null | undefined;
+  shiftId: string | null | undefined;
+  queue: QueueState | undefined;
+};
 
 /**
  * Asks /api/heartbeat on mount, every HEARTBEAT_INTERVAL_MS while the page is visible, as soon as
@@ -22,11 +31,23 @@ export function useHeartbeat(): {
   connectivity: Connectivity;
   newVersionAvailable: boolean;
   promptpayId: string | null | undefined;
+  /** The open shift (null = none); undefined until an answer carried it. */
+  shiftId: string | null | undefined;
+  /** Today's queue counter; undefined until an answer carried it. */
+  queue: QueueState | undefined;
+  /** When the last successful answer arrived (any kind); the outbox sender wakes on it. */
+  lastSuccessAt: number | null;
+  /** The last online answer, as sent (fields the server could not read stay undefined). */
+  answer: HeartbeatAnswer | null;
   checkNow: () => void;
 } {
   const [connectivity, setConnectivity] = useState<Connectivity>(INITIAL_CONNECTIVITY);
   const [newVersionAvailable, setNewVersionAvailable] = useState(false);
   const [promptpayId, setPromptpayId] = useState<string | null | undefined>(undefined);
+  const [shiftId, setShiftId] = useState<string | null | undefined>(undefined);
+  const [queue, setQueue] = useState<QueueState | undefined>(undefined);
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
+  const [answer, setAnswer] = useState<HeartbeatAnswer | null>(null);
   const inFlight = useRef(false);
 
   const checkNow = useCallback(async () => {
@@ -46,6 +67,7 @@ export function useHeartbeat(): {
         return;
       }
       setConnectivity((s) => nextConnectivity(s, "success"));
+      setLastSuccessAt(Date.now());
       if (kind === "online") {
         const body = parseHeartbeatBody(await res.json());
         if (body.version !== undefined && isNewVersion(BUILD_VERSION, body.version)) {
@@ -53,6 +75,14 @@ export function useHeartbeat(): {
         }
         // Absent means the server couldn't read it: keep the last value, never blank the QR.
         if (body.promptpayId !== undefined) setPromptpayId(body.promptpayId);
+        if (body.shiftId !== undefined) setShiftId(body.shiftId);
+        if (body.queue !== undefined) setQueue(body.queue);
+        setAnswer({
+          at: Date.now(),
+          promptpayId: body.promptpayId,
+          shiftId: body.shiftId,
+          queue: body.queue,
+        });
       }
     } catch {
       setConnectivity((s) => nextConnectivity(s, "failure"));
@@ -83,5 +113,14 @@ export function useHeartbeat(): {
     };
   }, [checkNow]);
 
-  return { connectivity, newVersionAvailable, promptpayId, checkNow: () => void checkNow() };
+  return {
+    connectivity,
+    newVersionAvailable,
+    promptpayId,
+    shiftId,
+    queue,
+    lastSuccessAt,
+    answer,
+    checkNow: () => void checkNow(),
+  };
 }

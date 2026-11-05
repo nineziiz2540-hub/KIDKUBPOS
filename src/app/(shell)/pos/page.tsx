@@ -8,6 +8,8 @@ import {
   getCancelledHeldBillsToday,
   getTenantPromptPayId,
 } from "@/lib/dal";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { bangkokToday } from "@/lib/bangkok-time";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -106,7 +108,16 @@ export default async function PosPage() {
     .eq("status", "completed")
     .gte("created_at", todayStart.toISOString());
 
-  const [activeShift, heldBills, cancelledHeldToday, promptpayId] = await Promise.all([
+  // Today's queue counter, for the device snapshot. tenant_queue_counters has no member RLS policy,
+  // so it is read with the admin client, scoped to this shop. No row yet means 0.
+  const todayQueueDate = bangkokToday(new Date());
+  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId] = await Promise.all([
+    createAdminClient()
+      .from("tenant_queue_counters")
+      .select("last_number")
+      .eq("tenant_id", profile.tenant_id)
+      .eq("business_date", todayQueueDate)
+      .maybeSingle(),
     getActiveShift(profile.tenant_id),
     getOpenHeldBills(profile.tenant_id),
     getCancelledHeldBillsToday(profile.tenant_id),
@@ -125,6 +136,11 @@ export default async function PosPage() {
       heldBills={heldBills}
       cancelledHeldToday={cancelledHeldToday}
       promptpayId={promptpayId}
+      tenantId={profile.tenant_id}
+      sellerId={profile.id}
+      renderedAt={nowMs}
+      todayQueueLast={counter.data?.last_number ?? 0}
+      todayQueueDate={todayQueueDate}
     />
   );
 }
