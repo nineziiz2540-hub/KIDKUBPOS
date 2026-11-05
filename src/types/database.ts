@@ -593,6 +593,7 @@ export type Database = {
           refunded_at: string | null
           refunded_by: string | null
           shift_id: string | null
+          sold_offline: boolean
           status: string
           subtotal: number
           table_number: string | null
@@ -636,6 +637,7 @@ export type Database = {
           refunded_at?: string | null
           refunded_by?: string | null
           shift_id?: string | null
+          sold_offline?: boolean
           status?: string
           subtotal?: number
           table_number?: string | null
@@ -679,6 +681,7 @@ export type Database = {
           refunded_at?: string | null
           refunded_by?: string | null
           shift_id?: string | null
+          sold_offline?: boolean
           status?: string
           subtotal?: number
           table_number?: string | null
@@ -1312,6 +1315,27 @@ export type Database = {
         }
         Returns: undefined
       }
+      order_record: {
+        Args: {
+          p_actor_id: string
+          p_client_ref: string
+          p_held_bill_id: string | null
+          p_held_bill_version: number | null
+          p_held_reductions: Json
+          p_items: Json
+          p_offline: Json | null
+          p_order: Json
+          p_tenant_id: string
+        }
+        Returns: {
+          cash_received: number
+          change_amount: number
+          created: boolean
+          order_id: string
+          order_number: string
+          queue_number: number
+        }[]
+      }
       order_restore_paid: {
         Args: {
           p_actor_id: string
@@ -1328,6 +1352,15 @@ export type Database = {
           p_order_id: string
           p_tenant_id: string
           p_verified: boolean
+        }
+        Returns: undefined
+      }
+      queue_counter_raise: {
+        Args: {
+          p_actor_id: string
+          p_business_date: string
+          p_queue_number: number
+          p_tenant_id: string
         }
         Returns: undefined
       }
