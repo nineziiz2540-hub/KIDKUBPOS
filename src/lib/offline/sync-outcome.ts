@@ -17,7 +17,11 @@ export type ReviewCode =
 
 export type SyncOutcome = "retry" | "review" | "refused";
 
-/** Why a bill is in review, as the review list shows it. "other" shows the server's own message. */
+/**
+ * Why a bill is in review, as the review list shows it. "other" is deliberately empty: for it the
+ * caller must show the `error` createOrder returned (the server's own message), never this value,
+ * or the review list would show a blank reason.
+ */
 export const REVIEW_MESSAGES: Record<ReviewCode, string> = {
   menu_changed: "ราคาหรือเมนูมีการเปลี่ยนแปลงระหว่างเน็ตหลุด",
   held_bill_stale: HELD_BILL_STALE_MESSAGE,
@@ -86,8 +90,11 @@ export function recordErrorMessage(raw: string, sqlState?: string): string | nul
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The device sends Date.toISOString(); Date.parse alone would accept "1" or "May 5". */
-const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+/**
+ * The device sends Date.toISOString(); Date.parse alone would accept "1" or "May 5". A zone (Z or
+ * ±hh:mm) is required: without one the time would be read in the server's own time zone.
+ */
+const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
  * The shop guard and shape check for an offline bill (spec call 7). A bill of another shop than

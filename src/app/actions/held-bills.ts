@@ -1,9 +1,9 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import { verifyManagerPin } from "@/lib/manager-pin";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import { priceCartItems, type PricedLine } from "@/lib/order-pricing";
 import { diffReductions } from "@/lib/held-bill-diff";
@@ -252,20 +252,8 @@ export async function cancelHeldBill(
   if (typeof pin !== "string" || !/^\d{6}$/.test(pin)) return { error: "PIN ไม่ถูกต้อง" };
 
   const admin = createAdminClient();
-  const { data: approvers } = await admin
-    .from("profiles")
-    .select("id, pin_hash")
-    .eq("tenant_id", profile.tenant_id)
-    .in("role", ["owner", "manager"])
-    .not("pin_hash", "is", null);
-
-  let approverId: string | null = null;
-  for (const approver of approvers ?? []) {
-    if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
-      approverId = approver.id;
-      break;
-    }
-  }
+  // Active owners/managers only: a deactivated manager's PIN must not approve anything.
+  const approverId = await verifyManagerPin(profile.tenant_id, pin);
   if (!approverId) return { error: "PIN ไม่ถูกต้อง" };
 
   const { data: updated, error } = await admin

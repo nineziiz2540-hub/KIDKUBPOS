@@ -118,10 +118,21 @@ test("wrong_tenant: a bill of another shop waits, it is never sent or refused", 
   );
 });
 
+test("a sale time without a zone is rejected; Z or an offset is accepted", () => {
+  assert.deepEqual(checkOfflineSale({ ...SALE, soldAt: "2026-11-05T09:30" }, TENANT), {
+    error: "ข้อมูลบิลที่ขายตอนเน็ตหลุดไม่ถูกต้อง",
+    outcome: "review",
+    reviewCode: "other",
+  });
+  assert.ok("ok" in checkOfflineSale({ ...SALE, soldAt: "2026-11-05T16:30:00+07:00" }, TENANT));
+  assert.ok("ok" in checkOfflineSale({ ...SALE, soldAt: "2026-11-05T09:30:00.000Z" }, TENANT));
+});
+
 test("an invalid offline sale goes to review as other", () => {
   const bad = [
     { ...SALE, sellerId: "nope" },
     { ...SALE, soldAt: "yesterday-ish" },
+    { ...SALE, soldAt: "2026-11-05T09:30" },
     { ...SALE, queueNumber: 0 },
     { ...SALE, queueNumber: 10000 },
     { ...SALE, queueNumber: 1.5 },

@@ -1,6 +1,5 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile, getActiveShift } from "@/lib/dal";
@@ -169,7 +168,8 @@ export async function createOrder(
     requiresApproval = computed.requiresApproval;
 
     // Under an override the manager's reason also explains a discount that crossed the threshold.
-    const reason = (data.discountReason ?? "").trim() || (override?.reason ?? "");
+    const reason =
+      (data.discountReason ?? "").trim() || (requiresApproval && override ? override.reason : "");
     if (requiresApproval && reason === "") {
       return stop("กรุณาระบุเหตุผลสำหรับส่วนลดนี้", "needs_approval");
     }
@@ -211,19 +211,8 @@ export async function createOrder(
       return stop("PIN ไม่ถูกต้อง", "needs_approval");
     }
 
-    const { data: approvers } = await admin
-      .from("profiles")
-      .select("id, pin_hash")
-      .eq("tenant_id", profile.tenant_id)
-      .in("role", ["owner", "manager"])
-      .not("pin_hash", "is", null);
-
-    for (const approver of approvers ?? []) {
-      if (approver.pin_hash && (await bcrypt.compare(pin, approver.pin_hash))) {
-        approverId = approver.id;
-        break;
-      }
-    }
+    // Active owners/managers only: a deactivated manager's PIN must not approve anything.
+    approverId = await verifyManagerPin(profile.tenant_id, pin);
     if (!approverId) return stop("PIN ไม่ถูกต้อง", "needs_approval");
   }
 
