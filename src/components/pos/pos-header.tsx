@@ -9,6 +9,8 @@ type Props = {
   hasActiveShift: boolean;
   heldCount: number;
   onOpenHeld: () => void;
+  /** Why the shift link can't be used now (offline or bills still waiting); null = usable. */
+  shiftDisabledReason: string | null;
 };
 
 export function PosHeader({
@@ -17,6 +19,7 @@ export function PosHeader({
   hasActiveShift,
   heldCount,
   onOpenHeld,
+  shiftDisabledReason,
 }: Props) {
   const dateStr = formatDate(new Date().toISOString(), "full");
 
@@ -44,17 +47,27 @@ export function PosHeader({
             </span>
           )}
         </button>
-        <Link
-          href="/shifts"
-          className={
-            "text-sm font-semibold px-3 py-1.5 rounded-full transition-colors " +
-            (hasActiveShift
-              ? "bg-success/10 text-success hover:bg-success/20"
-              : "bg-destructive/10 text-destructive hover:bg-destructive/20")
-          }
-        >
-          {hasActiveShift ? "กะเปิดอยู่" : "ยังไม่เปิดกะ"}
-        </Link>
+        {shiftDisabledReason === null ? (
+          <Link
+            href="/shifts"
+            className={
+              "text-sm font-semibold px-3 py-1.5 rounded-full transition-colors " +
+              (hasActiveShift
+                ? "bg-success/10 text-success hover:bg-success/20"
+                : "bg-destructive/10 text-destructive hover:bg-destructive/20")
+            }
+          >
+            {hasActiveShift ? "กะเปิดอยู่" : "ยังไม่เปิดกะ"}
+          </Link>
+        ) : (
+          // Opening/closing a shift needs the server: shown greyed, with why, instead of a link.
+          <div className="flex flex-col items-center gap-0.5" aria-disabled="true">
+            <span className="text-sm font-semibold px-3 py-1.5 rounded-full bg-muted text-muted-foreground">
+              {hasActiveShift ? "กะเปิดอยู่" : "ยังไม่เปิดกะ"}
+            </span>
+            <span className="text-xs text-muted-foreground">{shiftDisabledReason}</span>
+          </div>
+        )}
         <div className="text-right text-sm">
           <p className="font-medium text-sidebar">{userName}</p>
           <p className="text-xs text-muted-foreground">

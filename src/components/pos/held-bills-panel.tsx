@@ -6,6 +6,7 @@ import { formatPrice } from "@/lib/cash";
 import { formatTime } from "@/lib/bangkok-time";
 import type { CancelledHeldBill, HeldBillSummary } from "@/lib/dal";
 import { CancelHeldBillModal } from "./cancel-held-bill-modal";
+import { DisabledReason } from "./disabled-reason";
 
 type Props = {
   bills: HeldBillSummary[];
@@ -19,6 +20,11 @@ type Props = {
   onParkCurrentThenResume: (bill: HeldBillSummary) => void;
   onCancelled: (billId: string) => void;
   onClose: () => void;
+  /**
+   * Why opening (or cancelling) a held bill isn't possible now: both need the server. null = they
+   * are. The bill already loaded in the cart stays usable either way.
+   */
+  resumeDisabledReason: string | null;
 };
 
 function minutesAgo(iso: string, now: number): string {
@@ -37,6 +43,7 @@ export function HeldBillsPanel({
   onParkCurrentThenResume,
   onCancelled,
   onClose,
+  resumeDisabledReason,
 }: Props) {
   // Captured once when the panel opens — good enough for "พักไว้ X นาที" and keeps render pure.
   const [now] = useState(() => Date.now());
@@ -49,6 +56,7 @@ export function HeldBillsPanel({
       onClose();
       return;
     }
+    if (resumeDisabledReason !== null) return;
     if (cartBusy) setConfirmBill(bill);
     else onResume(bill);
   }
@@ -74,21 +82,31 @@ export function HeldBillsPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {resumeDisabledReason !== null && bills.length > 0 && (
+            <DisabledReason
+              what={["เปิดบิลพัก", "ยกเลิกบิลพัก"]}
+              reason={resumeDisabledReason}
+              className="text-sm"
+            />
+          )}
           {bills.length === 0 ? (
             <p className="text-center text-base text-muted-foreground py-10">ไม่มีบิลพัก</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {bills.map((bill) => (
+              {bills.map((bill) => {
+                const locked = resumeDisabledReason !== null && bill.id !== activeHeldId;
+                return (
                 <div
                   key={bill.id}
-                  className={`rounded-xl border-2 bg-white flex flex-col ${
+                  className={`rounded-xl border-2 flex flex-col ${
                     bill.id === activeHeldId ? "border-accent" : "border-border"
-                  }`}
+                  } ${locked ? "bg-muted" : "bg-white"}`}
                 >
                   <button
                     type="button"
                     onClick={() => open(bill)}
-                    className="flex-1 text-left p-4 rounded-t-xl hover:bg-muted/50 active:bg-muted transition-colors"
+                    disabled={locked}
+                    className="flex-1 text-left p-4 rounded-t-xl hover:bg-muted/50 active:bg-muted transition-colors disabled:pointer-events-none disabled:opacity-60"
                   >
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-3xl font-bold text-accent tabular-nums leading-none">
@@ -114,12 +132,15 @@ export function HeldBillsPanel({
                   <button
                     type="button"
                     onClick={() => setCancelBill(bill)}
-                    className="h-11 border-t text-sm font-semibold text-destructive hover:bg-destructive/5 rounded-b-xl"
+                    // Cancelling is a server call too; offline it would only fail.
+                    disabled={resumeDisabledReason !== null}
+                    className="h-11 border-t text-sm font-semibold text-destructive hover:bg-destructive/5 rounded-b-xl disabled:pointer-events-none disabled:text-muted-foreground"
                   >
                     ยกเลิกบิล
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

@@ -1,13 +1,16 @@
 "use client";
+import { DisabledReason } from "./disabled-reason";
 
 type Props = {
   onGoToShifts: () => void;
   onPayByTransfer: () => void;
   onClose: () => void;
+  /** Why opening a shift isn't possible now (offline or bills still waiting); null = it is. */
+  shiftDisabledReason: string | null;
 };
 
 /** Shown instead of the cash modal when no shift is open: cash needs a counted drawer. */
-export function NoShiftDialog({ onGoToShifts, onPayByTransfer, onClose }: Props) {
+export function NoShiftDialog({ onGoToShifts, onPayByTransfer, onClose, shiftDisabledReason }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div
@@ -21,13 +24,26 @@ export function NoShiftDialog({ onGoToShifts, onPayByTransfer, onClose }: Props)
         </h2>
         <p className="text-base text-muted-foreground">ต้องเปิดกะก่อนรับเงินสด</p>
         <div className="space-y-2">
-          <button
-            type="button"
-            onClick={onGoToShifts}
-            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90"
-          >
-            ไปเปิดกะ
-          </button>
+          {shiftDisabledReason === null ? (
+            <button
+              type="button"
+              onClick={onGoToShifts}
+              className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90"
+            >
+              ไปเปิดกะ
+            </button>
+          ) : (
+            <div className="space-y-1">
+              <button
+                type="button"
+                disabled
+                className="h-14 w-full rounded-xl bg-muted text-lg font-semibold text-muted-foreground"
+              >
+                ไปเปิดกะ
+              </button>
+              <DisabledReason reason={shiftDisabledReason} />
+            </div>
+          )}
           <button
             type="button"
             onClick={onPayByTransfer}

@@ -18,9 +18,27 @@ import { computeDiscount, type DiscountType } from "@/lib/discount";
 import type {
   CartItem,
   ModifierWithOptions,
+  OfflineSale,
   PosCategory,
   PosProduct,
+  SavedOrder,
 } from "@/types/app";
+import { gate, type Gate } from "@/lib/offline/feature-gates";
+import { requestPersistentStorage } from "@/lib/offline/idb";
+import type { OutboxEntry } from "@/lib/offline/outbox-rules";
+import { useOutbox } from "./use-outbox";
+import {
+  deviceQueueOf,
+  dropAttempt,
+  isFinal,
+  makeEntry,
+  readEntry,
+  saleDisplay,
+  SAVE_ON_DEVICE_FAILED,
+  type OfflineResult,
+  type SaleDisplay,
+  type SaleInput,
+} from "./outbox-sale";
 import { PosHeader } from "./pos-header";
 import { ProductGrid } from "./product-grid";
 import { ModifierModal } from "./modifier-modal";
@@ -37,6 +55,23 @@ import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
 
 const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
+/** The online attempt's crash backup is best-effort: a slow device store never holds up a sale. */
+const ATTEMPT_BACKUP_DEADLINE_MS = 3000;
+const ENTRY_MISSING = "outbox_entry_missing";
+
+/**
+ * Date.now() for code that runs only in event handlers and async callbacks. The React Compiler lint
+ * (react-hooks/purity) flags a direct Date.now() in applySuccess / showOfflineResult since this
+ * round's changes, although neither is ever called during render (a false positive; resetAfterPark's
+ * identical call isn't flagged).
+ */
+function eventTime(): number {
+  return Date.now();
+}
+
+function reasonOf(g: Gate): string | null {
+  return g.enabled ? null : g.reason;
+}
 
 type Props = {
   products: PosProduct[];
@@ -74,6 +109,7 @@ export function PosScreen({
   cancelledHeldToday,
   promptpayId,
   tenantId,
+  sellerId,
   renderedAt,
   todayQueueLast,
   todayQueueDate,
@@ -118,14 +154,27 @@ export function PosScreen({
   const attemptRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
   // The last try of that attempt got no answer, so it may or may not have been saved.
   const [uncertain, setUncertain] = useState(false);
-  // An attempt nobody could confirm (even checkOrderSaved got no answer). Its warning stays in the
-  // cart until a sale succeeds or the cart is cleared, and it is re-checked before a new attempt.
-  const [unresolvedRef, setUnresolvedRef] = useState<string | null>(null);
+  // An attempt nobody could confirm (even checkOrderSaved got no answer), set by this screen. The
+  // warning also shows for every check-only entry in the outbox (unresolvedRef below), so it
+  // survives a reload; it is re-checked before a new attempt.
+  const [localUnresolved, setLocalUnresolved] = useState<string | null>(null);
   // When the current result (order number, change, parked bill) appeared; holds off auto-reload.
   const [resultShownAt, setResultShownAt] = useState<number | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const paymentWindowOpenRef = useRef(false);
+  // Round C2: the last sale stored on the device, why storing failed (shown in the payment
+  // window), the review list, and bills the server gave another queue number (spec call 15).
+  const [lastOffline, setLastOffline] = useState<OfflineResult | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showReview, setShowReview] = useState(false);
+  const [queueChanges, setQueueChanges] = useState<{ device: number; server: number }[]>([]);
+  // What the last online try sent (never the PIN): บันทึกไว้ในเครื่อง stores exactly that.
+  const lastTryRef = useRef<{ clientRef: string; input: SaleInput; display: SaleDisplay } | null>(
+    null
+  );
   const heartbeat = useHeartbeat();
+  // C1's no-crying-wolf rule: offline only after two failed checks (or the browser says so).
+  const online = heartbeat.connectivity.status === "online";
   // The device snapshot starts from this page and follows the heartbeat, so a tab left open never
   // draws a QR to an account the owner has since changed, and keeps the latest shift and queue
   // for offline sales.
@@ -143,6 +192,39 @@ export function PosScreen({
   useEffect(() => {
     paymentWindowOpenRef.current = showCashModal || showQrModal;
   }, [showCashModal, showQrModal]);
+
+  // The device's outbox and its sender. Sending pauses for the whole payment window (retries
+  // included, note D) so it never competes with the cashier's own payment.
+  const outbox = useOutbox({
+    tenantId,
+    online,
+    paused: showCashModal || showQrModal || checkoutPending,
+    wakeAt: heartbeat.lastSuccessAt,
+    onSynced: (e, saved) => handleSynced(e, saved),
+    onChecked: (clientRef, saved) => handleChecked(clientRef, saved),
+  });
+  // Offline, or bills still waiting: sales take a device queue number and go to the outbox.
+  const deviceNumbered = outbox.deviceNumbered;
+  const gateState = { online, pendingCount: outbox.counts.pending };
+  const pinDiscountGate = gate("pin_discount", gateState);
+  const holdGate = gate("hold", gateState);
+  const resumeHeldGate = gate("resume_held", gateState);
+  const memberGate = gate("member", gateState);
+  const shiftGate = gate("shift", gateState);
+  const checkOnlyRef = outbox.entries.find((e) => e.state === "check-only")?.clientRef ?? null;
+  const unresolvedRef = localUnresolved ?? checkOnlyRef;
+
+  // Ask once for storage the browser won't clear on its own (spec call 13).
+  useEffect(() => {
+    void requestPersistentStorage();
+  }, []);
+
+  // The queue-number notes belong to the green bar they were sent in: drop them once it hides.
+  const [prevJustFinished, setPrevJustFinished] = useState<number | null>(null);
+  if (outbox.justFinished !== prevJustFinished) {
+    setPrevJustFinished(outbox.justFinished);
+    if (outbox.justFinished === null && queueChanges.length > 0) setQueueChanges([]);
+  }
 
   const productsWithModifiers = useMemo(
     () => new Set(Object.keys(productModifierRecord)),
@@ -288,14 +370,16 @@ export function PosScreen({
   function clearCart() {
     attemptRef.current = null;
     setUncertain(false);
-    setUnresolvedRef(null);
+    setLocalUnresolved(null);
     setResultShownAt(null);
     setCartItems([]);
     setError(null);
+    setSaveError(null);
     setLastOrderNumber(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
+    setLastOffline(null);
     setCustomer(null);
     setActiveHeld(null);
     setLoadedSnapshot(null);
@@ -314,9 +398,11 @@ export function PosScreen({
   function applySuccess(sale: SavedSale) {
     attemptRef.current = null;
     setUncertain(false);
-    setUnresolvedRef(null);
+    setLocalUnresolved(null);
     setError(null);
-    setResultShownAt(Date.now());
+    setSaveError(null);
+    setLastOffline(null);
+    setResultShownAt(eventTime());
     setLastOrderNumber(sale.orderNumber);
     setLastQueueNumber(sale.queueNumber);
     snapshot.observe(sale.queueNumber);
@@ -345,27 +431,64 @@ export function PosScreen({
     } catch {
       res = { error: UNRESOLVED_PAYMENT_MESSAGE };
     }
-    setUncertain(false);
+    // `uncertain` is about the attempt in the payment window; another check-only entry (an
+    // earlier one, or another tab's) being answered must not touch it.
+    if (attemptRef.current === null || attemptRef.current.clientRef === clientRef) {
+      setUncertain(false);
+    }
     if ("saved" in res && res.saved) {
+      // Settled: the outbox's crash backup of this attempt goes (a final bill would stay).
+      void dropAttempt(clientRef, tenantId);
       if (
         attemptRef.current?.clientRef === clientRef &&
         attemptRef.current.fingerprint === fingerprintRef.current
       ) {
         applySuccess(res);
       } else {
-        setUnresolvedRef(null);
+        setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
         setError(`บิลก่อนหน้าบันทึกแล้ว (${res.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
       }
       return "saved";
     }
     if ("saved" in res) {
-      setUnresolvedRef((ref) => (ref === clientRef ? null : ref));
+      void dropAttempt(clientRef, tenantId);
+      setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
       setError(null);
       return "not-saved";
     }
-    setUnresolvedRef(clientRef);
+    // Nobody could tell: keep it as check-only, so the warning survives a reload and the sender
+    // asks again once the connection is back. If even that write fails, the warning still stays
+    // here (note B).
+    setLocalUnresolved(clientRef);
     setError(null);
+    outbox.markCheckOnly(clientRef).catch(() => {});
     return "unknown";
+  }
+
+  /** A bill the outbox sent reached the server; nothing shows per bill, the bars carry the news. */
+  function handleSynced(e: OutboxEntry, saved: SavedOrder) {
+    snapshot.observe(saved.queueNumber);
+    const device = e.offline?.queueNumber;
+    if (device !== undefined && saved.queueNumber !== device) {
+      setQueueChanges((list) => [...list, { device, server: saved.queueNumber }]);
+    }
+    // A held bill paid offline is now closed on the server: drop it from the held list.
+    if (e.input.heldBillId !== undefined) router.refresh();
+  }
+
+  /** The sender answered a check-only entry: saved, or not saved (null). */
+  function handleChecked(clientRef: string, saved: Omit<SavedOrder, "orderId"> | null) {
+    setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
+    if (saved === null) return;
+    snapshot.observe(saved.queueNumber);
+    if (
+      attemptRef.current?.clientRef === clientRef &&
+      attemptRef.current.fingerprint === fingerprintRef.current
+    ) {
+      applySuccess(saved);
+    } else if (clientRef === unresolvedRef) {
+      setError(`บิลก่อนหน้าบันทึกแล้ว (${saved.orderNumber}) · ตรวจตะกร้าก่อนชำระ`);
+    }
   }
 
   // The current cart as a payment attempt; mirrored in a ref so an answer that arrives later can
@@ -385,6 +508,214 @@ export function PosScreen({
     fingerprintRef.current = currentFingerprint;
   }, [currentFingerprint]);
 
+  /** This cart as a sale for createOrder and the outbox. It never carries the manager PIN. */
+  function saleInput(clientRef: string, cashReceived: number | undefined): SaleInput {
+    return {
+      items: cartItems,
+      paymentMethod,
+      orderType,
+      customerId: customer?.id ?? undefined,
+      discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
+      discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
+      discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
+      cashReceived,
+      heldBillId: activeHeld?.id,
+      heldBillVersion: activeHeld?.version,
+      clientRef,
+    };
+  }
+
+  /** One client_ref per payment attempt: a retry of the same cart reuses it (payment-attempt.ts). */
+  function clientRefForCart(): string {
+    const fingerprint = currentFingerprint;
+    if (attemptRef.current?.fingerprint !== fingerprint) {
+      attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
+    }
+    return attemptRef.current.clientRef;
+  }
+
+  // A sale stored on the device: show its queue number and empty the cart (spec goal 2). Called
+  // only once the outbox write has resolved.
+  function showOfflineResult(result: OfflineResult, clientRef: string) {
+    attemptRef.current = null;
+    lastTryRef.current = null;
+    setUncertain(false);
+    setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
+    setError(null);
+    setSaveError(null);
+    setLastOrderNumber(null);
+    setLastQueueNumber(null);
+    setLastCashTender(null);
+    setLastHeld(null);
+    setLastOffline(result);
+    setResultShownAt(eventTime());
+    setCartItems([]);
+    setCustomer(null);
+    resetDiscount();
+    // No router.refresh() here: offline it can't load. The held list refreshes once it is sent.
+    setActiveHeld(null);
+    setLoadedSnapshot(null);
+    setShowCashModal(false);
+    setShowQrModal(false);
+    paymentWindowOpenRef.current = false;
+  }
+
+  /** "A PIN discount waits for the connection" (spec 6b), in the payment window. */
+  function pinDiscountMessage(): string {
+    return `ส่วนลดที่ต้องใช้ PIN — ${reasonOf(pinDiscountGate) ?? "ใช้ไม่ได้ตอนเน็ตหลุด"}`;
+  }
+
+  // Device-numbered mode at confirm: the server is never called. The bill takes a device queue
+  // number and goes into the outbox as a final `pending` entry; the sender sends it later.
+  async function sellOnDevice(cashReceived: number | undefined) {
+    // A sale whose discount needed a manager PIN never goes to the device (spec 6b).
+    if (requiresApproval) {
+      setSaveError(pinDiscountMessage());
+      return;
+    }
+    // Cash needs a shift the device knows is open.
+    if (paymentMethod === "cash" && snapshot.shiftId === null) {
+      setShowCashModal(false);
+      paymentWindowOpenRef.current = false;
+      setError(null);
+      setShowNoShift(true);
+      return;
+    }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    // The same attempt as an earlier try that got no answer keeps its client_ref: if the server
+    // did save it, sending it later just returns that bill.
+    const clientRef = clientRefForCart();
+    const input = saleInput(clientRef, cashReceived);
+    setError(null);
+    setSaveError(null);
+    setCheckoutPending(true);
+    try {
+      // Already stored as a final bill (a tap that raced the result): show it, take no new number.
+      const existing = await readEntry(clientRef, tenantId);
+      if (existing && isFinal(existing)) {
+        showOfflineResult(
+          {
+            queueNumber: deviceQueueOf(existing) ?? 0,
+            cashReceived: existing.display.cashReceived,
+            changeAmount: existing.display.changeAmount,
+          },
+          clientRef
+        );
+        return;
+      }
+      // Rejects when the device can't store the number (note I): the sale is blocked.
+      const queueNumber = await snapshot.takeNext();
+      const offline: OfflineSale = {
+        tenantId,
+        sellerId,
+        soldAt: new Date().toISOString(),
+        queueNumber,
+        shiftId: snapshot.shiftId,
+      };
+      const entry = makeEntry({
+        clientRef,
+        tenantId,
+        sellerId,
+        state: "pending",
+        input,
+        display: saleDisplay(input, total, queueNumber),
+        offline,
+      });
+      // Replaces this attempt's own attempt/check-only backup, if any (same client_ref).
+      await outbox.put(entry);
+      showOfflineResult(
+        {
+          queueNumber,
+          cashReceived: entry.display.cashReceived,
+          changeAmount: entry.display.changeAmount,
+        },
+        clientRef
+      );
+    } catch {
+      // Nothing was stored: the cart stays and the window says so.
+      setSaveError(SAVE_ON_DEVICE_FAILED);
+    } finally {
+      submittingRef.current = false;
+      setCheckoutPending(false);
+    }
+  }
+
+  // บันทึกไว้ในเครื่อง after a try got no answer (spec goal 11): the attempt becomes a final
+  // pending bill with the same client_ref, so it can never record twice.
+  async function saveAttemptToDevice() {
+    const last = lastTryRef.current;
+    if (!last || attemptRef.current?.clientRef !== last.clientRef) return;
+    if (requiresApproval) return; // the button is disabled for these (spec 6b)
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSaveError(null);
+    setCheckoutPending(true);
+    try {
+      const existing = await readEntry(last.clientRef, tenantId);
+      if (existing && isFinal(existing)) {
+        showOfflineResult(
+          {
+            queueNumber: deviceQueueOf(existing) ?? 0,
+            cashReceived: existing.display.cashReceived,
+            changeAmount: existing.display.changeAmount,
+          },
+          last.clientRef
+        );
+        return;
+      }
+      const queueNumber = await snapshot.takeNext();
+      const offline: OfflineSale = {
+        tenantId,
+        sellerId,
+        soldAt: new Date().toISOString(),
+        queueNumber,
+        shiftId: snapshot.shiftId,
+      };
+      try {
+        await outbox.finalize(last.clientRef, offline);
+      } catch (err) {
+        if (!(err instanceof Error && err.message === ENTRY_MISSING)) throw err;
+        // The attempt is gone (e.g. another tab found it "not saved"): store the bill afresh with
+        // the same client_ref (note B). The server replays it if it was in fact saved.
+        await outbox.put(
+          makeEntry({
+            clientRef: last.clientRef,
+            tenantId,
+            sellerId,
+            state: "pending",
+            input: last.input,
+            display: { ...last.display, queueNumber },
+            offline,
+          })
+        );
+      }
+      showOfflineResult(
+        {
+          queueNumber,
+          cashReceived: last.display.cashReceived,
+          changeAmount: last.display.changeAmount,
+        },
+        last.clientRef
+      );
+    } catch {
+      setSaveError(SAVE_ON_DEVICE_FAILED);
+    } finally {
+      submittingRef.current = false;
+      setCheckoutPending(false);
+    }
+  }
+
+  /** The online try's crash backup: an `attempt` entry, put fresh before every try (note A). */
+  async function backUpAttempt(clientRef: string, input: SaleInput, display: SaleDisplay) {
+    // Never over a final bill with this ref (it must not drop back to an attempt).
+    const existing = await readEntry(clientRef, tenantId);
+    if (existing && isFinal(existing)) return;
+    await outbox.put(
+      makeEntry({ clientRef, tenantId, sellerId, state: "attempt", input, display, offline: null })
+    );
+  }
+
   function submitOrder(
     cashReceived: number | undefined,
     onSettled?: (errorMessage: string | null, noAnswer: boolean) => void
@@ -393,20 +724,26 @@ export function PosScreen({
     // via the QR/transfer confirm flow), so the approval invariant must hold regardless of how
     // we got here, not just at the moment the "ชำระ" button was tapped.
     if (requiresApproval && !hasApproverPin) return;
+    // Offline, or bills still waiting: the sale goes to the device's outbox instead.
+    if (deviceNumbered) {
+      void sellOnDevice(cashReceived);
+      return;
+    }
     if (submittingRef.current) return;
     submittingRef.current = true;
     // One client_ref per payment attempt: a retry of the same cart reuses it, so a sale whose
     // response was lost is returned instead of being recorded twice (see payment-attempt.ts).
-    const fingerprint = currentFingerprint;
-    if (attemptRef.current?.fingerprint !== fingerprint) {
-      attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
-    }
-    const clientRef = attemptRef.current.clientRef;
+    const clientRef = clientRefForCart();
+    const input = saleInput(clientRef, cashReceived);
+    const display = saleDisplay(input, total, null);
+    lastTryRef.current = { clientRef, input, display };
     setError(null);
+    setSaveError(null);
     setLastOrderNumber(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
+    setLastOffline(null);
     setResultShownAt(null);
     // Not a transition: Next.js runs server actions one at a time, and a transition stays pending
     // for as long as a stalled createOrder does — the window would read "กำลังบันทึก…" long after
@@ -416,26 +753,20 @@ export function PosScreen({
       let result: Awaited<ReturnType<typeof createOrder>>;
       let noAnswer = false;
       try {
-        const call = createOrder({
-          items: cartItems,
-          paymentMethod,
-          orderType,
-          customerId: customer?.id ?? undefined,
-          discountType: discountAmount > 0 ? (discountType ?? undefined) : undefined,
-          discountValue: discountAmount > 0 ? parsedDiscountValue : undefined,
-          discountReason: discountReason.trim() !== "" ? discountReason.trim() : undefined,
-          approverPin: approverPin ?? undefined,
-          cashReceived,
-          heldBillId: activeHeld?.id,
-          heldBillVersion: activeHeld?.version,
-          clientRef,
-        });
+        await withDeadline(backUpAttempt(clientRef, input, display), ATTEMPT_BACKUP_DEADLINE_MS);
+      } catch {
+        // Only a crash backup: the sale goes on without it.
+      }
+      try {
+        const call = createOrder({ ...input, approverPin: approverPin ?? undefined });
         // A stalled connection must not trap the cashier: after PAYMENT_DEADLINE_MS it counts as no
         // answer (a retry reuses the client_ref, so giving up is safe). If the call still succeeds
         // later and the cart is still this attempt, show that sale.
         call
           .then((late) => {
-            if (!("error" in late) && attemptRef.current?.clientRef === clientRef) applySuccess(late);
+            if ("error" in late) return;
+            void dropAttempt(clientRef, tenantId);
+            if (attemptRef.current?.clientRef === clientRef) applySuccess(late);
           })
           .catch(() => {});
         result = await withDeadline(call, PAYMENT_DEADLINE_MS);
@@ -450,6 +781,9 @@ export function PosScreen({
       // The server itself may say it can't tell (database connection lost): same as no answer.
       if ("error" in result && result.mayHaveSaved) noAnswer = true;
       if ("error" in result) {
+        // A definite refusal goes back to the cart and its backup goes; no answer keeps the
+        // `attempt` entry (it may have saved).
+        if (!noAnswer) void dropAttempt(clientRef, tenantId);
         setUncertain(noAnswer);
         setError(result.error);
         if (result.error === "PIN ไม่ถูกต้อง" && requiresApproval) {
@@ -478,6 +812,7 @@ export function PosScreen({
     setShowCashModal(false);
     setShowQrModal(false);
     paymentWindowOpenRef.current = false;
+    setSaveError(null);
     if (checkoutPending) return;
     if (uncertain && attemptRef.current) {
       void resolveUncertain(attemptRef.current.clientRef);
@@ -488,10 +823,22 @@ export function PosScreen({
 
   async function handleCheckout() {
     if (requiresApproval && !hasApproverPin) return;
+    // Offline or bills still waiting: a discount that needs a PIN waits (the button says why).
+    if (deviceNumbered && requiresApproval) return;
+    setSaveError(null);
     // An earlier attempt nobody could confirm: find out first, before this cart gets a new
-    // client_ref and the same customer is charged twice.
-    if (unresolvedRef !== null && (await resolveUncertain(unresolvedRef)) === "saved") return;
-    if (paymentMethod === "cash" && activeShiftId === null) {
+    // client_ref and the same customer is charged twice. Offline there is nobody to ask; the
+    // same cart keeps that attempt's client_ref, so storing it can't record it twice.
+    if (
+      unresolvedRef !== null &&
+      online &&
+      (await resolveUncertain(unresolvedRef)) === "saved"
+    ) {
+      return;
+    }
+    // Device-numbered cash needs a shift the device knows is open (the latest it has seen).
+    const shiftOpen = deviceNumbered ? snapshot.shiftId !== null : activeShiftId !== null;
+    if (paymentMethod === "cash" && !shiftOpen) {
       setError(null);
       setShowMobileCart(false);
       setShowNoShift(true);
@@ -566,6 +913,7 @@ export function PosScreen({
     setLastOrderNumber(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
+    setLastOffline(null);
     setLastHeld({ queueNumber, customerLabel, saved });
     setResultShownAt(Date.now());
     router.refresh();
@@ -616,6 +964,7 @@ export function PosScreen({
 
   function handleHold() {
     if (cartItems.length === 0) return;
+    if (!holdGate.enabled) return; // needs the server (the cart says why)
     setError(null);
     if (activeHeld) {
       void parkCurrent("");
@@ -674,10 +1023,12 @@ export function PosScreen({
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
+    setLastOffline(null);
     setShowHeldPanel(false);
   }
 
   async function parkThenResume(bill: HeldBillSummary) {
+    if (!holdGate.enabled || !resumeHeldGate.enabled) return;
     setShowHeldPanel(false);
     const ok = await parkCurrent("");
     if (ok) resumeHeld(bill);
@@ -704,9 +1055,19 @@ export function PosScreen({
     showHeldPanel ||
     showNoShift ||
     showMobileCart ||
+    showReview ||
     pendingProduct !== null;
   const paymentUnresolved = uncertain || checkoutPending || unresolvedRef !== null;
-  const online = heartbeat.connectivity.status === "online";
+  const cartGates = { pinDiscount: pinDiscountGate, hold: holdGate, member: memberGate };
+  // บันทึกไว้ในเครื่อง: only after a try got no answer, and never for a PIN discount (spec 6b).
+  const saveToDevice = uncertain
+    ? {
+        onSave: () => void saveAttemptToDevice(),
+        disabledReason: reasonOf(
+          gate("save_to_device", { ...gateState, attemptHasPinDiscount: requiresApproval })
+        ),
+      }
+    : null;
   useEffect(() => {
     if (!heartbeat.newVersionAvailable) return;
     const resultAgeMs = resultShownAt === null ? null : Date.now() - resultShownAt;
@@ -739,13 +1100,16 @@ export function PosScreen({
   ]);
 
   // Back online with an attempt nobody could confirm: settle it now, before anyone pays again.
+  // Not while a payment window is open: its answer would land in that window's message (the
+  // outbox entries can now hold an earlier or another tab's attempt). It runs once it closes.
+  const paymentWindowOpen = showCashModal || showQrModal;
   useEffect(() => {
-    if (!online || unresolvedRef === null) return;
+    if (!online || unresolvedRef === null || paymentWindowOpen) return;
     const timer = setTimeout(() => void resolveUncertain(unresolvedRef), 0);
     return () => clearTimeout(timer);
     // resolveUncertain is recreated each render; re-running on it would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, unresolvedRef]);
+  }, [online, unresolvedRef, paymentWindowOpen]);
 
   // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
   // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
@@ -753,19 +1117,29 @@ export function PosScreen({
   return (
     <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
       <StatusBanners
-        offline={heartbeat.connectivity.status === "offline"}
+        offline={!online}
+        pendingCount={outbox.counts.pending}
+        progress={outbox.progress}
+        justFinished={outbox.justFinished}
+        reviewCount={outbox.counts.review}
+        onOpenReview={() => {
+          setShowMobileCart(false);
+          setShowReview((v) => !v);
+        }}
         updateAvailable={heartbeat.newVersionAvailable}
         onRefresh={() => window.location.reload()}
+        queueChanges={queueChanges}
       />
       <PosHeader
         userName={userName}
         todayOrderCount={todayOrderCount}
-        hasActiveShift={activeShiftId !== null}
+        hasActiveShift={deviceNumbered ? snapshot.shiftId !== null : activeShiftId !== null}
         heldCount={heldBills.length}
         onOpenHeld={() => {
           setShowMobileCart(false);
           setShowHeldPanel(true);
         }}
+        shiftDisabledReason={reasonOf(shiftGate)}
       />
       <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0 mt-2">
         <div className="flex-1 min-w-0 pb-20 md:pb-0">
@@ -814,6 +1188,8 @@ export function PosScreen({
             onHold={handleHold}
             holdPending={holdPending}
             lastHeld={lastHeld}
+            lastOffline={lastOffline}
+            gates={cartGates}
           />
         </div>
       </div>
@@ -882,6 +1258,8 @@ export function PosScreen({
                 onHold={handleHold}
                 holdPending={holdPending}
                 lastHeld={lastHeld}
+                lastOffline={lastOffline}
+                gates={cartGates}
               />
             </div>
           </div>
@@ -900,9 +1278,10 @@ export function PosScreen({
           total={total}
           promptpayId={currentPromptpayId}
           pending={checkoutPending}
-          error={uncertain ? error : null}
+          error={saveError ?? (uncertain ? error : null)}
           onConfirm={handleQrConfirm}
           onCancel={closePaymentWindow}
+          saveToDevice={saveToDevice}
         />
       )}
       {showHoldModal && (
@@ -931,29 +1310,38 @@ export function PosScreen({
           activeHeldId={activeHeld?.id ?? null}
           cartBusy={cartBusy}
           busyCartAction={activeHeld ? "save" : "hold"}
-          onResume={resumeHeld}
+          onResume={(bill) => {
+            if (resumeHeldGate.enabled) resumeHeld(bill);
+          }}
           onParkCurrentThenResume={(bill) => void parkThenResume(bill)}
           onCancelled={handleHeldCancelled}
           onClose={() => setShowHeldPanel(false)}
+          resumeDisabledReason={reasonOf(resumeHeldGate)}
         />
       )}
       {showNoShift && (
         <NoShiftDialog
-          onGoToShifts={() => router.push("/shifts")}
+          onGoToShifts={() => {
+            if (shiftGate.enabled) router.push("/shifts");
+          }}
           onPayByTransfer={payByTransferInstead}
           onClose={() => setShowNoShift(false)}
+          shiftDisabledReason={reasonOf(shiftGate)}
         />
       )}
       {showCashModal && (
         <CashPaymentModal
           total={total}
           pending={checkoutPending}
-          error={error}
+          error={saveError ?? error}
           retryable={uncertain}
           onConfirm={handleCashConfirm}
           onCancel={closePaymentWindow}
+          saveToDevice={saveToDevice}
         />
       )}
+      {/* Task 9: the review list of refused bills (ReviewPanel) opens here while showReview is
+          true, from the review bar. Nothing renders for it yet. */}
     </div>
   );
 }

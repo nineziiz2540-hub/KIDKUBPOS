@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { NumericKeypad } from "./numeric-keypad";
 import { computeChange, MAX_CASH_RECEIVED, suggestCashAmounts, toSatang } from "@/lib/cash";
+import { SaveToDeviceButton } from "./save-to-device-button";
 
 type Props = {
   total: number;
@@ -12,6 +13,11 @@ type Props = {
   retryable: boolean;
   onConfirm: (cashReceived: number) => void;
   onCancel: () => void;
+  /**
+   * Offered only after a try got no answer: store the bill on the device and send it later
+   * (same client_ref, so it can't record twice). disabledReason set = shown greyed with why.
+   */
+  saveToDevice?: { onSave: () => void; disabledReason: string | null } | null;
 };
 
 /** Appends one keypad key to the typed amount, rejecting anything that isn't a valid baht value. */
@@ -32,7 +38,15 @@ function formatBaht(amount: number): string {
   return amount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function CashPaymentModal({ total, pending, error, retryable, onConfirm, onCancel }: Props) {
+export function CashPaymentModal({
+  total,
+  pending,
+  error,
+  retryable,
+  onConfirm,
+  onCancel,
+  saveToDevice = null,
+}: Props) {
   const [typed, setTyped] = useState("");
 
   const received = typed === "" ? null : Number(typed);
@@ -156,6 +170,7 @@ export function CashPaymentModal({ total, pending, error, retryable, onConfirm, 
             {pending ? "กำลังบันทึก…" : retryable ? "ลองอีกครั้ง" : "ยืนยันรับเงิน"}
           </Button>
         </div>
+        {saveToDevice && <SaveToDeviceButton {...saveToDevice} pending={pending} />}
       </div>
     </div>
   );

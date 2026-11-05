@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { buildPromptPayPayload } from "@/lib/promptpay";
 import { Button } from "@/components/ui/button";
+import { SaveToDeviceButton } from "./save-to-device-button";
 
 type Props = {
   total: number;
@@ -14,6 +15,8 @@ type Props = {
   error: string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Offered only after a try got no answer (see CashPaymentModal). */
+  saveToDevice?: { onSave: () => void; disabledReason: string | null } | null;
 };
 
 type QrState =
@@ -24,7 +27,15 @@ type QrState =
 const QR_SIZE = 280;
 const NO_PROMPTPAY = "ร้านยังไม่ได้ตั้งค่า PromptPay ID กรุณาไปที่หน้าตั้งค่า";
 
-export function QrPaymentModal({ total, promptpayId, pending, error, onConfirm, onCancel }: Props) {
+export function QrPaymentModal({
+  total,
+  promptpayId,
+  pending,
+  error,
+  onConfirm,
+  onCancel,
+  saveToDevice = null,
+}: Props) {
   // Drawn entirely on the device: no request can leave this on "กำลังสร้าง QR…".
   const [image, setImage] = useState<{ key: string; state: QrState } | null>(null);
   const key = promptpayId === null ? "" : buildPromptPayPayload(promptpayId, total);
@@ -114,6 +125,7 @@ export function QrPaymentModal({ total, promptpayId, pending, error, onConfirm, 
             </Button>
           )}
         </div>
+        {saveToDevice && <SaveToDeviceButton {...saveToDevice} pending={pending} />}
       </div>
     </div>
   );

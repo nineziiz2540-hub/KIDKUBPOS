@@ -5,6 +5,7 @@ import { PinPad } from "@/components/ui/pin-pad";
 import { formatPrice } from "@/lib/cash";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import { NumericKeypad } from "./numeric-keypad";
+import { DisabledReason } from "./disabled-reason";
 
 type Props = {
   subtotal: number;
@@ -14,6 +15,11 @@ type Props = {
   /** pin is null when the discount is under the approval threshold. */
   onApply: (type: DiscountType, value: string, reason: string, pin: string | null) => void;
   onCancel: () => void;
+  /**
+   * Why a discount over the approval threshold can't be applied now (offline, or bills still
+   * waiting: the manager's PIN never travels with a bill stored on the device). null = it can.
+   */
+  approvalBlockedReason?: string | null;
 };
 
 // The shop's most-used discounts (asked 2026-09-25): one tap each.
@@ -45,6 +51,7 @@ export function DiscountModal({
   initialReason,
   onApply,
   onCancel,
+  approvalBlockedReason = null,
 }: Props) {
   const [type, setType] = useState<DiscountType>(initialType ?? "percent");
   const [typed, setTyped] = useState(initialValue);
@@ -67,8 +74,10 @@ export function DiscountModal({
     setTyped("");
   }
 
+  const approvalBlocked = valid && requiresApproval && approvalBlockedReason !== null;
+
   function confirmAmount() {
-    if (!valid) return;
+    if (!valid || approvalBlocked) return;
     if (requiresApproval) setStep("approval");
     else onApply(type, typed, reason.trim(), null);
   }
@@ -152,12 +161,19 @@ export function DiscountModal({
                   {valid ? `฿${formatPrice(total)}` : "—"}
                 </span>
               </div>
-              {valid && requiresApproval && (
+              {valid && requiresApproval && !approvalBlocked && (
                 <p className="text-sm text-warning font-medium pt-1">
                   ส่วนลดนี้เกินเพดาน ต้องใช้ PIN ผู้จัดการ
                 </p>
               )}
             </div>
+            {approvalBlocked && approvalBlockedReason !== null && (
+              <DisabledReason
+                what={["ส่วนลดที่ต้องใช้ PIN"]}
+                reason={approvalBlockedReason}
+                className="text-sm"
+              />
+            )}
 
             <div className="flex gap-2">
               <Button
@@ -170,7 +186,7 @@ export function DiscountModal({
               <Button
                 type="button"
                 onClick={confirmAmount}
-                disabled={!valid}
+                disabled={!valid || approvalBlocked}
                 className="flex-1 h-12 bg-accent hover:bg-accent/90 text-white text-base font-semibold"
               >
                 {valid && requiresApproval ? "ถัดไป: ขออนุมัติ" : "ใช้ส่วนลด"}

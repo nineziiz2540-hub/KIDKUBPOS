@@ -10,6 +10,10 @@ import { PinPad } from "@/components/ui/pin-pad";
 import { MemberModal } from "./member-modal";
 import { DiscountModal } from "./discount-modal";
 import { NoteModal } from "./note-modal";
+import { DisabledReason } from "./disabled-reason";
+import { OfflineSaleResult } from "./offline-sale-result";
+import type { OfflineResult } from "./outbox-sale";
+import type { Gate } from "@/lib/offline/feature-gates";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -67,7 +71,15 @@ type Props = {
   onHold: () => void;
   holdPending: boolean;
   lastHeld: { queueNumber: number; customerLabel: string | null; saved: boolean } | null;
+  /** The last sale stored on the device (round C2), shown in place of a bill number. */
+  lastOffline: OfflineResult | null;
+  /** What needs the server right now (feature-gates.ts): disabled ones show why. */
+  gates: { pinDiscount: Gate; hold: Gate; member: Gate };
 };
+
+function reasonOf(g: Gate): string | null {
+  return g.enabled ? null : g.reason;
+}
 
 export function SmartCart({
   cartItems,
@@ -106,8 +118,26 @@ export function SmartCart({
   onHold,
   holdPending,
   lastHeld,
+  lastOffline,
+  gates,
 }: Props) {
   const reasonId = useId();
+  const pinReason = reasonOf(gates.pinDiscount);
+  const holdReason = reasonOf(gates.hold);
+  const memberReason = reasonOf(gates.member);
+  // A discount that needs a manager PIN never goes into a bill stored on the device (spec 6b).
+  const pinDiscountBlocked = requiresApproval && pinReason !== null;
+  // The mockup's one grey line: "ส่วนลดที่ต้องใช้ PIN · พักบิล — ใช้ไม่ได้ตอนเน็ตหลุด". Grouped by
+  // reason, though every server feature shares the same one at any moment.
+  const disabledGroups = new Map<string, string[]>();
+  for (const [what, reason] of [
+    ["ส่วนลดที่ต้องใช้ PIN", pinReason],
+    [activeHeld ? "บันทึกบิลพัก" : "พักบิล", holdReason],
+    ["สมาชิก", customer ? null : memberReason],
+  ] as const) {
+    if (reason === null) continue;
+    disabledGroups.set(reason, [...(disabledGroups.get(reason) ?? []), what]);
+  }
   const [confirmCloseHeld, setConfirmCloseHeld] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -186,6 +216,13 @@ export function SmartCart({
                   <p className="text-base font-medium text-sidebar">{lastHeld.customerLabel}</p>
                 )}
               </div>
+            )}
+            {lastOffline && (
+              <OfflineSaleResult
+                queueNumber={lastOffline.queueNumber}
+                cashReceived={lastOffline.cashReceived}
+                changeAmount={lastOffline.changeAmount}
+              />
             )}
             {lastOrderNumber && lastQueueNumber !== null && (
               <div className="mb-2">
@@ -316,6 +353,7 @@ export function SmartCart({
             <button
               type="button"
               onClick={() => setShowMemberModal(true)}
+              disabled={memberReason !== null}
               className={SECONDARY_CLS}
             >
               <UserRound size={18} />
@@ -405,11 +443,21 @@ export function SmartCart({
           <p className="text-sm text-destructive font-medium">{error}</p>
         )}
 
+        {[...disabledGroups].map(([reason, what]) => (
+          <DisabledReason key={reason} what={what} reason={reason} />
+        ))}
+
         <div className="flex gap-2">
           <button
             type="button"
             onClick={onHold}
-            disabled={cartItems.length === 0 || pending || holdPending || discountExceedsSubtotal}
+            disabled={
+              cartItems.length === 0 ||
+              pending ||
+              holdPending ||
+              discountExceedsSubtotal ||
+              holdReason !== null
+            }
             className="w-[38%] h-14 shrink-0 rounded-xl border-2 border-accent bg-white text-accent text-base font-bold leading-tight hover:bg-accent/10 disabled:opacity-40 disabled:pointer-events-none transition-colors"
           >
             {holdPending ? "กำลังบันทึก…" : activeHeld ? "บันทึกบิลพัก" : "พักบิล"}
@@ -422,7 +470,8 @@ export function SmartCart({
               pending ||
               holdPending ||
               discountExceedsSubtotal ||
-              (requiresApproval && !hasApproverPin)
+              (requiresApproval && !hasApproverPin) ||
+              pinDiscountBlocked
             }
             className="flex-1 h-14 rounded-xl bg-accent hover:bg-accent/90 text-white text-xl font-bold"
           >
@@ -526,6 +575,7 @@ export function SmartCart({
             setShowDiscountModal(false);
           }}
           onCancel={() => setShowDiscountModal(false)}
+          approvalBlockedReason={pinReason}
         />
       )}
 
@@ -550,6 +600,12 @@ export function SmartCart({
               ส่วนลดนี้เกินเพดาน ต้องได้รับอนุมัติจาก Manager หรือ Owner
             </p>
 
+            {pinReason !== null ? (
+              // The PIN is checked by the server and never stored on the device, so a discount that
+              // needs it waits until the connection is back and no bills are waiting.
+              <DisabledReason what={["ส่วนลดที่ต้องใช้ PIN"]} reason={pinReason} className="text-sm" />
+            ) : (
+            <>
             <div className="space-y-1.5">
               <Label htmlFor={reasonId}>เหตุผลที่ให้ส่วนลด</Label>
               <textarea
@@ -575,6 +631,8 @@ export function SmartCart({
                 </p>
               )}
             </div>
+            </>
+            )}
 
             {error && (
               <p className="text-sm text-destructive font-medium text-center">
