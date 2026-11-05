@@ -26,6 +26,7 @@ import type { OfflineSale, SavedOrder } from "@/types/app";
 const LOCK_NAME = "kidkub-outbox-sender";
 const INTERVAL_MS = 5000;
 const JUST_FINISHED_MS = 5000;
+const LOAD_FALLBACK_MS = 3000;
 const ENTRY_MISSING = "outbox_entry_missing";
 const WRONG_TENANT = "outbox_wrong_tenant";
 
@@ -55,8 +56,9 @@ export type UseOutbox = {
   /** Bills sent since pending was last empty, for the green bar; null again after 5 s. */
   justFinished: number | null;
   /**
-   * True once the first read of the store has settled (also when storage is unavailable). Before
-   * that, `deviceNumbered` can't know about bills already waiting, so the POS doesn't take payments.
+   * True once the first read of the store has settled (also when storage is unavailable), or after
+   * 3 s at the latest. Before that, `deviceNumbered` can't know about bills already waiting, so the
+   * POS doesn't take payments.
    */
   loaded: boolean;
   put(e: OutboxEntry): Promise<void>;
@@ -327,6 +329,11 @@ export function useOutbox({
   useEffect(() => {
     mountedRef.current = true;
     const unsubscribe = onOutboxChange(() => void refresh());
+    // A stuck IndexedDB open (known on iPad Safari) must not block paying forever: after 3 s the POS
+    // takes payments anyway, and entries/deviceNumbered update as normal once the store answers.
+    const loadTimer = setTimeout(() => {
+      if (mountedRef.current) setLoaded(true);
+    }, LOAD_FALLBACK_MS);
     void (async () => {
       try {
         await recover();
@@ -339,6 +346,7 @@ export function useOutbox({
       mountedRef.current = false;
       genRef.current += 1;
       unsubscribe();
+      clearTimeout(loadTimer);
       if (finishedTimerRef.current) clearTimeout(finishedTimerRef.current);
       finishedTimerRef.current = null;
     };
