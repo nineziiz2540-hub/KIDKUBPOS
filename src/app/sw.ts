@@ -39,6 +39,14 @@ const serwist = new Serwist({
         ],
       }),
     },
+    // Every other page: network only. defaultCache would cache each visited page and serve it
+    // offline after a deploy, pointing at purged chunks (Next's error screen). A failed navigation
+    // instead goes to the offline.html fallback below.
+    {
+      matcher: ({ request, url, sameOrigin }) =>
+        sameOrigin && request.mode === "navigate" && url.pathname !== "/pos",
+      handler: new NetworkOnly(),
+    },
     ...defaultCache,
   ],
   // Other pages show a static Thai page when offline and uncached.
@@ -57,9 +65,9 @@ serwist.addEventListeners();
 // A new build changes every chunk hash and Serwist's own activate step drops the old build's
 // precache, so a /pos page cached by the old build would reference chunks that no longer exist
 // and render Next's error screen offline. Re-fetch /pos from the new build when this worker
-// activates (alongside Serwist's own activate listener). A response that is not a plain 200 (for
-// example signed out, redirected to /login) removes the stale entry: the offline page is better
-// than a page with missing chunks. If the fetch itself fails (offline), the cache is left as is.
+// activates (alongside Serwist's own activate listener). A redirect (signed out, sent to /login)
+// or a 4xx removes the stale entry: the offline page is better than a page with missing chunks.
+// A 5xx, a timeout or being offline leaves the cache as is.
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
@@ -70,16 +78,20 @@ self.addEventListener("activate", (event) => {
           credentials: "include",
           cache: "no-store",
           headers: { Accept: "text/html" },
+          // While this worker is activating, fetches from the controlled tab wait for it: bound it.
+          signal: AbortSignal.timeout(5000),
         });
       } catch {
+        // Offline or timed out: leave the cache as is.
         return;
       }
       const cache = await caches.open("pos-shell");
       if (response.status === 200 && !response.redirected) {
         await cache.put(key, response);
-      } else {
+      } else if (response.redirected || (response.status >= 400 && response.status < 500)) {
         await cache.delete(key);
       }
+      // 5xx: keep the entry, a transient error must not discard a page that may be current.
     })(),
   );
 });
