@@ -69,14 +69,15 @@ async function write(
   return new Promise<void>((resolve, reject) => {
     let tx: IDBTransaction;
     try {
-      tx = db.transaction(store, "readwrite");
+      tx = db.transaction(store, "readwrite", { durability: "strict" });
       fn(tx.objectStore(store));
     } catch (e) {
       reject(mapWriteError(e as Error));
       return;
     }
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(mapWriteError(tx.error));
+    tx.onerror = (ev) =>
+      reject(mapWriteError((ev.target as IDBRequest | null)?.error ?? tx.error));
     tx.onabort = () => reject(mapWriteError(tx.error));
   });
 }
