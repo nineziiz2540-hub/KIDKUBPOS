@@ -341,7 +341,7 @@ export function PosScreen({
   async function resolveUncertain(clientRef: string): Promise<"saved" | "not-saved" | "unknown"> {
     let res: Awaited<ReturnType<typeof checkOrderSaved>>;
     try {
-      res = await withDeadline(checkOrderSaved(clientRef), PAYMENT_DEADLINE_MS);
+      res = await withDeadline(checkOrderSaved(clientRef, tenantId), PAYMENT_DEADLINE_MS);
     } catch {
       res = { error: UNRESOLVED_PAYMENT_MESSAGE };
     }

@@ -2,7 +2,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkOrderSaved, createOrder, raiseQueueCounter } from "@/app/actions/orders";
 import { PAYMENT_DEADLINE_MS, withDeadline } from "@/lib/payment-attempt";
-import { onOutboxChange, outboxAll, outboxDelete, outboxPut } from "@/lib/offline/idb";
+import {
+  onOutboxChange,
+  outboxAll,
+  outboxDelete,
+  outboxDeleteIf,
+  outboxPut,
+  outboxUpdateIf,
+} from "@/lib/offline/idb";
 import {
   afterFailure,
   counts as countEntries,
@@ -20,6 +27,7 @@ const LOCK_NAME = "kidkub-outbox-sender";
 const INTERVAL_MS = 5000;
 const JUST_FINISHED_MS = 5000;
 const ENTRY_MISSING = "outbox_entry_missing";
+const WRONG_TENANT = "outbox_wrong_tenant";
 
 type Options = {
   tenantId: string;
@@ -33,15 +41,12 @@ type Options = {
    * is set when the server kept a different queue number than the device's (spec call 15).
    */
   onSynced(e: OutboxEntry, saved: SavedOrder): void;
-  /**
-   * A check-only entry was answered and left the outbox: saved (checkOrderSaved does not return
-   * the order id, so `saved.orderId` is "") or not saved (null).
-   */
-  onChecked(clientRef: string, saved: SavedOrder | null): void;
+  /** A check-only entry was answered and left the outbox: saved, or not saved (null). */
+  onChecked(clientRef: string, saved: Omit<SavedOrder, "orderId"> | null): void;
 };
 
 export type UseOutbox = {
-  /** Every entry on the device (all shops), oldest first. counts/deviceNumbered are this shop's. */
+  /** This shop's entries, oldest first (another shop's bills on the device are never shown). */
   entries: OutboxEntry[];
   counts: { pending: number; review: number; checkOnly: number };
   deviceNumbered: boolean;
@@ -57,26 +62,6 @@ export type UseOutbox = {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-async function findEntry(clientRef: string): Promise<OutboxEntry | undefined> {
-  return (await outboxAll()).find((e) => e.clientRef === clientRef);
-}
-
-/**
- * Writes `fn(current)` only if the entry is still in the store (read just before), so a bill
- * another tab removed meanwhile is never brought back.
- */
-async function updateIfPresent(
-  clientRef: string,
-  fn: (e: OutboxEntry) => OutboxEntry | null,
-): Promise<OutboxEntry | null> {
-  const cur = await findEntry(clientRef);
-  if (!cur) return null;
-  const next = fn(cur);
-  if (next === null) return null;
-  await outboxPut(next);
-  return next;
 }
 
 /**
@@ -134,7 +119,7 @@ export function useOutbox({
   const recover = useCallback(async () => {
     const changed = recoverOrphans(await outboxAll(), Date.now(), tenantRef.current);
     for (const e of changed) {
-      await updateIfPresent(e.clientRef, (cur) =>
+      await outboxUpdateIf(e.clientRef, (cur) =>
         cur.state === "attempt" ? { ...cur, state: "check-only" } : null,
       );
     }
@@ -150,14 +135,15 @@ export function useOutbox({
     let res: Awaited<ReturnType<typeof raiseQueueCounter>>;
     try {
       res = await withDeadline(
-        raiseQueueCounter(saleBusinessDate(e), e.offline.queueNumber),
+        // The bill's own shop: if another shop is signed in now, the server refuses (no marker).
+        raiseQueueCounter(saleBusinessDate(e), e.offline.queueNumber, e.tenantId),
         PAYMENT_DEADLINE_MS,
       );
     } catch {
       return; // retried on a later burst (the entry still has no marker)
     }
     if (!("ok" in res)) return;
-    await updateIfPresent(e.clientRef, (cur) =>
+    await outboxUpdateIf(e.clientRef, (cur) =>
       cur.state === "review" ? { ...cur, counterRaised: true } : null,
     );
   }, []);
@@ -179,7 +165,7 @@ export function useOutbox({
         if (work.kind === "send") {
           if (!e.offline) {
             // Should not exist: never send a bill without its device data.
-            await updateIfPresent(e.clientRef, (cur) =>
+            await outboxUpdateIf(e.clientRef, (cur) =>
               cur.state === "pending" ? missingOfflineToReview(cur) : null,
             );
             continue;
@@ -216,7 +202,7 @@ export function useOutbox({
 
           const failure = res;
           const now = Date.now();
-          const next = await updateIfPresent(e.clientRef, (cur) =>
+          const next = await outboxUpdateIf(e.clientRef, (cur) =>
             cur.state === "pending" ? afterFailure(cur, failure, now) : null,
           );
           if (next?.state === "review") {
@@ -233,19 +219,19 @@ export function useOutbox({
         if (work.kind === "check") {
           let res: Awaited<ReturnType<typeof checkOrderSaved>>;
           try {
-            res = await withDeadline(checkOrderSaved(e.clientRef), PAYMENT_DEADLINE_MS);
+            // A wrong-shop session answers { error }: kept, asked again later.
+            res = await withDeadline(checkOrderSaved(e.clientRef, e.tenantId), PAYMENT_DEADLINE_MS);
           } catch {
             continue; // no answer: keep it
           }
           if (!("saved" in res)) continue; // no answer: keep it
-          const cur = await findEntry(e.clientRef);
-          if (!cur || cur.state !== "check-only") continue; // resolved elsewhere meanwhile
-          await outboxDelete(e.clientRef);
+          // Only if still check-only (a finalize elsewhere makes it a final bill to keep).
+          const deleted = await outboxDeleteIf(e.clientRef, (cur) => cur.state === "check-only");
+          if (!deleted) continue;
           onCheckedRef.current(
             e.clientRef,
             res.saved
               ? {
-                  orderId: "",
                   orderNumber: res.orderNumber,
                   queueNumber: res.queueNumber,
                   cashReceived: res.cashReceived,
@@ -364,12 +350,13 @@ export function useOutbox({
     if (wakeAt !== null && onlineRef.current && !pausedRef.current) kick();
   }, [wakeAt, kick]);
 
-  const counts = useMemo(() => countEntries(entries, tenantId), [entries, tenantId]);
+  const mine = useMemo(() => entries.filter((e) => e.tenantId === tenantId), [entries, tenantId]);
+  const counts = useMemo(() => countEntries(mine, tenantId), [mine, tenantId]);
   const deviceNumbered = useMemo(
-    () => deviceNumberedMode(entries, tenantId, online),
-    [entries, tenantId, online],
+    () => deviceNumberedMode(mine, tenantId, online),
+    [mine, tenantId, online],
   );
-  const hasWork = useMemo(() => hasSenderWork(entries, tenantId), [entries, tenantId]);
+  const hasWork = useMemo(() => hasSenderWork(mine, tenantId), [mine, tenantId]);
 
   // A 5 s retry tick while this shop has something to send, check or raise.
   useEffect(() => {
@@ -387,25 +374,35 @@ export function useOutbox({
   );
 
   const remove = useCallback(async (clientRef: string) => {
-    await outboxDelete(clientRef);
+    let wrongTenant = false;
+    await outboxDeleteIf(clientRef, (cur) => {
+      wrongTenant = cur.tenantId !== tenantRef.current;
+      return !wrongTenant;
+    });
+    if (wrongTenant) throw new Error(WRONG_TENANT);
   }, []);
 
   // Both act on an online attempt (attempt, or check-only after recovery). A bill that is already
   // final (pending/review) is left exactly as it is: it must never drop back to check-only.
   const markCheckOnly = useCallback(async (clientRef: string) => {
-    const cur = await findEntry(clientRef);
-    if (!cur) throw new Error(ENTRY_MISSING);
-    if (cur.state !== "attempt") return;
-    await outboxPut({ ...cur, state: "check-only" });
+    let found = false;
+    await outboxUpdateIf(clientRef, (cur) => {
+      found = true;
+      return cur.state === "attempt" ? { ...cur, state: "check-only" } : null;
+    });
+    if (!found) throw new Error(ENTRY_MISSING);
   }, []);
 
   const finalize = useCallback(
     async (clientRef: string, offline: OfflineSale) => {
-      const cur = await findEntry(clientRef);
-      if (!cur) throw new Error(ENTRY_MISSING);
-      if (cur.state === "attempt" || cur.state === "check-only") {
-        await outboxPut({ ...cur, state: "pending", offline, tries: 0, nextTryAt: 0 });
-      }
+      let found = false;
+      await outboxUpdateIf(clientRef, (cur) => {
+        found = true;
+        return cur.state === "attempt" || cur.state === "check-only"
+          ? { ...cur, state: "pending", offline, tries: 0, nextTryAt: 0 }
+          : null;
+      });
+      if (!found) throw new Error(ENTRY_MISSING);
       kick();
     },
     [kick],
@@ -413,7 +410,7 @@ export function useOutbox({
 
   return useMemo(
     () => ({
-      entries,
+      entries: mine,
       counts,
       deviceNumbered,
       progress,
@@ -423,6 +420,6 @@ export function useOutbox({
       markCheckOnly,
       finalize,
     }),
-    [entries, counts, deviceNumbered, progress, justFinished, put, remove, markCheckOnly, finalize],
+    [mine, counts, deviceNumbered, progress, justFinished, put, remove, markCheckOnly, finalize],
   );
 }

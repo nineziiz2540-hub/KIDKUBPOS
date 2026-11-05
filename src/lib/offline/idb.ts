@@ -172,6 +172,84 @@ export async function outboxDelete(clientRef: string): Promise<void> {
   notifyChange();
 }
 
+/**
+ * One readwrite transaction: reads the entry, lets `decide` choose what to write ("delete", a new
+ * entry to put, or null = leave it), applies it, and resolves on commit with what was decided.
+ * Nothing can change the entry between the read and the write.
+ */
+async function outboxModify<R>(
+  clientRef: string,
+  decide: (cur: OutboxEntry) => { write: "delete" } | { write: OutboxEntry } | null,
+  result: (d: { write: "delete" } | { write: OutboxEntry } | null) => R,
+): Promise<R> {
+  const db = await openKidkubDb();
+  const decision = await new Promise<{ write: "delete" } | { write: OutboxEntry } | null>(
+    (resolve, reject) => {
+      let tx: IDBTransaction;
+      let d: { write: "delete" } | { write: OutboxEntry } | null = null;
+      try {
+        tx = db.transaction(OUTBOX, "readwrite", { durability: "strict" });
+        const store = tx.objectStore(OUTBOX);
+        const req = store.get(clientRef);
+        req.onsuccess = () => {
+          const cur = req.result as OutboxEntry | undefined;
+          if (!cur) return;
+          try {
+            d = decide(cur);
+            if (d === null) return;
+            if (d.write === "delete") store.delete(clientRef);
+            else store.put(d.write);
+          } catch (e) {
+            d = null;
+            tx.abort();
+            reject(e instanceof Error ? e : new Error("idb_error"));
+          }
+        };
+      } catch (e) {
+        reject(mapWriteError(e as Error));
+        return;
+      }
+      tx.oncomplete = () => resolve(d);
+      tx.onerror = (ev) =>
+        reject(mapWriteError((ev.target as IDBRequest | null)?.error ?? tx.error));
+      tx.onabort = () => reject(mapWriteError(tx.error));
+    },
+  );
+  if (decision !== null) notifyChange();
+  return result(decision);
+}
+
+/** Deletes the entry only if it exists and `pred` holds, atomically. True when it deleted. */
+export async function outboxDeleteIf(
+  clientRef: string,
+  pred: (e: OutboxEntry) => boolean,
+): Promise<boolean> {
+  return outboxModify(
+    clientRef,
+    (cur) => (pred(cur) ? { write: "delete" } : null),
+    (d) => d !== null,
+  );
+}
+
+/**
+ * Replaces the entry with `fn(current)` only if it exists and fn returns an entry, atomically.
+ * Resolves with the written entry, or null when nothing was written.
+ */
+export async function outboxUpdateIf(
+  clientRef: string,
+  fn: (e: OutboxEntry) => OutboxEntry | null,
+): Promise<OutboxEntry | null> {
+  return outboxModify(
+    clientRef,
+    (cur) => {
+      const next = fn(cur);
+      if (next !== null && next.clientRef !== clientRef) throw new Error("outbox_key_changed");
+      return next === null ? null : { write: next };
+    },
+    (d) => (d !== null && d.write !== "delete" ? d.write : null),
+  );
+}
+
 export async function outboxAll(): Promise<OutboxEntry[]> {
   return read<OutboxEntry[]>(OUTBOX, (s) => s.getAll());
 }

@@ -25,6 +25,7 @@ import type { Json } from "@/types/database";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SAVE_FAILED_MESSAGE = "บันทึกออเดอร์ไม่สำเร็จ";
+const WRONG_SHOP_MESSAGE = "บิลนี้เป็นของร้านอื่น";
 
 /**
  * createOrder's failure. `outcome` is for the device's outbox sender (src/lib/offline/sync-outcome.ts):
@@ -356,10 +357,14 @@ export async function createOrder(
  * caller's own shop by RLS and by the tenant filter.
  */
 export async function checkOrderSaved(
-  clientRef: string
+  clientRef: string,
+  expectedTenantId: string
 ): Promise<({ saved: true } & Omit<SavedOrder, "orderId">) | { saved: false } | { error: string }> {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+  // Another shop signed in meanwhile (e.g. from another tab): "not saved" would be a lie about
+  // the caller's shop, so it gets no answer and asks again later.
+  if (profile.tenant_id !== expectedTenantId) return { error: WRONG_SHOP_MESSAGE };
   if (typeof clientRef !== "string" || !UUID_RE.test(clientRef)) return { saved: false };
 
   const supabase = await createClient();
@@ -388,10 +393,13 @@ export async function checkOrderSaved(
  */
 export async function raiseQueueCounter(
   businessDate: string,
-  queueNumber: number
+  queueNumber: number,
+  expectedTenantId: string
 ): Promise<{ ok: true } | { error: string }> {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+  // Only ever the bill's own shop's counter.
+  if (profile.tenant_id !== expectedTenantId) return { error: WRONG_SHOP_MESSAGE };
   if (typeof businessDate !== "string" || !isValidDateString(businessDate)) {
     return { error: "วันที่ไม่ถูกต้อง" };
   }
