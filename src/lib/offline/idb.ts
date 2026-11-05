@@ -101,6 +101,18 @@ async function read<T>(
 
 const localListeners = new Set<() => void>();
 let postChannel: BroadcastChannel | null = null;
+let tabId: string | null = null;
+
+function getTabId(): string {
+  if (!tabId) {
+    try {
+      tabId = crypto.randomUUID();
+    } catch {
+      tabId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+  return tabId;
+}
 
 function notifyChange(): void {
   for (const cb of Array.from(localListeners)) {
@@ -113,7 +125,7 @@ function notifyChange(): void {
   try {
     if (typeof BroadcastChannel === "undefined") return;
     postChannel ??= new BroadcastChannel(CHANNEL_NAME);
-    postChannel.postMessage("change");
+    postChannel.postMessage(getTabId());
   } catch {
     // cross-tab refresh is best-effort
   }
@@ -125,7 +137,10 @@ export function onOutboxChange(cb: () => void): () => void {
   try {
     if (typeof BroadcastChannel !== "undefined") {
       channel = new BroadcastChannel(CHANNEL_NAME);
-      channel.onmessage = () => cb();
+      // Messages from this tab are already delivered via localListeners.
+      channel.onmessage = (ev) => {
+        if (ev.data !== getTabId()) cb();
+      };
     }
   } catch {
     channel = null;
