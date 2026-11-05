@@ -79,11 +79,41 @@ test("auto-reload never happens while offline", () => {
 });
 
 test("a heartbeat without promptpayId leaves the last known value alone", () => {
-  assert.deepEqual(parseHeartbeatBody({ version: "v1" }), { version: "v1", promptpayId: undefined });
-  assert.deepEqual(parseHeartbeatBody({ version: "v1", promptpayId: null }), { version: "v1", promptpayId: null });
+  const none = { shiftId: undefined, queue: undefined };
+  assert.deepEqual(parseHeartbeatBody({ version: "v1" }), { version: "v1", promptpayId: undefined, ...none });
+  assert.deepEqual(parseHeartbeatBody({ version: "v1", promptpayId: null }), {
+    version: "v1",
+    promptpayId: null,
+    ...none,
+  });
   assert.deepEqual(parseHeartbeatBody({ version: "v1", promptpayId: "0812345678" }), {
     version: "v1",
     promptpayId: "0812345678",
+    ...none,
   });
-  assert.deepEqual(parseHeartbeatBody("junk"), { version: undefined, promptpayId: undefined });
+  assert.deepEqual(parseHeartbeatBody("junk"), { version: undefined, promptpayId: undefined, ...none });
+});
+
+// ── Round C2: open shift and today's queue counter ──────────────────────────
+
+test("a heartbeat carries the open shift and today's last queue number", () => {
+  assert.deepEqual(parseHeartbeatBody({ version: "v", shiftId: null, queue: { date: "2026-11-05", last: 12 } }), {
+    version: "v",
+    promptpayId: undefined,
+    shiftId: null,
+    queue: { date: "2026-11-05", last: 12 },
+  });
+  assert.equal(parseHeartbeatBody({ version: "v", shiftId: "s1" }).shiftId, "s1");
+});
+
+test("a heartbeat without shift or queue leaves both undefined", () => {
+  const r = parseHeartbeatBody({ version: "v" });
+  assert.equal(r.shiftId, undefined);
+  assert.equal(r.queue, undefined);
+});
+
+test("a queue with a non-number last is ignored", () => {
+  assert.equal(parseHeartbeatBody({ version: "v", queue: { date: "2026-11-05", last: "12" } }).queue, undefined);
+  assert.equal(parseHeartbeatBody({ version: "v", queue: { last: 3 } }).queue, undefined);
+  assert.equal(parseHeartbeatBody({ version: "v", queue: null }).queue, undefined);
 });

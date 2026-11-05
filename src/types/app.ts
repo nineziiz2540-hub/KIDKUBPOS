@@ -36,6 +36,31 @@ export type CreateOrderInput = {
   heldBillVersion?: number;
   /** Id of this payment attempt, kept across retries; the same id never records a second bill. */
   clientRef: string;
+  /** Set when the bill was sold in device-numbered mode and is sent later by the outbox. */
+  offline?: OfflineSale;
+  /**
+   * "Record as charged" from the manager's review list (offline bills only): the device's prices
+   * are kept and an owner/manager PIN approves it. The PIN is sent once and never stored.
+   */
+  override?: { approverPin: string; reason: string };
+};
+
+/** What the device recorded at the moment of an offline sale. */
+export type OfflineSale = {
+  tenantId: string;
+  sellerId: string;
+  soldAt: string /* ISO */;
+  queueNumber: number;
+  shiftId: string | null;
+};
+
+/** A recorded bill as createOrder / checkOrderSaved return it. */
+export type SavedOrder = {
+  orderId: string;
+  orderNumber: string;
+  queueNumber: number;
+  cashReceived: number | null;
+  changeAmount: number | null;
 };
 
 export type ProductCost = {

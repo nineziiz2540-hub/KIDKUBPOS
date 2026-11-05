@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { priceLines, STALE, type PricingCatalog } from "./order-pricing-core.ts";
+import { priceLines, priceLinesAsCharged, STALE, type PricingCatalog } from "./order-pricing-core.ts";
 import type { CartItem } from "../types/app.ts";
 
 const BAD = "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง";
 
-function catalog(overrides: { archived?: boolean } = {}): PricingCatalog {
+function catalog(overrides: { archived?: boolean; price?: number } = {}): PricingCatalog {
   return {
     products: new Map([
       [
@@ -13,7 +13,7 @@ function catalog(overrides: { archived?: boolean } = {}): PricingCatalog {
         {
           id: "latte",
           name: "ลาเต้",
-          price: 55,
+          price: overrides.price ?? 55,
           is_active: true,
           archived_at: overrides.archived ? "2026-10-01T00:00:00Z" : null,
           categories: { name: "กาแฟ" },
@@ -91,4 +91,40 @@ test("a note over 200 characters is refused", () => {
   assert.deepEqual(priceLines([item(["large"], 130, { note: "ก".repeat(201) })], catalog()), {
     error: "หมายเหตุไม่ถูกต้อง (ไม่เกิน 200 ตัวอักษร)",
   });
+});
+
+// ── priceLinesAsCharged ("record as charged") ───────────────────────────────
+
+test("as charged: a changed price keeps the device total and reports the catalog total", () => {
+  // Sold at 55 + 10 (large) × 2 = 130; the latte now costs 60, so the catalog says 140.
+  const r = priceLinesAsCharged([item(["large"], 130, { name: "ลาเต้เก่า" })], catalog({ price: 60 }));
+  assert.ok(!("error" in r));
+  assert.equal(r.subtotal, 130);
+  assert.equal(r.serverSubtotal, 140);
+  assert.equal(r.lines[0]!.lineTotal, 130);
+  assert.equal(r.lines[0]!.unitPrice, 65);
+  assert.equal(r.lines[0]!.productName, "ลาเต้");
+  assert.equal(r.lines[0]!.categoryName, "กาแฟ");
+  assert.deepEqual(r.lines[0]!.modifiersSnapshot, [{ group: "ขนาด", option: "ใหญ่", priceDelta: 0 }]);
+});
+
+test("as charged: a product no longer in the catalog can't be recorded", () => {
+  assert.deepEqual(
+    priceLinesAsCharged([item(["large"], 130, { productId: "gone" })], catalog()),
+    { error: "product_missing" }
+  );
+});
+
+test("as charged: an archived product still records, with catalog names and no server total", () => {
+  const r = priceLinesAsCharged([item(["large"], 130)], catalog({ archived: true }));
+  assert.ok(!("error" in r));
+  assert.equal(r.subtotal, 130);
+  assert.equal(r.serverSubtotal, null);
+  assert.equal(r.lines[0]!.productName, "ลาเต้");
+});
+
+test("as charged: a note over 200 characters is cut, not refused", () => {
+  const r = priceLinesAsCharged([item(["large"], 130, { note: "ก".repeat(201) })], catalog());
+  assert.ok(!("error" in r));
+  assert.equal(r.lines[0]!.note, "ก".repeat(200));
 });

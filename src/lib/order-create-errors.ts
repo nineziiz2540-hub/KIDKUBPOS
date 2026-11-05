@@ -6,8 +6,11 @@ import { orderInsertShiftError } from "./shift-errors.ts";
 /** A request without a client_ref can only come from a POS tab still running pre-update code. */
 export const OLD_TAB_MESSAGE = "กรุณารีเฟรชหน้า POS แล้วลองใหม่ (ระบบเพิ่งอัปเดต)";
 
+export const HELD_BILL_STALE_MESSAGE =
+  "บิลพักนี้ถูกแก้ไข ชำระ หรือยกเลิกไปแล้ว กรุณาเปิดรายการบิลพักใหม่";
+
 const MESSAGES: Record<string, string> = {
-  held_bill_stale: "บิลพักนี้ถูกแก้ไข ชำระ หรือยกเลิกไปแล้ว กรุณาเปิดรายการบิลพักใหม่",
+  held_bill_stale: HELD_BILL_STALE_MESSAGE,
   forbidden: "ไม่มีสิทธิ์ทำรายการนี้",
   invalid_client_ref: OLD_TAB_MESSAGE,
 };

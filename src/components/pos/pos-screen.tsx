@@ -419,7 +419,7 @@ export function PosScreen({
         // A dropped connection doesn't mean the sale failed — the server may have saved it before
         // the response was lost. Retrying sends the same client_ref, so it is always safe.
         noAnswer = true;
-        result = { error: CONNECTION_RETRY_MESSAGE, mayHaveSaved: true };
+        result = { error: CONNECTION_RETRY_MESSAGE, outcome: "retry", mayHaveSaved: true };
       } finally {
         submittingRef.current = false;
       }

@@ -64,18 +64,35 @@ export function canAutoReload(s: {
 
 /**
  * The heartbeat's JSON. `promptpayId` is undefined when the server left it out (its read failed),
- * so the POS keeps the last value it had instead of blanking the QR.
+ * so the POS keeps the last value it had instead of blanking the QR. `shiftId` (the open shift,
+ * null for none) and `queue` (today's Bangkok date and last queue number) follow the same rule:
+ * undefined means "not read this time", keep what you know.
  */
 export function parseHeartbeatBody(body: unknown): {
   version: string | undefined;
   promptpayId: string | null | undefined;
+  shiftId: string | null | undefined;
+  queue: { date: string; last: number } | undefined;
 } {
-  if (typeof body !== "object" || body === null) return { version: undefined, promptpayId: undefined };
-  const b = body as { version?: unknown; promptpayId?: unknown };
+  if (typeof body !== "object" || body === null) {
+    return { version: undefined, promptpayId: undefined, shiftId: undefined, queue: undefined };
+  }
+  const b = body as { version?: unknown; promptpayId?: unknown; shiftId?: unknown; queue?: unknown };
+  const q = b.queue as { date?: unknown; last?: unknown } | null | undefined;
   return {
     version: typeof b.version === "string" ? b.version : undefined,
     promptpayId:
       !("promptpayId" in b) ? undefined : typeof b.promptpayId === "string" ? b.promptpayId : null,
+    shiftId: !("shiftId" in b) ? undefined : typeof b.shiftId === "string" ? b.shiftId : null,
+    queue:
+      typeof q === "object" &&
+      q !== null &&
+      typeof q.date === "string" &&
+      typeof q.last === "number" &&
+      Number.isInteger(q.last) &&
+      q.last >= 0
+        ? { date: q.date, last: q.last }
+        : undefined,
   };
 }
 
