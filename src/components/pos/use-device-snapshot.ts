@@ -57,7 +57,9 @@ function mergeQueue(today: string, ...states: (QueueState | null)[]): QueueState
   return out;
 }
 
-/** The larger `at` wins shift and PromptPay; the queue is always merged, never overwritten. */
+/** The larger `at` wins shift and PromptPay; the queue is always merged, never overwritten.
+ *  Note `at` is server time for a page but device time for a heartbeat answer, so a skewed device
+ *  clock can mis-order them until the next heartbeat corrects it. */
 function mergeSnapshots(a: Snapshot, b: Snapshot | null, today: string): Snapshot {
   const newer = b && b.at > a.at ? b : a;
   return {
@@ -131,6 +133,32 @@ export function useDeviceSnapshot({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, []);
 
+  // A refreshed page (router.refresh() after a sale or a shift change) brings newer server values:
+  // merge them in (the larger `at` wins) so the snapshot agrees with the page straight away.
+  const { at: pageAt, shiftId: pageShift, promptpayId: pagePromptpay } = page;
+  const { date: pageQDate, last: pageQLast } = page.queue;
+  const firstPageRef = useRef(true);
+  useEffect(() => {
+    if (firstPageRef.current) {
+      firstPageRef.current = false; // the mount effect above already persists the initial page
+      return;
+    }
+    const today = bangkokToday(new Date());
+    apply(
+      mergeSnapshots(
+        snapRef.current,
+        {
+          at: pageAt,
+          shiftId: pageShift,
+          promptpayId: pagePromptpay,
+          queue: { date: pageQDate, last: pageQLast },
+        },
+        today,
+      ),
+    );
+    persist();
+  }, [pageAt, pageShift, pagePromptpay, pageQDate, pageQLast, apply, persist]);
+
   // Every online heartbeat answer. A field the server could not read (undefined) changes nothing;
   // null is a real "no open shift".
   const answer = heartbeat.answer;
@@ -161,17 +189,14 @@ export function useDeviceSnapshot({
     () =>
       serialized(async () => {
         const today = bangkokToday(new Date());
-        let stored: Snapshot | null = null;
-        try {
-          stored = parseStored(await kvGet<unknown>(key(tenantId)));
-        } catch {
-          // an unreadable store will fail the write below, which is what stops the sale
-        }
+        // A failed re-read rejects: ignoring another tab's higher number could hand out a duplicate.
+        const stored = parseStored(await kvGet<unknown>(key(tenantId)));
         const merged = mergeSnapshots(snapRef.current, stored, today);
         const { number, state } = nextDeviceQueue(merged.queue, today);
         const next: Snapshot = { ...merged, queue: state };
         await kvSet(key(tenantId), next); // rejects -> takeNext rejects, state unchanged
-        apply(next);
+        // Merge, not replace: a heartbeat answer or observe() may have landed during the write.
+        apply(mergeSnapshots(snapRef.current, next, today));
         return number;
       }),
     [apply, serialized, tenantId],
