@@ -53,3 +53,33 @@ const serwist = new Serwist({
 });
 
 serwist.addEventListeners();
+
+// A new build changes every chunk hash and Serwist's own activate step drops the old build's
+// precache, so a /pos page cached by the old build would reference chunks that no longer exist
+// and render Next's error screen offline. Re-fetch /pos from the new build when this worker
+// activates (alongside Serwist's own activate listener). A response that is not a plain 200 (for
+// example signed out, redirected to /login) removes the stale entry: the offline page is better
+// than a page with missing chunks. If the fetch itself fails (offline), the cache is left as is.
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const key = new URL("/pos", self.location.origin).href;
+      let response: Response;
+      try {
+        response = await fetch(key, {
+          credentials: "include",
+          cache: "no-store",
+          headers: { Accept: "text/html" },
+        });
+      } catch {
+        return;
+      }
+      const cache = await caches.open("pos-shell");
+      if (response.status === 200 && !response.redirected) {
+        await cache.put(key, response);
+      } else {
+        await cache.delete(key);
+      }
+    })(),
+  );
+});
