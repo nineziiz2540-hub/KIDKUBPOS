@@ -53,6 +53,7 @@ import { useDeviceSnapshot } from "./use-device-snapshot";
 import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
+import { ReviewPanel } from "./review-panel";
 
 const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 /** The online attempt's crash backup is best-effort: a slow device store never holds up a sale. */
@@ -1373,8 +1374,19 @@ export function PosScreen({
           saveToDevice={saveToDevice}
         />
       )}
-      {/* Task 9: the review list of refused bills (ReviewPanel) opens here while showReview is
-          true, from the review bar. Nothing renders for it yet. */}
+      {showReview && (
+        <ReviewPanel
+          entries={outbox.entries.filter((e) => e.state === "review")}
+          online={online}
+          remove={outbox.remove}
+          onRecorded={() => {
+            // The outbox already dropped the entry and the list updates itself; the bill's number
+            // is shown in the panel. Nothing else on the screen depends on it.
+          }}
+          onClose={() => setShowReview(false)}
+        />
+      )}
+
     </div>
   );
 }
