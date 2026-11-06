@@ -159,6 +159,9 @@ export function SidebarShell({ items, userName, role, tenantId }: Props) {
           );
         })}
       </nav>
+      {!online && !expanded && (
+        <p className="px-1 pb-2 text-center text-[9px] leading-3 text-white/50">{OFFLINE_REASON}</p>
+      )}
       <div className="border-t border-white/10 px-2 py-3">
         {expanded && (
           <div className="px-2 pb-2">

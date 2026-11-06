@@ -18,6 +18,7 @@ import { MarkUnpaidButton } from "@/components/orders/mark-unpaid-button";
 import { RestorePaidButton } from "@/components/orders/restore-paid-button";
 import { TransferCheckToggle } from "@/components/orders/transfer-check-toggle";
 import { formatDateTime, formatTime } from "@/lib/bangkok-time";
+import { formatBaht } from "@/lib/order-history";
 
 type OrderItem = {
   id: string;
@@ -100,6 +101,11 @@ const STATUS: Record<string, { label: string; className: string }> = {
   unpaid: { label: "ไม่ได้รับเงิน", className: "text-destructive" },
 };
 
+function bahtOrDash(v: string): string {
+  const n = Number(v);
+  return v.trim() === "" || !Number.isFinite(n) ? `฿${v}` : `฿${formatBaht(n)}`;
+}
+
 function adjustmentLabel(a: OrderAdjustment): string {
   switch (a.kind) {
     case "payment_method_change":
@@ -108,9 +114,7 @@ function adjustmentLabel(a: OrderAdjustment): string {
       }`;
     case "offline_override":
       // from_value is the server's total, or '-' when the server had no total to compare.
-      return a.fromValue === "-"
-        ? `บันทึกตามยอดที่เก็บจริง: ฿- → ฿${a.toValue}`
-        : `บันทึกตามยอดที่เก็บจริง: ฿${a.fromValue} → ฿${a.toValue}`;
+      return `บันทึกตามยอดที่เก็บจริง: ${bahtOrDash(a.fromValue)} → ${bahtOrDash(a.toValue)}`;
     case "mark_unpaid":
       return "แจ้งไม่ได้รับเงิน";
     case "restore_paid":

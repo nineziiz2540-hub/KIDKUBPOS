@@ -18,6 +18,8 @@ import {
 import { shiftErrorMessage } from "@/lib/shift-errors";
 import { AmountInput } from "./amount-input";
 import { usePendingCount } from "@/lib/offline/status-store";
+import { outboxAll } from "@/lib/offline/idb";
+import { counts } from "@/lib/offline/outbox-rules";
 
 /** What finishShift returns when cash moved after the latest count (shift_close's expected_changed). */
 const EXPECTED_CHANGED = shiftErrorMessage("expected_changed");
@@ -74,6 +76,8 @@ export function CloseShiftFlow({
   // Unsent and refused bills still belong to this drawer, so the shift can't close without them.
   const unsentTotal = unsent.pending + unsent.review;
   const closeBlocked = unsentTotal > 0;
+  // Until the device count is known the close buttons stay off (no copy: nothing is wrong yet).
+  const closeDisabled = closeBlocked || !unsent.loaded;
   const countId = useId();
   const floatId = useId();
   const noteId = useId();
@@ -123,6 +127,17 @@ export function CloseShiftFlow({
     }
     setError(null);
     startTransition(async () => {
+      // Re-read the device right before closing: a bill saved a moment ago must not slip past.
+      try {
+        const c = counts(await outboxAll(), tenantId);
+        if (c.pending + c.review > 0) {
+          setError(`ยังมีบิลค้างส่ง ${c.pending + c.review} บิล · รอส่งให้ครบก่อนปิดกะ`);
+          return;
+        }
+      } catch {
+        setError("ตรวจบิลค้างส่งในเครื่องไม่ได้ ลองอีกครั้ง");
+        return;
+      }
       const res = await finishShift(shiftId, floatLeft, note.trim() === "" ? null : note);
       if ("error" in res) {
         if (res.error === EXPECTED_CHANGED) {
@@ -150,7 +165,7 @@ export function CloseShiftFlow({
           <button
             type="button"
             onClick={begin}
-            disabled={closeBlocked}
+            disabled={closeDisabled}
             className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
           >
             ปิดกะ
@@ -309,7 +324,7 @@ export function CloseShiftFlow({
             <button
               type="button"
               onClick={finish}
-              disabled={isPending || deposit === null || closeBlocked}
+              disabled={isPending || deposit === null || closeDisabled}
               className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
             >
               {isPending ? "กำลังปิดกะ…" : "ยืนยันปิดกะ"}

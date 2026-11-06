@@ -17,6 +17,15 @@ export function BottomNav() {
   const online = usePosOnline();
 
   return (
+    <>
+    {!online && (
+      <p
+        className="md:hidden fixed left-0 right-0 z-50 bg-sidebar/95 py-1 text-center text-xs text-white/70"
+        style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+      >
+        ใช้ไม่ได้ตอนเน็ตหลุด
+      </p>
+    )}
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-sidebar border-t border-white/10 flex h-16"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
@@ -59,5 +68,6 @@ export function BottomNav() {
         );
       })}
     </nav>
+    </>
   );
 }

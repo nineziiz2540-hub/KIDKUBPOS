@@ -70,10 +70,15 @@ export async function signIn(
   redirect("/");
 }
 
-export async function signOut(): Promise<void> {
+/** Ends the session without redirecting, so a client can finish its own cleanup before leaving. */
+export async function endSession(): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();
   (await cookies()).delete("worker_verified");
+}
+
+export async function signOut(): Promise<void> {
+  await endSession();
   redirect("/login");
 }
 

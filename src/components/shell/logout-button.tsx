@@ -1,7 +1,7 @@
 "use client";
-import { useState, useTransition } from "react";
-import { signOut } from "@/app/actions/auth";
-import { usePendingCount } from "@/lib/offline/status-store";
+import { useEffect, useState, useTransition } from "react";
+import { endSession } from "@/app/actions/auth";
+import { usePendingCount, usePosOnline } from "@/lib/offline/status-store";
 import { LogOut } from "lucide-react";
 
 type Props = { expanded?: boolean; tenantId?: string | null };
@@ -21,17 +21,55 @@ async function dropPosShellCache(): Promise<void> {
 }
 
 export function LogoutButton({ expanded = false, tenantId = null }: Props) {
-  const { pending } = usePendingCount(tenantId ?? undefined);
+  const { pending, loaded } = usePendingCount(tenantId ?? undefined);
+  const posOnline = usePosOnline();
+  const [browserOnline, setBrowserOnline] = useState(true);
+  const [waited, setWaited] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [busy, startTransition] = useTransition();
+
+  useEffect(() => {
+    const sync = () => setBrowserOnline(navigator.onLine !== false);
+    sync();
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+
+  // Wait for the device count (so the warning can't be missed), but never more than 1 s.
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), 1000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // The warning closes by itself once nothing is left to send.
+  useEffect(() => {
+    if (confirming && pending === 0) setConfirming(false);
+  }, [confirming, pending]);
+
+  // Logging out needs the network: the session ends first, and only then is the cached POS page
+  // dropped, so a failed sign-out can never leave an offline shop without its POS.
+  const offline = !posOnline || !browserOnline;
+  const notReady = !loaded && !waited;
 
   // Without a tenant there is nothing to scope the warning to, so it never blocks the logout.
   const mustWarn = tenantId !== null && pending > 0;
 
   function logout() {
+    setFailed(false);
     startTransition(async () => {
+      try {
+        await endSession();
+      } catch {
+        setFailed(true);
+        return;
+      }
       await dropPosShellCache();
-      await signOut();
+      window.location.assign("/login");
     });
   }
 
@@ -39,14 +77,21 @@ export function LogoutButton({ expanded = false, tenantId = null }: Props) {
     <>
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || offline || notReady}
+        title={offline ? "ใช้ไม่ได้ตอนเน็ตหลุด" : undefined}
         onClick={() => (mustWarn ? setConfirming(true) : logout())}
-        className="flex items-center gap-3 h-10 px-2 w-full rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+        className="flex items-center gap-3 h-10 px-2 w-full rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors disabled:cursor-not-allowed disabled:text-white/30 disabled:hover:bg-transparent disabled:hover:text-white/30"
         aria-label="ออกจากระบบ"
       >
         <LogOut size={20} className="shrink-0" />
-        {expanded && <span className="text-sm font-medium">ออกจากระบบ</span>}
+        {expanded && (
+          <span className="min-w-0 text-left">
+            <span className="block text-sm font-medium leading-4">ออกจากระบบ</span>
+            {offline && <span className="block text-[10px] leading-3">ใช้ไม่ได้ตอนเน็ตหลุด</span>}
+          </span>
+        )}
       </button>
+      {failed && <p className="px-2 pt-1 text-xs text-warning">ออกจากระบบไม่สำเร็จ ลองอีกครั้ง</p>}
       {confirming && (
         <div
           role="alertdialog"
@@ -68,7 +113,7 @@ export function LogoutButton({ expanded = false, tenantId = null }: Props) {
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || offline}
                 onClick={logout}
                 className="h-12 flex-1 rounded-xl bg-destructive text-base font-semibold text-white hover:bg-destructive/90"
               >

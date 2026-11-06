@@ -37,8 +37,12 @@ export function usePosOnline(): boolean {
  * drawer), live across tabs. With a tenantId only that shop's bills count. When the device
  * store is unavailable it reports zero rather than crashing the shell.
  */
-export function usePendingCount(tenantId?: string): { pending: number; review: number } {
-  const [state, setState] = useState({ pending: 0, review: 0 });
+export function usePendingCount(tenantId?: string): {
+  pending: number;
+  review: number;
+  loaded: boolean;
+} {
+  const [state, setState] = useState({ pending: 0, review: 0, loaded: false });
   useEffect(() => {
     let alive = true;
     async function refresh() {
@@ -50,11 +54,14 @@ export function usePendingCount(tenantId?: string): { pending: number; review: n
             : (({ pending, review }) => ({ pending, review }))(counts(entries, tenantId));
         if (alive) {
           setState((prev) =>
-            prev.pending === next.pending && prev.review === next.review ? prev : next,
+            prev.loaded && prev.pending === next.pending && prev.review === next.review
+              ? prev
+              : { ...next, loaded: true },
           );
         }
       } catch {
-        if (alive) setState((prev) => (prev.pending === 0 && prev.review === 0 ? prev : { pending: 0, review: 0 }));
+        // Storage unavailable: nothing to count, and nothing to wait for.
+        if (alive) setState({ pending: 0, review: 0, loaded: true });
       }
     }
     void refresh();
