@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { LogoutButton } from "./logout-button";
 import { SwitchWorkerButton } from "./switch-worker-button";
+import { usePosOnline } from "@/lib/offline/status-store";
+
+const OFFLINE_REASON = "ใช้ไม่ได้ตอนเน็ตหลุด";
 
 // Server Components can't pass component references (functions) to Client
 // Components as props — only plain, serializable data. Nav items cross that
@@ -76,9 +79,11 @@ type Props = {
   items: NavItem[];
   userName: string | null;
   role: string;
+  tenantId: string | null;
 };
 
-export function SidebarShell({ items, userName, role }: Props) {
+export function SidebarShell({ items, userName, role, tenantId }: Props) {
+  const online = usePosOnline();
   const expanded = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function toggle() {
@@ -123,6 +128,25 @@ export function SidebarShell({ items, userName, role }: Props) {
       <nav className="flex-1 py-4 flex flex-col gap-1 px-2 overflow-y-auto">
         {items.map(({ href, label, icon }) => {
           const Icon = ICONS[icon];
+          if (!online && href !== "/pos") {
+            return (
+              <span
+                key={href}
+                role="link"
+                aria-disabled="true"
+                title={OFFLINE_REASON}
+                className="flex items-center gap-3 h-10 px-2 rounded-md text-white/30 cursor-not-allowed"
+              >
+                <Icon size={20} className="shrink-0" />
+                {expanded && (
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium leading-4">{label}</span>
+                    <span className="block text-[10px] leading-3">{OFFLINE_REASON}</span>
+                  </span>
+                )}
+              </span>
+            );
+          }
           return (
             <Link
               key={href}
@@ -143,7 +167,7 @@ export function SidebarShell({ items, userName, role }: Props) {
           </div>
         )}
         <SwitchWorkerButton expanded={expanded} />
-        <LogoutButton expanded={expanded} />
+        <LogoutButton expanded={expanded} tenantId={tenantId} />
       </div>
     </aside>
   );

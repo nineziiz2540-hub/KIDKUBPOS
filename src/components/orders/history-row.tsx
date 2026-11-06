@@ -49,6 +49,11 @@ export function HistoryRow({ row, href, showDate = false, highlight = false, act
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-[17px] font-semibold text-sidebar">{title}</span>
             <Badge status={row.status} paymentMethod={row.paymentMethod} />
+            {row.soldOffline && (
+              <span className="inline-flex h-6 items-center rounded-full bg-warning/10 px-2.5 text-xs font-semibold text-warning">
+                ขายตอนเน็ตหลุด
+              </span>
+            )}
           </span>
           <span className="block truncate text-[15px] text-muted-foreground">
             {itemSummary(row.itemNames) || row.orderNumber}

@@ -143,6 +143,7 @@ export default async function ShiftsPage({ searchParams }: Props) {
           <CloseShiftFlow
             summary={canSeeTotals && totals ? <ShiftSummaryCard totals={totals} /> : null}
             shiftId={activeShift.id}
+            tenantId={profile.tenant_id}
             initialStep={initialStep}
             lastResult={lastResult}
             floatDefault={floatDefault}

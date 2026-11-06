@@ -65,6 +65,7 @@ type OrderDetail = {
   unpaid_approved_by: string | null;
   transfer_verified_at: string | null;
   transfer_verified_by: string | null;
+  sold_offline: boolean;
   order_items: OrderItem[];
 };
 
@@ -75,7 +76,7 @@ const ORDER_SELECT = [
   "cancelled_at, cancel_reason, cancelled_by, cancelled_approved_by",
   "refunded_at, refund_reason, refund_method, refunded_by, refunded_approved_by",
   "unpaid_at, unpaid_reason, unpaid_by, unpaid_approved_by",
-  "transfer_verified_at, transfer_verified_by",
+  "transfer_verified_at, transfer_verified_by, sold_offline",
   "order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)",
 ].join(", ");
 
@@ -105,6 +106,11 @@ function adjustmentLabel(a: OrderAdjustment): string {
       return `แก้ช่องทางชำระ ${PAYMENT_LABELS[a.fromValue] ?? a.fromValue} → ${
         PAYMENT_LABELS[a.toValue] ?? a.toValue
       }`;
+    case "offline_override":
+      // from_value is the server's total, or '-' when the server had no total to compare.
+      return a.fromValue === "-"
+        ? `บันทึกตามยอดที่เก็บจริง: ฿- → ฿${a.toValue}`
+        : `บันทึกตามยอดที่เก็บจริง: ฿${a.fromValue} → ฿${a.toValue}`;
     case "mark_unpaid":
       return "แจ้งไม่ได้รับเงิน";
     case "restore_paid":
@@ -207,6 +213,11 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
             {order.queue_number !== null && (
               <span className="ml-3 rounded-full bg-accent/10 px-3 py-1 align-middle font-sans text-base font-semibold text-accent">
                 คิว {order.queue_number}
+              </span>
+            )}
+            {order.sold_offline && (
+              <span className="ml-3 rounded-full bg-warning/10 px-3 py-1 align-middle font-sans text-base font-semibold text-warning">
+                ขายตอนเน็ตหลุด
               </span>
             )}
           </h1>

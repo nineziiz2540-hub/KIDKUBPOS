@@ -42,6 +42,7 @@ export async function Sidebar() {
       items={visibleItems}
       userName={profile?.full_name ?? null}
       role={role}
+      tenantId={profile?.tenant_id ?? null}
     />
   );
 }

@@ -30,6 +30,7 @@ function row(
     createdAt: "2026-10-20T05:00:00Z",
     transferVerified: false,
     itemNames: [],
+    soldOffline: false,
     ...extra,
   };
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { usePosOnline } from "@/lib/offline/status-store";
 import { LayoutDashboard, CreditCard, ShoppingBag, Settings } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -13,6 +14,7 @@ const NAV_ITEMS = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const online = usePosOnline();
 
   return (
     <nav
@@ -21,6 +23,22 @@ export function BottomNav() {
     >
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+        if (!online && href !== "/pos") {
+          return (
+            <span
+              key={href}
+              role="link"
+              aria-disabled="true"
+              title="ใช้ไม่ได้ตอนเน็ตหลุด"
+              className="flex-1 flex items-center justify-center text-xs text-white/30 cursor-not-allowed"
+            >
+              <span className="flex flex-col items-center justify-center gap-0.5 px-3 py-1">
+                <Icon size={22} />
+                <span>{label}</span>
+              </span>
+            </span>
+          );
+        }
         return (
           <Link
             key={href}

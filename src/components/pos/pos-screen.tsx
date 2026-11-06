@@ -27,6 +27,7 @@ import { gate, type Gate } from "@/lib/offline/feature-gates";
 import { requestPersistentStorage } from "@/lib/offline/idb";
 import type { OutboxEntry } from "@/lib/offline/outbox-rules";
 import { useOutbox } from "./use-outbox";
+import { setPosOnline } from "@/lib/offline/status-store";
 import {
   deviceQueueOf,
   dropAttempt,
@@ -201,6 +202,10 @@ export function PosScreen({
   const heartbeat = useHeartbeat();
   // C1's no-crying-wolf rule: offline only after two failed checks (or the browser says so).
   const online = heartbeat.connectivity.status === "online";
+  // The app shell (nav guard) follows the same verdict.
+  useEffect(() => {
+    setPosOnline(online);
+  }, [online]);
   // The device snapshot starts from this page and follows the heartbeat, so a tab left open never
   // draws a QR to an account the owner has since changed, and keeps the latest shift and queue
   // for offline sales.

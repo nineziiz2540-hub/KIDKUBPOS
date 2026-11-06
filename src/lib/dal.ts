@@ -1240,7 +1240,7 @@ export async function getCashFloatDefault(tenantId: string): Promise<number> {
 // ─── Order History ───────────────────────────────────────────────────────────
 
 const HISTORY_SELECT =
-  "id, order_number, queue_number, payment_method, status, total, created_at, transfer_verified_at, order_items(product_name)";
+  "id, order_number, queue_number, payment_method, status, total, created_at, transfer_verified_at, sold_offline, order_items(product_name)";
 
 type HistoryDbRow = {
   id: string;
@@ -1251,6 +1251,7 @@ type HistoryDbRow = {
   total: number;
   created_at: string;
   transfer_verified_at: string | null;
+  sold_offline: boolean;
   order_items: { product_name: string }[] | null;
 };
 
@@ -1264,6 +1265,7 @@ function toHistoryRow(r: HistoryDbRow): HistoryRow {
     total: Number(r.total),
     createdAt: r.created_at,
     transferVerified: r.transfer_verified_at !== null,
+    soldOffline: r.sold_offline === true,
     itemNames: (r.order_items ?? []).map((i) => i.product_name),
   };
 }

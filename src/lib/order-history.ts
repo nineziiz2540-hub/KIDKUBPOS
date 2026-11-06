@@ -18,6 +18,7 @@ export type HistoryRow = {
   createdAt: string;
   transferVerified: boolean;
   itemNames: string[];
+  soldOffline: boolean;
 };
 
 export type DaySummary = {

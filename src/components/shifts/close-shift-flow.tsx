@@ -17,6 +17,7 @@ import {
 } from "@/lib/shift-math";
 import { shiftErrorMessage } from "@/lib/shift-errors";
 import { AmountInput } from "./amount-input";
+import { usePendingCount } from "@/lib/offline/status-store";
 
 /** What finishShift returns when cash moved after the latest count (shift_close's expected_changed). */
 const EXPECTED_CHANGED = shiftErrorMessage("expected_changed");
@@ -46,6 +47,8 @@ type Props = {
    * liveSummaryVisible(step) — never while someone is counting. Null for staff.
    */
   summary: ReactNode;
+  /** This shop, so only its unsent bills on this device block the close. */
+  tenantId: string;
 };
 
 type Step = "idle" | "held" | "count1" | "count2" | "recount_changed" | "float";
@@ -64,8 +67,13 @@ export function CloseShiftFlow({
   openHeld,
   personalOutstanding,
   summary,
+  tenantId,
 }: Props) {
   const router = useRouter();
+  const unsent = usePendingCount(tenantId);
+  // Unsent and refused bills still belong to this drawer, so the shift can't close without them.
+  const unsentTotal = unsent.pending + unsent.review;
+  const closeBlocked = unsentTotal > 0;
   const countId = useId();
   const floatId = useId();
   const noteId = useId();
@@ -142,10 +150,16 @@ export function CloseShiftFlow({
           <button
             type="button"
             onClick={begin}
-            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90"
+            disabled={closeBlocked}
+            className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
           >
             ปิดกะ
           </button>
+          {closeBlocked && (
+            <p className="text-base font-medium text-warning">
+              ยังมีบิลค้างส่ง {unsentTotal} บิล · รอส่งให้ครบก่อนปิดกะ
+            </p>
+          )}
         </section>
       </>
     );
@@ -295,11 +309,16 @@ export function CloseShiftFlow({
             <button
               type="button"
               onClick={finish}
-              disabled={isPending || deposit === null}
+              disabled={isPending || deposit === null || closeBlocked}
               className="h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
             >
               {isPending ? "กำลังปิดกะ…" : "ยืนยันปิดกะ"}
             </button>
+            {closeBlocked && (
+              <p className="text-base font-medium text-warning">
+                ยังมีบิลค้างส่ง {unsentTotal} บิล · รอส่งให้ครบก่อนปิดกะ
+              </p>
+            )}
           </div>
         )}
 

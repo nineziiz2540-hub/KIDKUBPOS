@@ -1,7 +1,9 @@
 import { Menu } from "lucide-react";
 import { LogoutButton } from "./logout-button";
+import { getProfile } from "@/lib/dal";
 
-export function Topbar() {
+export async function Topbar() {
+  const profile = await getProfile();
   return (
     <header className="flex md:hidden items-center gap-4 h-14 px-4 bg-sidebar border-b border-white/10 sticky top-0 z-10 shrink-0">
       <button
@@ -12,7 +14,7 @@ export function Topbar() {
         <Menu size={22} />
       </button>
       <span className="text-accent font-bold text-lg flex-1">KIDKUBPOS</span>
-      <LogoutButton />
+      <LogoutButton tenantId={profile?.tenant_id ?? null} />
     </header>
   );
 }
