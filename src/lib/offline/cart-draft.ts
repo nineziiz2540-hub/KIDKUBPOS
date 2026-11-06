@@ -26,6 +26,29 @@ export type DraftState = Omit<CartDraft, "v" | "tenantId" | "sellerId">;
 
 type Ids = { tenantId: string; sellerId: string };
 
+/** A draft older than this is not brought back (a different day's cart). */
+export const DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+/** Only CartItem's known fields: unknown keys inside an item are dropped too. */
+function cleanItem(i: CartItem): CartItem {
+  return {
+    cartItemKey: i.cartItemKey,
+    productId: i.productId,
+    name: i.name,
+    basePrice: i.basePrice,
+    quantity: i.quantity,
+    selectedModifiers: i.selectedModifiers.map((m) => ({
+      modifierId: m.modifierId,
+      modifierName: m.modifierName,
+      optionId: m.optionId,
+      optionName: m.optionName,
+      priceDelta: m.priceDelta,
+    })),
+    totalPrice: i.totalPrice,
+    note: i.note,
+  };
+}
+
 export function draftKey(ids: Ids): string {
   return `cart:${ids.tenantId}:${ids.sellerId}`;
 }
@@ -37,7 +60,7 @@ export function toDraft(state: DraftState, ids: Ids): CartDraft | null {
     tenantId: ids.tenantId,
     sellerId: ids.sellerId,
     savedAt: state.savedAt,
-    items: state.items,
+    items: state.items.map(cleanItem),
     orderType: state.orderType,
     paymentMethod: state.paymentMethod,
     customer: state.customer ? { id: state.customer.id, phone: state.customer.phone } : null,
@@ -83,10 +106,11 @@ function validItem(x: unknown): x is CartItem {
 }
 
 /** The saved draft if it is this seller's, current-version and well formed; otherwise null. */
-export function restorable(d: unknown, ids: Ids): CartDraft | null {
+export function restorable(d: unknown, ids: Ids, now?: number): CartDraft | null {
   if (!isObj(d) || d.v !== 1) return null;
   if (d.tenantId !== ids.tenantId || d.sellerId !== ids.sellerId) return null;
   if (!isNum(d.savedAt)) return null;
+  if (now !== undefined && now - d.savedAt > DRAFT_MAX_AGE_MS) return null;
   if (!Array.isArray(d.items) || !d.items.every(validItem)) return null;
   if (d.orderType !== "dine_in" && d.orderType !== "take_away") return null;
   if (d.paymentMethod !== "cash" && d.paymentMethod !== "transfer") return null;
@@ -137,7 +161,7 @@ export function restorable(d: unknown, ids: Ids): CartDraft | null {
     tenantId: ids.tenantId,
     sellerId: ids.sellerId,
     savedAt: d.savedAt,
-    items: d.items,
+    items: d.items.map(cleanItem),
     orderType: d.orderType,
     paymentMethod: d.paymentMethod,
     customer,

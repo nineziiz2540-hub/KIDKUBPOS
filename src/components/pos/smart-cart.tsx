@@ -59,6 +59,8 @@ type Props = {
   onCancelDiscount: () => void;
   pending: boolean;
   error: string | null;
+  /** A neutral note (e.g. the cart was restored after a reload). */
+  notice?: string | null;
   lastOrderNumber: string | null;
   lastQueueNumber: number | null;
   lastCashTender: { received: number; change: number } | null;
@@ -110,6 +112,7 @@ export function SmartCart({
   onCancelDiscount,
   pending,
   error,
+  notice = null,
   lastOrderNumber,
   lastQueueNumber,
   lastCashTender,
@@ -442,6 +445,7 @@ export function SmartCart({
           ))}
         </div>
 
+        {notice && !error && <p className="text-sm text-info font-medium">{notice}</p>}
         {error && (
           <p className="text-sm text-destructive font-medium">{error}</p>
         )}
@@ -638,6 +642,9 @@ export function SmartCart({
             </>
             )}
 
+            {notice && !error && (
+              <p className="text-sm text-info font-medium text-center">{notice}</p>
+            )}
             {error && (
               <p className="text-sm text-destructive font-medium text-center">
                 {error}

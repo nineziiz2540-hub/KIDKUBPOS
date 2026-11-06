@@ -182,7 +182,8 @@ export function PosScreen({
     () => (discountType === null ? null : { type: discountType, value: discountValue, reason: discountReason }),
     [discountType, discountValue, discountReason]
   );
-  const { discard: discardDraft } = useCartDraft({
+  const [notice, setNotice] = useState<string | null>(null);
+  const { discard: discardDraftRaw } = useCartDraft({
     tenantId,
     sellerId,
     items: cartItems,
@@ -193,6 +194,10 @@ export function PosScreen({
     discount: draftDiscount,
     onRestore: restoreDraft,
   });
+  const discardDraft = () => {
+    discardDraftRaw();
+    setNotice(null);
+  };
   const heartbeat = useHeartbeat();
   // C1's no-crying-wolf rule: offline only after two failed checks (or the browser says so).
   const online = heartbeat.connectivity.status === "online";
@@ -401,7 +406,7 @@ export function PosScreen({
     setActiveHeld(d.activeHeld);
     // The held bill's loaded items are not known any more: treat it as edited (never loses edits).
     setLoadedSnapshot(null);
-    setError("กู้ตะกร้าที่ค้างไว้");
+    setNotice("กู้ตะกร้าที่ค้างไว้");
   }
 
   function clearCart() {
@@ -1250,6 +1255,7 @@ export function PosScreen({
             onCancelDiscount={resetDiscount}
             pending={checkoutPending}
             error={cartWarning(error, unresolvedRef)}
+            notice={notice}
             lastOrderNumber={lastOrderNumber}
             lastQueueNumber={lastQueueNumber}
             lastCashTender={lastCashTender}
@@ -1321,6 +1327,7 @@ export function PosScreen({
                 onCancelDiscount={resetDiscount}
                 pending={checkoutPending}
                 error={cartWarning(error, unresolvedRef)}
+                notice={notice}
                 lastOrderNumber={lastOrderNumber}
                 lastQueueNumber={lastQueueNumber}
                 lastCashTender={lastCashTender}

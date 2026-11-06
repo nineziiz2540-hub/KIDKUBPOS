@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { draftKey, restorable, toDraft, type DraftState } from "./cart-draft.ts";
+import { DRAFT_MAX_AGE_MS, draftKey, restorable, toDraft, type DraftState } from "./cart-draft.ts";
 
 const ids = { tenantId: "t1", sellerId: "u1" };
 
@@ -101,4 +101,22 @@ test("an empty cart with a held bill loaded is still a draft", () => {
 test("no discount type means no discount in the draft", () => {
   const d = toDraft(state({ discount: null }), ids);
   assert.equal(d?.discount, null);
+});
+
+test("unknown keys inside items and modifiers are stripped", () => {
+  const dirtyItem = {
+    ...item,
+    extra: "x",
+    selectedModifiers: [{ ...item.selectedModifiers[0], extra: "y" }],
+  };
+  const d = toDraft(state({ items: [dirtyItem] as DraftState["items"] }), ids);
+  assert.deepEqual(d?.items[0], item);
+  const back = restorable({ ...d, items: [dirtyItem] }, ids);
+  assert.deepEqual(back?.items[0], item);
+});
+
+test("a draft older than 12 hours is ignored", () => {
+  const d = toDraft(state({ savedAt: 1000 }), ids);
+  assert.ok(restorable(d, ids, 1000 + DRAFT_MAX_AGE_MS));
+  assert.equal(restorable(d, ids, 1000 + DRAFT_MAX_AGE_MS + 1), null);
 });

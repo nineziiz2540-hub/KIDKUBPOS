@@ -10,6 +10,9 @@ import {
 } from "@/lib/offline/cart-draft";
 
 const SAVE_DEBOUNCE_MS = 300;
+/** A stuck device store must not leave the hook never saving. */
+const RESTORE_READ_TIMEOUT_MS = 3000;
+const LOCK_RETRY_MS = 100;
 
 type Args = {
   tenantId: string;
@@ -20,13 +23,28 @@ type Args = {
   customer: DraftState["customer"];
   activeHeld: DraftState["activeHeld"];
   discount: DraftState["discount"];
-  /** Called once on mount, only if a draft was found and the cart was still empty. */
+  /** Called at most once, only if a draft was found and the cart was still empty. */
   onRestore: (draft: CartDraft) => void;
 };
 
+type LockApi = {
+  request: (
+    name: string,
+    options: { ifAvailable: boolean },
+    cb: (lock: unknown) => Promise<void> | null
+  ) => Promise<unknown>;
+};
+
+function lockApi(): LockApi | null {
+  const locks = (typeof navigator !== "undefined" ? navigator : undefined)?.locks;
+  return locks ? (locks as unknown as LockApi) : null;
+}
+
 /**
  * Keeps the cart in progress on the device (kv `cart:<tenant>:<seller>`) so a reload brings it back.
- * Storage trouble is swallowed: the POS never depends on it. Returns a stable `discard`.
+ * Only one tab per seller owns the draft (a Web Lock held for the tab's lifetime); the others work
+ * as a normal POS without touching it. Without Web Locks every tab owns it, as before. Storage
+ * trouble is swallowed. Returns a stable `discard`.
  */
 export function useCartDraft(args: Args): { discard: () => void } {
   const { tenantId, sellerId, items, orderType, paymentMethod, customer, activeHeld, discount } =
@@ -34,36 +52,91 @@ export function useCartDraft(args: Args): { discard: () => void } {
   const key = draftKey({ tenantId, sellerId });
   const [ready, setReady] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once the cart has been finished or a restore has happened: no (later) restore may run.
+  const noRestoreRef = useRef(false);
+  const ownerRef = useRef(false);
   const latest = useRef(args);
   useEffect(() => {
     latest.current = args;
   });
 
-  // Restore once on mount. The cart may already have changed while the read was running: then
-  // the cashier's own cart wins and nothing is restored.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let release: (() => void) | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    noRestoreRef.current = false;
+    ownerRef.current = false;
+
+    async function restore() {
+      let saved: unknown;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const saved = await kvGet<unknown>(key);
-        if (cancelled) return;
-        const draft = restorable(saved, { tenantId, sellerId });
-        const cur = latest.current;
-        if (draft && cur.items.length === 0 && cur.activeHeld === null) cur.onRestore(draft);
+        saved = await Promise.race([
+          kvGet<unknown>(key),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), RESTORE_READ_TIMEOUT_MS);
+          }),
+        ]);
       } catch {
-        // no storage: nothing to restore
+        saved = undefined;
+      } finally {
+        clearTimeout(timer);
       }
-      if (!cancelled) setReady(true);
-    })();
+      if (cancelled) return;
+      const draft = restorable(saved, { tenantId, sellerId }, Date.now());
+      const cur = latest.current;
+      if (draft && !noRestoreRef.current && cur.items.length === 0 && cur.activeHeld === null) {
+        noRestoreRef.current = true;
+        cur.onRestore(draft);
+      }
+      setReady(true);
+    }
+
+    function own() {
+      ownerRef.current = true;
+      void restore();
+    }
+
+    const locks = lockApi();
+    if (!locks) {
+      own();
+    } else {
+      const tryLock = (again: boolean) => {
+        locks
+          .request(`kidkub-cart:${tenantId}:${sellerId}`, { ifAvailable: true }, (lock) => {
+            if (!lock) return null;
+            // Held until this tab goes away (or the effect is cleaned up).
+            return new Promise<void>((resolve) => {
+              release = resolve;
+              if (cancelled) resolve();
+              else own();
+            });
+          })
+          .then(() => {
+            // Not granted: one short retry (a strict-mode remount releases a moment late).
+            if (!ownerRef.current && !cancelled && again) {
+              retry = setTimeout(() => tryLock(false), LOCK_RETRY_MS);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) own();
+          });
+      };
+      tryLock(true);
+    }
+
     return () => {
       cancelled = true;
+      if (retry !== null) clearTimeout(retry);
+      release?.();
+      ownerRef.current = false;
+      setReady(false);
     };
-    // Once per mount (and per seller): a restore must never run again.
   }, [key, tenantId, sellerId]);
 
   // Save after the cart settles for a moment. An emptied cart removes the draft.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !ownerRef.current) return;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       const draft = toDraft(
@@ -78,9 +151,12 @@ export function useCartDraft(args: Args): { discard: () => void } {
     };
   }, [ready, key, tenantId, sellerId, items, orderType, paymentMethod, customer, activeHeld, discount]);
 
-  // The cart is finished (paid, cleared, parked): forget it now. Any save still waiting is
-  // cancelled first, so it cannot write the old cart back after the delete.
+  // The cart is finished (paid, cleared, parked): forget it now, and never restore it, even if a
+  // restore read is still in flight. A save still waiting is cancelled first so it cannot write
+  // the old cart back after the delete. A tab that does not own the draft leaves it alone.
   const discard = useCallback(() => {
+    noRestoreRef.current = true;
+    if (!ownerRef.current) return;
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
