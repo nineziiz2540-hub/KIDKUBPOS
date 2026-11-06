@@ -80,97 +80,103 @@ export function CashPaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl p-5 w-full max-w-md space-y-4 max-h-[95vh] overflow-y-auto">
-        <div className="text-center">
-          <h2 className="text-lg font-bold text-sidebar">รับเงินสด</h2>
-          <p className="text-sm text-muted-foreground mt-1">ยอดที่ต้องชำระ</p>
-          <p className="text-3xl font-bold text-sidebar tabular-nums">฿{formatBaht(total)}</p>
-        </div>
+      {/* The amount entry scrolls if it must; the change, the message and every button stay in a
+          footer that is always on screen (บันทึกไว้ในเครื่อง included, on the iPad's 740px height). */}
+      <div className="bg-white rounded-xl p-5 w-full max-w-md max-h-[95dvh] flex flex-col gap-4">
+        <div className="min-h-0 flex-1 overflow-y-auto space-y-4">
+          <div className="text-center">
+            <h2 className="text-lg font-bold text-sidebar">รับเงินสด</h2>
+            <p className="text-sm text-muted-foreground mt-1">ยอดที่ต้องชำระ</p>
+            <p className="text-3xl font-bold text-sidebar tabular-nums">฿{formatBaht(total)}</p>
+          </div>
 
-        {/* Quick-tender buttons: set (not add) the received amount */}
-        <div className="grid grid-cols-5 gap-2">
-          <button
-            type="button"
-            onClick={() => setTyped((toSatang(total) / 100).toString())}
-            disabled={pending}
-            className="rounded-lg border-2 border-accent/40 bg-accent/10 py-3 text-sm font-semibold text-accent hover:bg-accent/20 disabled:opacity-50"
-          >
-            พอดี
-          </button>
-          {suggestions.map((amount) => (
+          {/* Quick-tender buttons: set (not add) the received amount */}
+          <div className="grid grid-cols-5 gap-2">
             <button
-              key={amount}
               type="button"
-              onClick={() => setTyped(amount.toString())}
+              onClick={() => setTyped((toSatang(total) / 100).toString())}
               disabled={pending}
-              className="rounded-lg border border-input bg-white py-3 text-sm font-semibold text-sidebar tabular-nums hover:bg-muted disabled:opacity-50"
+              className="rounded-lg border-2 border-accent/40 bg-accent/10 py-3 text-sm font-semibold text-accent hover:bg-accent/20 disabled:opacity-50"
             >
-              ฿{amount.toLocaleString("th-TH")}
+              พอดี
             </button>
-          ))}
+            {suggestions.map((amount) => (
+              <button
+                key={amount}
+                type="button"
+                onClick={() => setTyped(amount.toString())}
+                disabled={pending}
+                className="rounded-lg border border-input bg-white py-3 text-sm font-semibold text-sidebar tabular-nums hover:bg-muted disabled:opacity-50"
+              >
+                ฿{amount.toLocaleString("th-TH")}
+              </button>
+            ))}
+          </div>
+
+          {/* Received amount */}
+          <div className="rounded-lg border border-input bg-surface px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">รับเงินมา</span>
+            <span className="text-2xl font-bold text-sidebar tabular-nums" aria-live="polite">
+              {typed === "" ? "—" : `฿${typed}`}
+            </span>
+          </div>
+
+          {/* Keypad */}
+          <NumericKeypad
+            allowDecimal
+            disabled={pending}
+            onKey={(key) => setTyped((t) => applyKey(t, key))}
+          />
         </div>
 
-        {/* Received amount */}
-        <div className="rounded-lg border border-input bg-surface px-4 py-3 flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">รับเงินมา</span>
-          <span className="text-2xl font-bold text-sidebar tabular-nums" aria-live="polite">
-            {typed === "" ? "—" : `฿${typed}`}
-          </span>
-        </div>
-
-        {/* Keypad */}
-        <NumericKeypad
-          allowDecimal
-          disabled={pending}
-          onKey={(key) => setTyped((t) => applyKey(t, key))}
-        />
-
-        {/* Change / shortfall */}
-        <div
-          className={`rounded-lg px-4 py-3 flex items-center justify-between ${
-            change !== null
-              ? "bg-success/10 text-success"
-              : shortBy !== null
-                ? "bg-destructive/10 text-destructive"
-                : "bg-muted text-muted-foreground"
-          }`}
-        >
-          <span className="text-sm font-medium">
-            {shortBy !== null ? "ยังขาดอีก" : "เงินทอน"}
-          </span>
-          <span className="text-3xl font-bold tabular-nums">
-            {change !== null
-              ? `฿${formatBaht(change)}`
-              : shortBy !== null
-                ? `฿${formatBaht(shortBy)}`
-                : "—"}
-          </span>
-        </div>
-
-        {error && (
-          <p className="text-sm text-destructive font-medium text-center">{error}</p>
-        )}
-
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            // Never disabled: a stalled try must not trap the cashier. Closing while it is in flight
-            // lets it settle in the background (see closePaymentWindow in pos-screen.tsx).
-            onClick={onCancel}
-            className="flex-1 h-12 bg-white border border-input text-sidebar hover:bg-muted"
+        <div className="shrink-0 space-y-3">
+          {/* Change / shortfall */}
+          <div
+            className={`rounded-lg px-4 py-3 flex items-center justify-between ${
+              change !== null
+                ? "bg-success/10 text-success"
+                : shortBy !== null
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-muted text-muted-foreground"
+            }`}
           >
-            ยกเลิก
-          </Button>
-          <Button
-            type="button"
-            onClick={confirm}
-            disabled={!canConfirm}
-            className="flex-1 h-12 bg-accent hover:bg-accent/90 text-white text-base"
-          >
-            {pending ? "กำลังบันทึก…" : retryable ? "ลองอีกครั้ง" : "ยืนยันรับเงิน"}
-          </Button>
+            <span className="text-sm font-medium">
+              {shortBy !== null ? "ยังขาดอีก" : "เงินทอน"}
+            </span>
+            <span className="text-3xl font-bold tabular-nums">
+              {change !== null
+                ? `฿${formatBaht(change)}`
+                : shortBy !== null
+                  ? `฿${formatBaht(shortBy)}`
+                  : "—"}
+            </span>
+          </div>
+
+          {error && (
+            <p className="text-sm text-destructive font-medium text-center">{error}</p>
+          )}
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              // Never disabled: a stalled try must not trap the cashier. Closing while it is in flight
+              // lets it settle in the background (see closePaymentWindow in pos-screen.tsx).
+              onClick={onCancel}
+              className="flex-1 h-12 bg-white border border-input text-sidebar hover:bg-muted"
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              onClick={confirm}
+              disabled={!canConfirm}
+              className="flex-1 h-12 bg-accent hover:bg-accent/90 text-white text-base"
+            >
+              {pending ? "กำลังบันทึก…" : retryable ? "ลองอีกครั้ง" : "ยืนยันรับเงิน"}
+            </Button>
+          </div>
+          {saveToDevice && <SaveToDeviceButton {...saveToDevice} pending={pending} />}
         </div>
-        {saveToDevice && <SaveToDeviceButton {...saveToDevice} pending={pending} />}
       </div>
     </div>
   );
