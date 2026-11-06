@@ -47,9 +47,7 @@ export function LogoutButton({ expanded = false, tenantId = null }: Props) {
   }, []);
 
   // The warning closes by itself once nothing is left to send.
-  useEffect(() => {
-    if (confirming && pending === 0) setConfirming(false);
-  }, [confirming, pending]);
+  const showWarning = confirming && pending > 0;
 
   // Logging out needs the network: the session ends first, and only then is the cached POS page
   // dropped, so a failed sign-out can never leave an offline shop without its POS.
@@ -92,7 +90,7 @@ export function LogoutButton({ expanded = false, tenantId = null }: Props) {
         )}
       </button>
       {failed && <p className="px-2 pt-1 text-xs text-warning">ออกจากระบบไม่สำเร็จ ลองอีกครั้ง</p>}
-      {confirming && (
+      {showWarning && (
         <div
           role="alertdialog"
           aria-modal="true"
