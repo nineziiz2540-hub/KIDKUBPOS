@@ -4,9 +4,11 @@ import {
   afterFailure,
   backoffMs,
   checkable,
+  closeBlockCounts,
   counts,
   deviceNumberedMode,
   hasSenderWork,
+  matchingAttemptRef,
   MAX_GENERIC_TRIES,
   MISSING_OFFLINE_MESSAGE,
   missingOfflineToReview,
@@ -15,6 +17,7 @@ import {
   ORPHAN_AFTER_MS,
   recoverOrphans,
   saleBusinessDate,
+  saleKey,
   sendable,
   startupRecovery,
   type OutboxEntry,
@@ -280,4 +283,72 @@ test("hasSenderWork", () => {
   assert.equal(hasSenderWork([st("a", "review", { offline: offline(), counterRaised: true })], "t1"), false);
   assert.equal(hasSenderWork([st("a", "review", { offline: offline() })], "t1"), true);
   assert.equal(hasSenderWork([st("a", "pending", { tenantId: "t2" })], "t1"), false);
+});
+
+// ── closeBlockCounts (R24b) ─────────────────────────────────────────────────
+test("closeBlockCounts: product_missing review bills don't block, they are counted apart", () => {
+  const list = [
+    st("p", "pending"),
+    st("r1", "review", { reviewCode: "menu_changed" }),
+    st("r2", "review", { reviewCode: "product_missing" }),
+    st("r3", "review", { reviewCode: "other" }),
+    st("c", "check-only"),
+    st("x", "review", { tenantId: "t2", reviewCode: "other" }),
+  ];
+  assert.deepEqual(closeBlockCounts(list, "t1"), { pending: 1, review: 2, unrecordable: 1 });
+  assert.deepEqual(closeBlockCounts(list), { pending: 1, review: 3, unrecordable: 1 });
+  assert.deepEqual(closeBlockCounts([], "t1"), { pending: 0, review: 0, unrecordable: 0 });
+});
+
+// ── saleKey / matchingAttemptRef (lost answer → reload → same client_ref) ───
+const latte = {
+  cartItemKey: "p1",
+  productId: "p1",
+  name: "ลาเต้",
+  basePrice: 55,
+  quantity: 2,
+  selectedModifiers: [],
+  note: null,
+  totalPrice: 110,
+};
+const cartInput = {
+  items: [latte],
+  paymentMethod: "cash" as const,
+  orderType: "dine_in" as const,
+  clientRef: "",
+};
+
+test("saleKey ignores client_ref, cash received and names; follows what makes the sale", () => {
+  const base = saleKey(cartInput);
+  assert.equal(saleKey({ ...cartInput }), base);
+  assert.equal(
+    saleKey({ ...cartInput, items: [{ ...latte, name: "x", cartItemKey: "k" }] }),
+    base,
+  );
+  assert.notEqual(saleKey({ ...cartInput, items: [{ ...latte, quantity: 3, totalPrice: 165 }] }), base);
+  assert.notEqual(saleKey({ ...cartInput, paymentMethod: "transfer" }), base);
+  assert.notEqual(saleKey({ ...cartInput, discountType: "amount", discountValue: 10 }), base);
+  assert.notEqual(saleKey({ ...cartInput, heldBillId: "h1", heldBillVersion: 2 }), base);
+  assert.notEqual(saleKey({ ...cartInput, customerId: "c1" }), base);
+});
+
+test("matchingAttemptRef finds the newest attempt/check-only of this shop+seller with the same sale", () => {
+  const input = cartInput as unknown as OutboxEntry["input"];
+  const key = saleKey(cartInput);
+  const list = [
+    st("old", "check-only", { input, createdAt: 10 }),
+    st("new", "attempt", { input, createdAt: 20 }),
+    st("final", "pending", { input, createdAt: 30 }),
+    st("rev", "review", { input, createdAt: 40 }),
+    st("shop2", "check-only", { input, createdAt: 50, tenantId: "t2" }),
+    st("seller2", "check-only", { input, createdAt: 60, sellerId: "u2" }),
+  ];
+  assert.equal(matchingAttemptRef(list, "t1", "u1", key), "new");
+  assert.equal(matchingAttemptRef(list.slice(0, 1), "t1", "u1", key), "old");
+  // A different cart, or only final bills: nothing to reuse.
+  assert.equal(
+    matchingAttemptRef(list, "t1", "u1", saleKey({ ...cartInput, paymentMethod: "transfer" })),
+    null,
+  );
+  assert.equal(matchingAttemptRef(list.slice(2), "t1", "u1", key), null);
 });

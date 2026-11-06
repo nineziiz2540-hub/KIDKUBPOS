@@ -103,6 +103,83 @@ export function counts(
   };
 }
 
+/**
+ * What still blocks closing the shift (ruling R24b): pending bills, and review bills that can still
+ * be recorded. A review bill whose menu item was deleted (product_missing) can never be recorded,
+ * so it is counted apart (`unrecordable`) and only warned about. Without a tenantId every shop's
+ * bills count.
+ */
+export function closeBlockCounts(
+  entries: OutboxEntry[],
+  tenantId?: string,
+): { pending: number; review: number; unrecordable: number } {
+  const mine = tenantId === undefined ? entries : entries.filter((e) => e.tenantId === tenantId);
+  const review = mine.filter((e) => e.state === "review");
+  const unrecordable = review.filter((e) => e.reviewCode === "product_missing").length;
+  return {
+    pending: mine.filter((e) => e.state === "pending").length,
+    review: review.length - unrecordable,
+    unrecordable,
+  };
+}
+
+type SaleKeyInput = Pick<
+  OutboxEntry["input"],
+  | "items"
+  | "paymentMethod"
+  | "orderType"
+  | "customerId"
+  | "discountType"
+  | "discountValue"
+  | "heldBillId"
+  | "heldBillVersion"
+>;
+
+/**
+ * The fields that make one sale, as the POS's saleInput() builds them (and the outbox stores
+ * them): the same cart always gives the same key, whatever it is stored as.
+ */
+export function saleKey(i: SaleKeyInput): string {
+  return JSON.stringify([
+    i.items.map((it) => [
+      it.productId,
+      it.quantity,
+      it.totalPrice,
+      it.note ?? null,
+      it.selectedModifiers.map((m) => m.optionId),
+    ]),
+    i.paymentMethod,
+    i.orderType,
+    i.customerId ?? null,
+    i.discountType ?? null,
+    i.discountValue ?? null,
+    i.heldBillId ?? null,
+    i.heldBillVersion ?? null,
+  ]);
+}
+
+/**
+ * The client_ref of an online payment of this cart that may have been saved (an `attempt` or a
+ * `check-only` entry of this shop and seller with the same sale key), newest first; null if none.
+ * A cart restored after a reload reuses it, so paying it again (online or on the device) can only
+ * replay that bill, never record a second one.
+ */
+export function matchingAttemptRef(
+  entries: OutboxEntry[],
+  tenantId: string,
+  sellerId: string,
+  key: string,
+): string | null {
+  let best: OutboxEntry | null = null;
+  for (const e of entries) {
+    if (e.tenantId !== tenantId || e.sellerId !== sellerId) continue;
+    if (e.state !== "attempt" && e.state !== "check-only") continue;
+    if (saleKey(e.input) !== key) continue;
+    if (best === null || e.createdAt > best.createdAt) best = e;
+  }
+  return best?.clientRef ?? null;
+}
+
 function isOrphan(e: OutboxEntry, now: number): boolean {
   return now - e.createdAt > ORPHAN_AFTER_MS;
 }

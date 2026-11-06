@@ -8,6 +8,7 @@ import {
   attemptFingerprint,
   cartWarning,
   CONNECTION_RETRY_MESSAGE,
+  DeadlineError,
   PAYMENT_DEADLINE_MS,
   UNRESOLVED_PAYMENT_MESSAGE,
   withDeadline,
@@ -25,7 +26,7 @@ import type {
 } from "@/types/app";
 import { gate, type Gate } from "@/lib/offline/feature-gates";
 import { requestPersistentStorage } from "@/lib/offline/idb";
-import type { OutboxEntry } from "@/lib/offline/outbox-rules";
+import { matchingAttemptRef, saleKey, type OutboxEntry } from "@/lib/offline/outbox-rules";
 import { useOutbox } from "./use-outbox";
 import { setPosOnline } from "@/lib/offline/status-store";
 import {
@@ -62,6 +63,11 @@ const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 /** The online attempt's crash backup is best-effort: a slow device store never holds up a sale. */
 const ATTEMPT_BACKUP_DEADLINE_MS = 3000;
 const ENTRY_MISSING = "outbox_entry_missing";
+/**
+ * Storing a sale on the device (read, queue number, write) gives up after this: a stuck device
+ * store (known on iPad Safari) must never leave the payment window on "กำลังบันทึก…".
+ */
+const DEVICE_STORE_DEADLINE_MS = 5000;
 
 /**
  * Date.now() for code that runs only in event handlers and async callbacks. The React Compiler lint
@@ -156,6 +162,13 @@ export function PosScreen({
   const submittingRef = useRef(false);
   // The payment attempt in progress: its client_ref is reused by every retry of the same cart.
   const attemptRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
+  // A cart brought back after a reload (its attemptFingerprint) whose online payment may already
+  // have been saved: until the cart is finished, it takes over that attempt's client_ref from the
+  // outbox (adoptRestoredAttempt), so paying it again can only replay that bill.
+  const restoredRef = useRef<string | null>(null);
+  // The client_ref of the sale whose result was last shown (online or on the device): a device
+  // write that lands after its deadline for that same sale needs no notice.
+  const settledRef = useRef<string | null>(null);
   // The last try of that attempt got no answer, so it may or may not have been saved.
   const [uncertain, setUncertain] = useState(false);
   // An attempt nobody could confirm (even checkOrderSaved got no answer), set by this screen. The
@@ -399,16 +412,29 @@ export function PosScreen({
   }
 
   function restoreDraft(d: CartDraft) {
-    setCartItems(repriceFromMenu(d.items));
+    const items = repriceFromMenu(d.items);
+    setCartItems(items);
     setOrderType(d.orderType);
     setPaymentMethod(d.paymentMethod);
     setCustomer(d.customer);
+    resetDiscount();
     if (d.discount) {
       setDiscountType(d.discount.type);
       setDiscountValue(d.discount.value);
       setDiscountReason(d.discount.reason);
     }
     setActiveHeld(d.activeHeld);
+    // Exactly the fingerprint the restored cart will have once these states land.
+    restoredRef.current = attemptFingerprint({
+      items,
+      paymentMethod: d.paymentMethod,
+      orderType: d.orderType,
+      customerId: d.customer?.id ?? null,
+      discountType: d.discount?.type ?? null,
+      discountValue: d.discount?.value ?? "",
+      heldBillId: d.activeHeld?.id ?? null,
+      heldBillVersion: d.activeHeld?.version ?? null,
+    });
     // The held bill's loaded items are not known any more: treat it as edited (never loses edits).
     setLoadedSnapshot(null);
     setNotice("กู้ตะกร้าที่ค้างไว้");
@@ -417,6 +443,7 @@ export function PosScreen({
   function clearCart() {
     discardDraft();
     attemptRef.current = null;
+    restoredRef.current = null;
     setUncertain(false);
     setLocalUnresolved(null);
     setResultShownAt(null);
@@ -445,7 +472,10 @@ export function PosScreen({
   // payment that ended without an answer and turned out (checkOrderSaved) to be saved.
   function applySuccess(sale: SavedSale) {
     discardDraft();
+    // Every caller has checked that attemptRef is the sale being finished.
+    settledRef.current = attemptRef.current?.clientRef ?? null;
     attemptRef.current = null;
+    restoredRef.current = null;
     setUncertain(false);
     setLocalUnresolved(null);
     setError(null);
@@ -480,6 +510,8 @@ export function PosScreen({
     } catch {
       res = { error: UNRESOLVED_PAYMENT_MESSAGE };
     }
+    // A restored cart that is this attempt's sale takes it over first, so "saved" finishes it.
+    adoptRestoredAttempt(fingerprintRef.current, saleKeyRef.current, entriesRef.current);
     // `uncertain` is about the attempt in the payment window; another check-only entry (an
     // earlier one, or another tab's) being answered must not touch it.
     if (attemptRef.current === null || attemptRef.current.clientRef === clientRef) {
@@ -530,6 +562,9 @@ export function PosScreen({
 
   /** The sender answered a check-only entry: saved, or not saved (null). */
   function handleChecked(clientRef: string, saved: Omit<SavedOrder, "orderId"> | null) {
+    // Before anything changes: the entry just answered is still in entriesRef (the outbox's own
+    // refresh lands later), so a restored cart of the same sale can still take it over.
+    adoptRestoredAttempt(fingerprintRef.current, saleKeyRef.current, entriesRef.current);
     setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
     if (saved === null) return;
     snapshot.observe(saved.queueNumber);
@@ -565,6 +600,36 @@ export function PosScreen({
   useEffect(() => {
     lastOrderNumberRef.current = lastOrderNumber;
   }, [lastOrderNumber]);
+  // The cart as the outbox stores a sale (saleInput's shape), for matching a restored cart to an
+  // attempt that may have been saved; mirrored with the entries for answers that arrive later.
+  const currentSaleKey = saleKey(saleInput("", undefined));
+  const saleKeyRef = useRef(currentSaleKey);
+  const entriesRef = useRef(outbox.entries);
+  useEffect(() => {
+    saleKeyRef.current = currentSaleKey;
+    entriesRef.current = outbox.entries;
+  }, [currentSaleKey, outbox.entries]);
+
+  /**
+   * A payment that got no answer (maybe saved), then a reload: the cart draft brings the cart back
+   * but the in-memory attempt is gone, so a new client_ref would record the sale a second time.
+   * While the cart is still exactly the restored one, it takes over the client_ref of the outbox's
+   * attempt/check-only entry for the same sale (the server then only ever replays that bill).
+   */
+  function adoptRestoredAttempt(fingerprint: string, key: string, entries: OutboxEntry[]) {
+    const restored = restoredRef.current;
+    if (restored === null || restored !== fingerprint || attemptRef.current !== null) return;
+    const clientRef = matchingAttemptRef(entries, tenantId, sellerId, key);
+    if (clientRef === null) return;
+    attemptRef.current = { fingerprint, clientRef };
+    restoredRef.current = null;
+  }
+  // As soon as both the restored cart and the outbox entries are there.
+  useEffect(() => {
+    adoptRestoredAttempt(currentFingerprint, currentSaleKey, outbox.entries);
+    // adoptRestoredAttempt is recreated each render and only touches refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFingerprint, currentSaleKey, outbox.entries]);
 
   /** This cart as a sale for createOrder and the outbox. It never carries the manager PIN. */
   function saleInput(clientRef: string, cashReceived: number | undefined): SaleInput {
@@ -586,6 +651,7 @@ export function PosScreen({
   /** One client_ref per payment attempt: a retry of the same cart reuses it (payment-attempt.ts). */
   function clientRefForCart(): string {
     const fingerprint = currentFingerprint;
+    adoptRestoredAttempt(fingerprint, currentSaleKey, outbox.entries);
     if (attemptRef.current?.fingerprint !== fingerprint) {
       attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
     }
@@ -596,7 +662,9 @@ export function PosScreen({
   // only once the outbox write has resolved.
   function showOfflineResult(result: OfflineResult, clientRef: string) {
     discardDraft();
+    settledRef.current = clientRef;
     attemptRef.current = null;
+    restoredRef.current = null;
     lastTryRef.current = null;
     setUncertain(false);
     setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
@@ -641,6 +709,48 @@ export function PosScreen({
     return `ส่วนลดที่ต้องใช้ PIN — ${reasonOf(pinDiscountGate) ?? "ใช้ไม่ได้ตอนเน็ตหลุด"}`;
   }
 
+  /** What the cart shows for a final bill already on the device. */
+  function storedResult(e: OutboxEntry): OfflineResult {
+    return {
+      queueNumber: deviceQueueOf(e) ?? 0,
+      cashReceived: e.display.cashReceived,
+      changeAmount: e.display.changeAmount,
+    };
+  }
+
+  /**
+   * Runs `work` (read the store, take a queue number, write the bill) for the sale `clientRef`
+   * and shows its result. A stuck device store gives up after DEVICE_STORE_DEADLINE_MS: the cart
+   * stays with บันทึกในเครื่องไม่ได้ and the cashier can retry, pay online or cancel. A write that
+   * still lands later carries the same client_ref, so a retry finds it (readEntry) and the server
+   * can only replay it. If it lands while this sale is still on screen its result shows then; if
+   * the cart has moved on, a note says that bill was stored after all.
+   */
+  async function storeOnDevice(clientRef: string, work: () => Promise<OfflineResult>) {
+    const run = work();
+    try {
+      showOfflineResult(await withDeadline(run, DEVICE_STORE_DEADLINE_MS), clientRef);
+    } catch (err) {
+      // Nothing was stored (or not in time): the cart stays and the window says so.
+      setSaveError(SAVE_ON_DEVICE_FAILED);
+      if (!(err instanceof DeadlineError)) return;
+      run.then(
+        (late) => {
+          if (settledRef.current === clientRef) return; // already shown (e.g. by a retry)
+          if (
+            attemptRef.current?.clientRef === clientRef &&
+            attemptRef.current.fingerprint === fingerprintRef.current
+          ) {
+            showOfflineResult(late, clientRef);
+          } else {
+            setError(`บิลก่อนหน้าบันทึกในเครื่องแล้ว (คิว ${late.queueNumber}) · ตรวจตะกร้าก่อนชำระ`);
+          }
+        },
+        () => {}
+      );
+    }
+  }
+
   // Device-numbered mode at confirm: the server is never called. The bill takes a device queue
   // number and goes into the outbox as a final `pending` entry; the sender sends it later.
   async function sellOnDevice(cashReceived: number | undefined) {
@@ -660,54 +770,45 @@ export function PosScreen({
     // did save it, sending it later just returns that bill.
     const clientRef = clientRefForCart();
     const input = saleInput(clientRef, cashReceived);
+    // A held bill keeps its own queue number (the server keeps it too): no device number is taken.
+    const heldQueue = activeHeld?.queueNumber ?? null;
+    const shiftId = snapshot.shiftId;
+    const saleTotal = total;
     setError(null);
     setSaveError(null);
     setCheckoutPending(true);
     try {
-      // Already stored as a final bill (a tap that raced the result): show it, take no new number.
-      const existing = await readEntry(clientRef, tenantId);
-      if (existing && isFinal(existing)) {
-        showOfflineResult(
-          {
-            queueNumber: deviceQueueOf(existing) ?? 0,
-            cashReceived: existing.display.cashReceived,
-            changeAmount: existing.display.changeAmount,
-          },
-          clientRef
-        );
-        return;
-      }
-      // Rejects when the device can't store the number (note I): the sale is blocked.
-      const queueNumber = await snapshot.takeNext();
-      const offline: OfflineSale = {
-        tenantId,
-        sellerId,
-        soldAt: new Date().toISOString(),
-        queueNumber,
-        shiftId: snapshot.shiftId,
-      };
-      const entry = makeEntry({
-        clientRef,
-        tenantId,
-        sellerId,
-        state: "pending",
-        input,
-        display: saleDisplay(input, total, queueNumber),
-        offline,
-      });
-      // Replaces this attempt's own attempt/check-only backup, if any (same client_ref).
-      await outbox.put(entry);
-      showOfflineResult(
-        {
+      await storeOnDevice(clientRef, async () => {
+        // Already stored as a final bill (a tap that raced the result, or a write that landed
+        // after an earlier deadline): show it, take no new number.
+        const existing = await readEntry(clientRef, tenantId);
+        if (existing && isFinal(existing)) return storedResult(existing);
+        // Rejects when the device can't store the number (note I): the sale is blocked.
+        const queueNumber = heldQueue ?? (await snapshot.takeNext());
+        const offline: OfflineSale = {
+          tenantId,
+          sellerId,
+          soldAt: new Date().toISOString(),
+          queueNumber,
+          shiftId,
+        };
+        const entry = makeEntry({
+          clientRef,
+          tenantId,
+          sellerId,
+          state: "pending",
+          input,
+          display: saleDisplay(input, saleTotal, queueNumber),
+          offline,
+        });
+        // Replaces this attempt's own attempt/check-only backup, if any (same client_ref).
+        await outbox.put(entry);
+        return {
           queueNumber,
           cashReceived: entry.display.cashReceived,
           changeAmount: entry.display.changeAmount,
-        },
-        clientRef
-      );
-    } catch {
-      // Nothing was stored: the cart stays and the window says so.
-      setSaveError(SAVE_ON_DEVICE_FAILED);
+        };
+      });
     } finally {
       submittingRef.current = false;
       setCheckoutPending(false);
@@ -727,57 +828,50 @@ export function PosScreen({
     }
     if (submittingRef.current) return;
     submittingRef.current = true;
+    // A held bill keeps its own queue number, as in sellOnDevice.
+    const heldQueue =
+      last.input.heldBillId !== undefined && activeHeld?.id === last.input.heldBillId
+        ? activeHeld.queueNumber
+        : null;
+    const shiftId = snapshot.shiftId;
     setSaveError(null);
     setCheckoutPending(true);
     try {
-      const existing = await readEntry(last.clientRef, tenantId);
-      if (existing && isFinal(existing)) {
-        showOfflineResult(
-          {
-            queueNumber: deviceQueueOf(existing) ?? 0,
-            cashReceived: existing.display.cashReceived,
-            changeAmount: existing.display.changeAmount,
-          },
-          last.clientRef
-        );
-        return;
-      }
-      const queueNumber = await snapshot.takeNext();
-      const offline: OfflineSale = {
-        tenantId,
-        sellerId,
-        soldAt: new Date().toISOString(),
-        queueNumber,
-        shiftId: snapshot.shiftId,
-      };
-      try {
-        await outbox.finalize(last.clientRef, offline);
-      } catch (err) {
-        if (!(err instanceof Error && err.message === ENTRY_MISSING)) throw err;
-        // The attempt is gone (e.g. another tab found it "not saved"): store the bill afresh with
-        // the same client_ref (note B). The server replays it if it was in fact saved.
-        await outbox.put(
-          makeEntry({
-            clientRef: last.clientRef,
-            tenantId,
-            sellerId,
-            state: "pending",
-            input: last.input,
-            display: { ...last.display, queueNumber },
-            offline,
-          })
-        );
-      }
-      showOfflineResult(
-        {
+      await storeOnDevice(last.clientRef, async () => {
+        const existing = await readEntry(last.clientRef, tenantId);
+        if (existing && isFinal(existing)) return storedResult(existing);
+        const queueNumber = heldQueue ?? (await snapshot.takeNext());
+        const offline: OfflineSale = {
+          tenantId,
+          sellerId,
+          soldAt: new Date().toISOString(),
+          queueNumber,
+          shiftId,
+        };
+        try {
+          await outbox.finalize(last.clientRef, offline);
+        } catch (err) {
+          if (!(err instanceof Error && err.message === ENTRY_MISSING)) throw err;
+          // The attempt is gone (e.g. another tab found it "not saved"): store the bill afresh
+          // with the same client_ref (note B). The server replays it if it was in fact saved.
+          await outbox.put(
+            makeEntry({
+              clientRef: last.clientRef,
+              tenantId,
+              sellerId,
+              state: "pending",
+              input: last.input,
+              display: { ...last.display, queueNumber },
+              offline,
+            })
+          );
+        }
+        return {
           queueNumber,
           cashReceived: last.display.cashReceived,
           changeAmount: last.display.changeAmount,
-        },
-        last.clientRef
-      );
-    } catch {
-      setSaveError(SAVE_ON_DEVICE_FAILED);
+        };
+      });
     } finally {
       submittingRef.current = false;
       setCheckoutPending(false);
@@ -986,6 +1080,7 @@ export function PosScreen({
 
   function resetAfterPark(queueNumber: number, customerLabel: string | null, saved: boolean) {
     discardDraft();
+    restoredRef.current = null;
     setCartItems([]);
     setCustomer(null);
     resetDiscount();
@@ -1081,6 +1176,7 @@ export function PosScreen({
   }
 
   function resumeHeld(bill: HeldBillSummary) {
+    restoredRef.current = null;
     const items = repriceFromMenu(bill.items);
     setCartItems(items);
     setOrderType(bill.orderType);
