@@ -191,6 +191,8 @@ export function PosScreen({
   // Round C2: the last sale stored on the device, why storing failed (shown in the payment
   // window), the review list, and bills the server gave another queue number (spec call 15).
   const [lastOffline, setLastOffline] = useState<OfflineResult | null>(null);
+  /** The bill behind lastOffline, so its card can show the bill number once it is sent. */
+  const lastOfflineRefKey = useRef<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [queueChanges, setQueueChanges] = useState<{ device: number; server: number }[]>([]);
@@ -583,6 +585,10 @@ export function PosScreen({
   /** A bill the outbox sent reached the server; nothing shows per bill, the bars carry the news. */
   function handleSynced(e: OutboxEntry, saved: SavedOrder) {
     snapshot.observe(saved.queueNumber);
+    // The sale whose result is still on screen: its card stops saying it is waiting to be sent.
+    if (e.clientRef === lastOfflineRefKey.current) {
+      setLastOffline((r) => (r ? { ...r, orderNumber: saved.orderNumber } : r));
+    }
     const device = e.offline?.queueNumber;
     if (device !== undefined && saved.queueNumber !== device) {
       setQueueChanges((list) => [...list, { device, server: saved.queueNumber }]);
@@ -712,6 +718,7 @@ export function PosScreen({
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
+    lastOfflineRefKey.current = clientRef;
     setLastOffline(result);
     setResultShownAt(eventTime());
     setCartItems([]);
@@ -1342,6 +1349,7 @@ export function PosScreen({
     <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
       <StatusBanners
         offline={!online}
+        confirmed={heartbeat.lastSuccessAt !== null}
         pendingCount={outbox.counts.pending}
         progress={outbox.progress}
         justFinished={outbox.justFinished}

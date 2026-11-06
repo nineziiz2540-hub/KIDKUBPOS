@@ -1,10 +1,13 @@
 "use client";
 import { useState, type ReactNode } from "react";
+import { showSyncingBar } from "@/lib/connectivity";
 
 type Progress = { sent: number; total: number };
 
 type Props = {
   offline: boolean;
+  /** The server has answered this page at least once (not just assumed online after a load). */
+  confirmed: boolean;
   /** This shop's bills waiting on the device to be sent. */
   pendingCount: number;
   /** Bills sent in this burst against its total; null when this tab isn't sending. */
@@ -29,6 +32,7 @@ const BAR = "flex shrink-0 items-center justify-between gap-3 rounded-xl px-4 py
  */
 export function StatusBanners({
   offline,
+  confirmed,
   pendingCount,
   progress,
   justFinished,
@@ -46,7 +50,7 @@ export function StatusBanners({
   } else if (!progress && pendingCount === 0 && lastProgress !== null) {
     setLastProgress(null);
   }
-  const syncing = !offline && (progress !== null || pendingCount > 0);
+  const syncing = showSyncingBar({ offline, confirmed, sending: progress !== null, pendingCount });
   const shown: Progress =
     progress ??
     (lastProgress && lastProgress.total - lastProgress.sent === pendingCount

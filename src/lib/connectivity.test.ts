@@ -3,13 +3,41 @@ import assert from "node:assert/strict";
 import {
   canAutoReload,
   classifyHeartbeat,
+  FIRST_RECHECK_MS,
   INITIAL_CONNECTIVITY,
   isNewVersion,
   nextConnectivity,
   OFFLINE_AFTER_FAILURES,
   parseHeartbeatBody,
+  recheckAfterFailureMs,
   RESULT_HOLD_MS,
+  showSyncingBar,
 } from "./connectivity.ts";
+
+test("a page that has never reached the server re-checks soon after a failed check", () => {
+  assert.equal(FIRST_RECHECK_MS, 3_000);
+  // Reloaded while offline: the first check failed, so the verdict comes in seconds, not 30 s.
+  assert.equal(recheckAfterFailureMs({ failures: 1, everSucceeded: false }), FIRST_RECHECK_MS);
+});
+
+test("no quick re-check once the page has reached the server, or once it is already offline", () => {
+  // A page that was working keeps the slow, no-crying-wolf pace.
+  assert.equal(recheckAfterFailureMs({ failures: 1, everSucceeded: true }), null);
+  assert.equal(recheckAfterFailureMs({ failures: OFFLINE_AFTER_FAILURES, everSucceeded: false }), null);
+});
+
+test("the yellow 'back online' bar waits until the server has answered once", () => {
+  const base = { offline: false, sending: false, pendingCount: 2 };
+  assert.equal(showSyncingBar({ ...base, confirmed: false }), false);
+  assert.equal(showSyncingBar({ ...base, confirmed: false, sending: true }), false);
+  assert.equal(showSyncingBar({ ...base, confirmed: true }), true);
+});
+
+test("the yellow bar never shows offline or with nothing to send", () => {
+  assert.equal(showSyncingBar({ offline: true, confirmed: true, sending: true, pendingCount: 2 }), false);
+  assert.equal(showSyncingBar({ offline: false, confirmed: true, sending: false, pendingCount: 0 }), false);
+  assert.equal(showSyncingBar({ offline: false, confirmed: true, sending: true, pendingCount: 0 }), true);
+});
 
 test("one failed check is not enough to cry wolf", () => {
   const s = nextConnectivity(INITIAL_CONNECTIVITY, "failure");

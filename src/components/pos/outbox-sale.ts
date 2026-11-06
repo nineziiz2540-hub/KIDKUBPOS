@@ -18,6 +18,8 @@ export type OfflineResult = {
   queueNumber: number;
   cashReceived: number | null;
   changeAmount: number | null;
+  /** The system's bill number, once this bill has been sent while its result is still shown. */
+  orderNumber?: string;
 };
 
 export function saleDisplay(

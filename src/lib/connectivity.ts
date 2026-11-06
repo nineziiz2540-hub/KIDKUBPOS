@@ -9,6 +9,32 @@ export const INITIAL_CONNECTIVITY: Connectivity = { status: "online", failures: 
 export const OFFLINE_AFTER_FAILURES = 2;
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const HEARTBEAT_TIMEOUT_MS = 5_000;
+/** Re-check delay after a failed check on a page that has never reached the server. */
+export const FIRST_RECHECK_MS = 3_000;
+
+/**
+ * When to check again after a failed check, if sooner than the interval. "online" is only the
+ * starting assumption of a freshly loaded page (e.g. reloaded while offline): until the server
+ * has answered once, a failure is re-checked within seconds so the verdict doesn't take 30 s.
+ * A page that has reached the server keeps the slow pace, so one dropped request never turns
+ * the bar red.
+ */
+export function recheckAfterFailureMs(s: { failures: number; everSucceeded: boolean }): number | null {
+  return !s.everSucceeded && s.failures < OFFLINE_AFTER_FAILURES ? FIRST_RECHECK_MS : null;
+}
+
+/**
+ * The yellow "เน็ตกลับมาแล้ว — กำลังส่ง" bar. It claims the connection is back, so it waits for
+ * the server to have answered once (confirmed); before that the page only assumes it is online.
+ */
+export function showSyncingBar(s: {
+  offline: boolean;
+  confirmed: boolean;
+  sending: boolean;
+  pendingCount: number;
+}): boolean {
+  return !s.offline && s.confirmed && (s.sending || s.pendingCount > 0);
+}
 
 export function nextConnectivity(
   state: Connectivity,

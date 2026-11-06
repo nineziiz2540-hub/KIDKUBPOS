@@ -231,6 +231,7 @@ export function SmartCart({
                 queueNumber={lastOffline.queueNumber}
                 cashReceived={lastOffline.cashReceived}
                 changeAmount={lastOffline.changeAmount}
+                orderNumber={lastOffline.orderNumber}
               />
             )}
             {lastOrderNumber && lastQueueNumber !== null && (

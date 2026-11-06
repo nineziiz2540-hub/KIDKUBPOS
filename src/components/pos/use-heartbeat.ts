@@ -9,6 +9,7 @@ import {
   isNewVersion,
   nextConnectivity,
   parseHeartbeatBody,
+  recheckAfterFailureMs,
   type Connectivity,
 } from "@/lib/connectivity";
 import type { QueueState } from "@/lib/offline/device-queue";
@@ -49,12 +50,35 @@ export function useHeartbeat(): {
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const [answer, setAnswer] = useState<HeartbeatAnswer | null>(null);
   const inFlight = useRef(false);
+  // Mirrors of the connectivity state for the quick re-check decision (recheckAfterFailureMs).
+  const failuresRef = useRef(0);
+  const everSucceededRef = useRef(false);
+  const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkNowRef = useRef<() => Promise<void>>(async () => {});
 
   const checkNow = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
+    if (recheckTimer.current) {
+      clearTimeout(recheckTimer.current);
+      recheckTimer.current = null;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEARTBEAT_TIMEOUT_MS);
+    const fail = () => {
+      failuresRef.current += 1;
+      setConnectivity((s) => nextConnectivity(s, "failure"));
+      const delay = recheckAfterFailureMs({
+        failures: failuresRef.current,
+        everSucceeded: everSucceededRef.current,
+      });
+      if (delay !== null) {
+        recheckTimer.current = setTimeout(() => {
+          recheckTimer.current = null;
+          void checkNowRef.current();
+        }, delay);
+      }
+    };
     try {
       const res = await fetch("/api/heartbeat", { cache: "no-store", signal: controller.signal });
       const kind = classifyHeartbeat({
@@ -63,9 +87,11 @@ export function useHeartbeat(): {
         contentType: res.headers.get("content-type"),
       });
       if (kind === "failure") {
-        setConnectivity((s) => nextConnectivity(s, "failure"));
+        fail();
         return;
       }
+      failuresRef.current = 0;
+      everSucceededRef.current = true;
       setConnectivity((s) => nextConnectivity(s, "success"));
       setLastSuccessAt(Date.now());
       if (kind === "online") {
@@ -85,12 +111,16 @@ export function useHeartbeat(): {
         });
       }
     } catch {
-      setConnectivity((s) => nextConnectivity(s, "failure"));
+      fail();
     } finally {
       clearTimeout(timer);
       inFlight.current = false;
     }
   }, []);
+
+  useEffect(() => {
+    checkNowRef.current = checkNow;
+  }, [checkNow]);
 
   useEffect(() => {
     const check = () => void checkNow();
@@ -101,12 +131,19 @@ export function useHeartbeat(): {
     const onVisible = () => {
       if (document.visibilityState === "visible") check();
     };
-    const onOffline = () => setConnectivity((s) => nextConnectivity(s, "browser-offline"));
+    const onOffline = () => {
+      failuresRef.current += 1;
+      setConnectivity((s) => nextConnectivity(s, "browser-offline"));
+    };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", check);
     window.addEventListener("offline", onOffline);
     return () => {
       clearInterval(interval);
+      if (recheckTimer.current) {
+        clearTimeout(recheckTimer.current);
+        recheckTimer.current = null;
+      }
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", check);
       window.removeEventListener("offline", onOffline);
