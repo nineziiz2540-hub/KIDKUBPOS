@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
 import { endSession } from "@/app/actions/auth";
-import { usePendingCount, usePosOnline } from "@/lib/offline/status-store";
+import { usePendingCount, useShellOffline } from "@/lib/offline/status-store";
 import { LogOut } from "lucide-react";
 
 type Props = { expanded?: boolean; tenantId?: string | null };
@@ -22,23 +22,11 @@ async function dropPosShellCache(): Promise<void> {
 
 export function LogoutButton({ expanded = false, tenantId = null }: Props) {
   const { pending, loaded } = usePendingCount(tenantId ?? undefined);
-  const posOnline = usePosOnline();
-  const [browserOnline, setBrowserOnline] = useState(true);
+  const offline = useShellOffline();
   const [waited, setWaited] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [failed, setFailed] = useState(false);
   const [busy, startTransition] = useTransition();
-
-  useEffect(() => {
-    const sync = () => setBrowserOnline(navigator.onLine !== false);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-    };
-  }, []);
 
   // Wait for the device count (so the warning can't be missed), but never more than 1 s.
   useEffect(() => {
@@ -46,12 +34,12 @@ export function LogoutButton({ expanded = false, tenantId = null }: Props) {
     return () => clearTimeout(t);
   }, []);
 
-  // The warning closes by itself once nothing is left to send.
-  const showWarning = confirming && pending > 0;
+  // Nothing left to send: the warning is over for good (adjusting state while rendering).
+  if (confirming && pending === 0) setConfirming(false);
+  const showWarning = confirming;
 
   // Logging out needs the network: the session ends first, and only then is the cached POS page
   // dropped, so a failed sign-out can never leave an offline shop without its POS.
-  const offline = !posOnline || !browserOnline;
   const notReady = !loaded && !waited;
 
   // Without a tenant there is nothing to scope the warning to, so it never blocks the logout.

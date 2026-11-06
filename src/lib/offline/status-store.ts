@@ -32,6 +32,26 @@ export function usePosOnline(): boolean {
   );
 }
 
+function subscribeBrowser(cb: () => void) {
+  const off = subscribe(cb);
+  window.addEventListener("online", cb);
+  window.addEventListener("offline", cb);
+  return () => {
+    off();
+    window.removeEventListener("online", cb);
+    window.removeEventListener("offline", cb);
+  };
+}
+
+/** True when the POS heartbeat says offline OR the browser itself reports no network. */
+export function useShellOffline(): boolean {
+  return useSyncExternalStore(
+    subscribeBrowser,
+    () => !posOnline || navigator.onLine === false,
+    () => false,
+  );
+}
+
 /**
  * Unsent bills on this device (pending = waiting to send, review = refused, cash still in the
  * drawer), live across tabs. With a tenantId only that shop's bills count. When the device

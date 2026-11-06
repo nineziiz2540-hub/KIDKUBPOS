@@ -73,7 +73,8 @@ export async function signIn(
 /** Ends the session without redirecting, so a client can finish its own cleanup before leaving. */
 export async function endSession(): Promise<void> {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw new Error("sign_out_failed");
   (await cookies()).delete("worker_verified");
 }
 

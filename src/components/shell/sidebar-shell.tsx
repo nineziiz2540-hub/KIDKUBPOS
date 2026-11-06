@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { LogoutButton } from "./logout-button";
 import { SwitchWorkerButton } from "./switch-worker-button";
-import { usePosOnline } from "@/lib/offline/status-store";
+import { useShellOffline } from "@/lib/offline/status-store";
 
 const OFFLINE_REASON = "ใช้ไม่ได้ตอนเน็ตหลุด";
 
@@ -83,7 +83,7 @@ type Props = {
 };
 
 export function SidebarShell({ items, userName, role, tenantId }: Props) {
-  const online = usePosOnline();
+  const offline = useShellOffline();
   const expanded = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function toggle() {
@@ -128,7 +128,7 @@ export function SidebarShell({ items, userName, role, tenantId }: Props) {
       <nav className="flex-1 py-4 flex flex-col gap-1 px-2 overflow-y-auto">
         {items.map(({ href, label, icon }) => {
           const Icon = ICONS[icon];
-          if (!online && href !== "/pos") {
+          if (offline && href !== "/pos") {
             return (
               <span
                 key={href}
@@ -159,7 +159,7 @@ export function SidebarShell({ items, userName, role, tenantId }: Props) {
           );
         })}
       </nav>
-      {!online && !expanded && (
+      {offline && !expanded && (
         <p className="px-1 pb-2 text-center text-[9px] leading-3 text-white/50">{OFFLINE_REASON}</p>
       )}
       <div className="border-t border-white/10 px-2 py-3">
