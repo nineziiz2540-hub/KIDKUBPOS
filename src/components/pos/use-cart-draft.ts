@@ -23,6 +23,8 @@ type Args = {
   customer: DraftState["customer"];
   activeHeld: DraftState["activeHeld"];
   discount: DraftState["discount"];
+  /** The cart's payment attempt ref (see CartDraft.attemptRef); null when none. */
+  attemptRef: string | null;
   /** Called at most once, only if a draft was found and the cart was still empty. */
   onRestore: (draft: CartDraft) => void;
 };
@@ -47,8 +49,17 @@ function lockApi(): LockApi | null {
  * trouble is swallowed. Returns a stable `discard`.
  */
 export function useCartDraft(args: Args): { discard: () => void } {
-  const { tenantId, sellerId, items, orderType, paymentMethod, customer, activeHeld, discount } =
-    args;
+  const {
+    tenantId,
+    sellerId,
+    items,
+    orderType,
+    paymentMethod,
+    customer,
+    activeHeld,
+    discount,
+    attemptRef,
+  } = args;
   const key = draftKey({ tenantId, sellerId });
   const [ready, setReady] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -150,7 +161,16 @@ export function useCartDraft(args: Args): { discard: () => void } {
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       const draft = toDraft(
-        { savedAt: Date.now(), items, orderType, paymentMethod, customer, activeHeld, discount },
+        {
+          savedAt: Date.now(),
+          items,
+          orderType,
+          paymentMethod,
+          customer,
+          activeHeld,
+          discount,
+          attemptRef: attemptRef ?? undefined,
+        },
         { tenantId, sellerId }
       );
       // Saving only writes. An emptied cart removes the draft only when the read said what was
@@ -166,7 +186,19 @@ export function useCartDraft(args: Args): { discard: () => void } {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = null;
     };
-  }, [ready, key, tenantId, sellerId, items, orderType, paymentMethod, customer, activeHeld, discount]);
+  }, [
+    ready,
+    key,
+    tenantId,
+    sellerId,
+    items,
+    orderType,
+    paymentMethod,
+    customer,
+    activeHeld,
+    discount,
+    attemptRef,
+  ]);
 
   // The cart is finished (paid, cleared, parked): forget it now, and never restore it, even if a
   // restore read is still in flight. A save still waiting is cancelled first so it cannot write

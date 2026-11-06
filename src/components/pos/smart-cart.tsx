@@ -79,6 +79,8 @@ type Props = {
   gates: { pinDiscount: Gate; hold: Gate; member: Gate };
   /** False until the device's outbox has been read once: paying waits for it. */
   paymentReady: boolean;
+  /** Why ชำระ is off right now (e.g. an earlier device save is still settling); null = none. */
+  payBlockedReason?: string | null;
 };
 
 function reasonOf(g: Gate): string | null {
@@ -126,6 +128,7 @@ export function SmartCart({
   lastOffline,
   gates,
   paymentReady,
+  payBlockedReason = null,
 }: Props) {
   const reasonId = useId();
   const pinReason = reasonOf(gates.pinDiscount);
@@ -453,6 +456,9 @@ export function SmartCart({
         {[...disabledGroups].map(([reason, what]) => (
           <DisabledReason key={reason} what={what} reason={reason} />
         ))}
+        {payBlockedReason && (
+          <p className="text-sm font-medium text-muted-foreground">{payBlockedReason}</p>
+        )}
 
         <div className="flex gap-2">
           <button

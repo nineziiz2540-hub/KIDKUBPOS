@@ -26,7 +26,7 @@ import type {
 } from "@/types/app";
 import { gate, type Gate } from "@/lib/offline/feature-gates";
 import { requestPersistentStorage } from "@/lib/offline/idb";
-import { matchingAttemptRef, saleKey, type OutboxEntry } from "@/lib/offline/outbox-rules";
+import { adoptableRef, saleKey, type OutboxEntry } from "@/lib/offline/outbox-rules";
 import { useOutbox } from "./use-outbox";
 import { setPosOnline } from "@/lib/offline/status-store";
 import {
@@ -68,6 +68,8 @@ const ENTRY_MISSING = "outbox_entry_missing";
  * store (known on iPad Safari) must never leave the payment window on "กำลังบันทึก…".
  */
 const DEVICE_STORE_DEADLINE_MS = 5000;
+/** Shown under ชำระ while a device save that missed its deadline has not settled. */
+const UNSETTLED_SAVE_MESSAGE = "กำลังบันทึกบิลก่อนหน้า… รอสักครู่ (ถ้าค้างนาน ให้รีเฟรชหน้า)";
 
 /**
  * Date.now() for code that runs only in event handlers and async callbacks. The React Compiler lint
@@ -162,10 +164,17 @@ export function PosScreen({
   const submittingRef = useRef(false);
   // The payment attempt in progress: its client_ref is reused by every retry of the same cart.
   const attemptRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
-  // A cart brought back after a reload (its attemptFingerprint) whose online payment may already
-  // have been saved: until the cart is finished, it takes over that attempt's client_ref from the
-  // outbox (adoptRestoredAttempt), so paying it again can only replay that bill.
-  const restoredRef = useRef<string | null>(null);
+  // A cart brought back after a reload together with the client_ref of its own payment attempt
+  // (saved in the draft), whose answer may have been lost: while the cart is still exactly the
+  // restored one it takes over that ref (adoptRestoredAttempt), so paying it again can only
+  // replay its own bill. Only that ref, never one found by matching the cart's contents.
+  const restoredRef = useRef<{ fingerprint: string; clientRef: string } | null>(null);
+  // attemptRef's client_ref as state, for the cart draft: a reload keeps the attempt's identity.
+  // Set whenever a payment try starts (clientRefForCart), cleared whenever the cart is finished.
+  const [draftAttemptRef, setDraftAttemptRef] = useState<string | null>(null);
+  // Device saves that missed DEVICE_STORE_DEADLINE_MS and have not settled yet: their write may
+  // still land, so no new sale starts until each one has (ชำระ stays off, with a reason).
+  const [unsettledSaves, setUnsettledSaves] = useState(0);
   // The client_ref of the sale whose result was last shown (online or on the device): a device
   // write that lands after its deadline for that same sale needs no notice.
   const settledRef = useRef<string | null>(null);
@@ -206,6 +215,7 @@ export function PosScreen({
     customer,
     activeHeld,
     discount: draftDiscount,
+    attemptRef: draftAttemptRef,
     onRestore: restoreDraft,
   });
   const discardDraft = () => {
@@ -394,8 +404,18 @@ export function PosScreen({
     setPendingProduct(null);
   }
 
+  // The last item taken out by hand ends this cart as a sale, just like ล้าง: its payment attempt
+  // is forgotten, so an identical cart built next (another customer) never reuses its client_ref.
+  function forgetAttemptIfEmptied(key: string) {
+    if (activeHeld !== null || cartItems.some((i) => i.cartItemKey !== key)) return;
+    attemptRef.current = null;
+    restoredRef.current = null;
+    setDraftAttemptRef(null);
+  }
+
   function updateQty(key: string, qty: number) {
     if (qty <= 0) {
+      forgetAttemptIfEmptied(key);
       setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
     } else {
       setCartItems((prev) =>
@@ -408,6 +428,7 @@ export function PosScreen({
   }
 
   function removeItem(key: string) {
+    forgetAttemptIfEmptied(key);
     setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
   }
 
@@ -424,17 +445,25 @@ export function PosScreen({
       setDiscountReason(d.discount.reason);
     }
     setActiveHeld(d.activeHeld);
-    // Exactly the fingerprint the restored cart will have once these states land.
-    restoredRef.current = attemptFingerprint({
-      items,
-      paymentMethod: d.paymentMethod,
-      orderType: d.orderType,
-      customerId: d.customer?.id ?? null,
-      discountType: d.discount?.type ?? null,
-      discountValue: d.discount?.value ?? "",
-      heldBillId: d.activeHeld?.id ?? null,
-      heldBillVersion: d.activeHeld?.version ?? null,
-    });
+    // The draft's own attempt ref (if a payment was tried) stays with the cart, and the restored
+    // cart may take it over: keyed by exactly the fingerprint it will have once these states land.
+    setDraftAttemptRef(d.attemptRef ?? null);
+    restoredRef.current =
+      d.attemptRef === undefined
+        ? null
+        : {
+            clientRef: d.attemptRef,
+            fingerprint: attemptFingerprint({
+              items,
+              paymentMethod: d.paymentMethod,
+              orderType: d.orderType,
+              customerId: d.customer?.id ?? null,
+              discountType: d.discount?.type ?? null,
+              discountValue: d.discount?.value ?? "",
+              heldBillId: d.activeHeld?.id ?? null,
+              heldBillVersion: d.activeHeld?.version ?? null,
+            }),
+          };
     // The held bill's loaded items are not known any more: treat it as edited (never loses edits).
     setLoadedSnapshot(null);
     setNotice("กู้ตะกร้าที่ค้างไว้");
@@ -444,6 +473,7 @@ export function PosScreen({
     discardDraft();
     attemptRef.current = null;
     restoredRef.current = null;
+    setDraftAttemptRef(null);
     setUncertain(false);
     setLocalUnresolved(null);
     setResultShownAt(null);
@@ -476,6 +506,7 @@ export function PosScreen({
     settledRef.current = attemptRef.current?.clientRef ?? null;
     attemptRef.current = null;
     restoredRef.current = null;
+    setDraftAttemptRef(null);
     setUncertain(false);
     setLocalUnresolved(null);
     setError(null);
@@ -612,14 +643,18 @@ export function PosScreen({
 
   /**
    * A payment that got no answer (maybe saved), then a reload: the cart draft brings the cart back
-   * but the in-memory attempt is gone, so a new client_ref would record the sale a second time.
-   * While the cart is still exactly the restored one, it takes over the client_ref of the outbox's
-   * attempt/check-only entry for the same sale (the server then only ever replays that bill).
+   * with its attempt's client_ref, but the in-memory attempt is gone, so a new client_ref would
+   * record the sale a second time. While the cart is still exactly the restored one and that very
+   * ref is still an unanswered attempt/check-only entry for the same sale, it is taken over (the
+   * server then only ever replays that bill). An identical cart built for the next customer has no
+   * ref in its draft and so never inherits the earlier bill.
    */
   function adoptRestoredAttempt(fingerprint: string, key: string, entries: OutboxEntry[]) {
     const restored = restoredRef.current;
-    if (restored === null || restored !== fingerprint || attemptRef.current !== null) return;
-    const clientRef = matchingAttemptRef(entries, tenantId, sellerId, key);
+    if (restored === null || restored.fingerprint !== fingerprint || attemptRef.current !== null) {
+      return;
+    }
+    const clientRef = adoptableRef(restored.clientRef, entries, tenantId, sellerId, key);
     if (clientRef === null) return;
     attemptRef.current = { fingerprint, clientRef };
     restoredRef.current = null;
@@ -655,6 +690,8 @@ export function PosScreen({
     if (attemptRef.current?.fingerprint !== fingerprint) {
       attemptRef.current = { fingerprint, clientRef: crypto.randomUUID() };
     }
+    // Into the cart draft, so a reload keeps this attempt's identity.
+    setDraftAttemptRef(attemptRef.current.clientRef);
     return attemptRef.current.clientRef;
   }
 
@@ -665,6 +702,7 @@ export function PosScreen({
     settledRef.current = clientRef;
     attemptRef.current = null;
     restoredRef.current = null;
+    setDraftAttemptRef(null);
     lastTryRef.current = null;
     setUncertain(false);
     setLocalUnresolved((ref) => (ref === clientRef ? null : ref));
@@ -734,8 +772,11 @@ export function PosScreen({
       // Nothing was stored (or not in time): the cart stays and the window says so.
       setSaveError(SAVE_ON_DEVICE_FAILED);
       if (!(err instanceof DeadlineError)) return;
+      // The write may still land: no new sale starts until it settles (a reload aborts it).
+      setUnsettledSaves((n) => n + 1);
       run.then(
         (late) => {
+          setUnsettledSaves((n) => Math.max(0, n - 1));
           if (settledRef.current === clientRef) return; // already shown (e.g. by a retry)
           if (
             attemptRef.current?.clientRef === clientRef &&
@@ -746,7 +787,7 @@ export function PosScreen({
             setError(`บิลก่อนหน้าบันทึกในเครื่องแล้ว (คิว ${late.queueNumber}) · ตรวจตะกร้าก่อนชำระ`);
           }
         },
-        () => {}
+        () => setUnsettledSaves((n) => Math.max(0, n - 1))
       );
     }
   }
@@ -997,6 +1038,8 @@ export function PosScreen({
     // Until the outbox has been read, nobody knows whether bills are already waiting (which
     // would make this a device-numbered sale): wait for it, never guess either way.
     if (!outbox.loaded) return;
+    // A device save that missed its deadline may still land: wait for it (ชำระ says so).
+    if (unsettledSaves > 0) return;
     if (requiresApproval && !hasApproverPin) return;
     // Offline or bills still waiting: a discount that needs a PIN waits (the button says why).
     if (deviceNumbered && requiresApproval) return;
@@ -1081,6 +1124,8 @@ export function PosScreen({
   function resetAfterPark(queueNumber: number, customerLabel: string | null, saved: boolean) {
     discardDraft();
     restoredRef.current = null;
+    attemptRef.current = null;
+    setDraftAttemptRef(null);
     setCartItems([]);
     setCustomer(null);
     resetDiscount();
@@ -1177,6 +1222,7 @@ export function PosScreen({
 
   function resumeHeld(bill: HeldBillSummary) {
     restoredRef.current = null;
+    setDraftAttemptRef(null);
     const items = repriceFromMenu(bill.items);
     setCartItems(items);
     setOrderType(bill.orderType);
@@ -1369,7 +1415,8 @@ export function PosScreen({
             lastHeld={lastHeld}
             lastOffline={lastOffline}
             gates={cartGates}
-            paymentReady={outbox.loaded}
+            paymentReady={outbox.loaded && unsettledSaves === 0}
+            payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
           />
         </div>
       </div>
@@ -1441,7 +1488,8 @@ export function PosScreen({
                 lastHeld={lastHeld}
                 lastOffline={lastOffline}
                 gates={cartGates}
-                paymentReady={outbox.loaded}
+                paymentReady={outbox.loaded && unsettledSaves === 0}
+            payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
               />
             </div>
           </div>

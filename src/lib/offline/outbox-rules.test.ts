@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  adoptableRef,
   afterFailure,
   backoffMs,
   checkable,
@@ -8,7 +9,6 @@ import {
   counts,
   deviceNumberedMode,
   hasSenderWork,
-  matchingAttemptRef,
   MAX_GENERIC_TRIES,
   MISSING_OFFLINE_MESSAGE,
   missingOfflineToReview,
@@ -23,6 +23,7 @@ import {
   type OutboxEntry,
   type OutboxState,
 } from "./outbox-rules.ts";
+import { restorable, toDraft, type DraftState } from "./cart-draft.ts";
 
 function entry(over: Partial<OutboxEntry> & { clientRef: string }): OutboxEntry {
   return {
@@ -300,7 +301,7 @@ test("closeBlockCounts: product_missing review bills don't block, they are count
   assert.deepEqual(closeBlockCounts([], "t1"), { pending: 0, review: 0, unrecordable: 0 });
 });
 
-// ── saleKey / matchingAttemptRef (lost answer → reload → same client_ref) ───
+// ── saleKey / adoptableRef (lost answer → reload → same client_ref) ─────────
 const latte = {
   cartItemKey: "p1",
   productId: "p1",
@@ -332,23 +333,72 @@ test("saleKey ignores client_ref, cash received and names; follows what makes th
   assert.notEqual(saleKey({ ...cartInput, customerId: "c1" }), base);
 });
 
-test("matchingAttemptRef finds the newest attempt/check-only of this shop+seller with the same sale", () => {
+const REF_A = "11111111-1111-4111-8111-111111111111";
+const REF_B = "22222222-2222-4222-8222-222222222222";
+const ids = { tenantId: "t1", sellerId: "u1" };
+const draftState = (over: Partial<DraftState> = {}): DraftState => ({
+  savedAt: 1000,
+  items: [latte],
+  orderType: "dine_in",
+  paymentMethod: "cash",
+  customer: null,
+  activeHeld: null,
+  discount: null,
+  ...over,
+});
+/** A draft saved, then read back after a reload (JSON round trip through the device store). */
+const reloaded = (state: DraftState) =>
+  restorable(JSON.parse(JSON.stringify(toDraft(state, ids))), ids);
+
+test("adoptableRef takes only the draft's own ref, still unanswered, same shop/seller/sale", () => {
   const input = cartInput as unknown as OutboxEntry["input"];
   const key = saleKey(cartInput);
   const list = [
-    st("old", "check-only", { input, createdAt: 10 }),
-    st("new", "attempt", { input, createdAt: 20 }),
-    st("final", "pending", { input, createdAt: 30 }),
-    st("rev", "review", { input, createdAt: 40 }),
-    st("shop2", "check-only", { input, createdAt: 50, tenantId: "t2" }),
-    st("seller2", "check-only", { input, createdAt: 60, sellerId: "u2" }),
+    st(REF_A, "check-only", { input }),
+    st(REF_B, "attempt", { input }),
+    st("final", "pending", { input }),
+    st("shop2", "check-only", { input, tenantId: "t2" }),
+    st("seller2", "attempt", { input, sellerId: "u2" }),
   ];
-  assert.equal(matchingAttemptRef(list, "t1", "u1", key), "new");
-  assert.equal(matchingAttemptRef(list.slice(0, 1), "t1", "u1", key), "old");
-  // A different cart, or only final bills: nothing to reuse.
+  assert.equal(adoptableRef(REF_A, list, "t1", "u1", key), REF_A);
+  assert.equal(adoptableRef(REF_B, list, "t1", "u1", key), REF_B);
+  // No ref, a ref with no entry, a final bill, another shop/seller, or another sale: nothing.
+  assert.equal(adoptableRef(undefined, list, "t1", "u1", key), null);
+  assert.equal(adoptableRef(null, list, "t1", "u1", key), null);
+  assert.equal(adoptableRef("33333333-3333-4333-8333-333333333333", list, "t1", "u1", key), null);
+  assert.equal(adoptableRef("final", list, "t1", "u1", key), null);
+  assert.equal(adoptableRef("shop2", list, "t1", "u1", key), null);
+  assert.equal(adoptableRef("seller2", list, "t1", "u1", key), null);
   assert.equal(
-    matchingAttemptRef(list, "t1", "u1", saleKey({ ...cartInput, paymentMethod: "transfer" })),
+    adoptableRef(REF_A, list, "t1", "u1", saleKey({ ...cartInput, paymentMethod: "transfer" })),
     null,
   );
-  assert.equal(matchingAttemptRef(list.slice(2), "t1", "u1", key), null);
+});
+
+test("lost answer → reload: the restored cart adopts the ref its draft stored", () => {
+  // Sale A was tried online (draft saved with its ref), the answer was lost: entry check-only.
+  const outbox = [st(REF_A, "check-only", { input: cartInput as unknown as OutboxEntry["input"] })];
+  const back = reloaded(draftState({ attemptRef: REF_A }));
+  assert.equal(back?.attemptRef, REF_A);
+  assert.equal(adoptableRef(back?.attemptRef, outbox, "t1", "u1", saleKey(cartInput)), REF_A);
+});
+
+test("clear → identical cart for the next customer → reload: nothing is adopted", () => {
+  // Sale A's answer was lost (check-only), then the cart was cleared (draft discarded) and
+  // customer B ordered the very same cart; B never paid, so B's draft carries no ref.
+  const outbox = [st(REF_A, "check-only", { input: cartInput as unknown as OutboxEntry["input"] })];
+  const back = reloaded(draftState());
+  assert.ok(back);
+  assert.equal(back.attemptRef, undefined);
+  assert.equal(adoptableRef(back.attemptRef, outbox, "t1", "u1", saleKey(cartInput)), null);
+});
+
+test("the draft's attempt ref must be a UUID; a malformed one is dropped, the cart still restores", () => {
+  const d = toDraft(draftState({ attemptRef: REF_A }), ids);
+  assert.equal(d?.attemptRef, REF_A);
+  assert.equal(toDraft(draftState({ attemptRef: "x" }), ids)?.attemptRef, undefined);
+  const bad = restorable({ ...d, attemptRef: 42 }, ids);
+  assert.ok(bad);
+  assert.equal(bad.attemptRef, undefined);
+  assert.equal(restorable({ ...d, attemptRef: "not-a-uuid" }, ids)?.attemptRef, undefined);
 });

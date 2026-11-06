@@ -159,25 +159,23 @@ export function saleKey(i: SaleKeyInput): string {
 }
 
 /**
- * The client_ref of an online payment of this cart that may have been saved (an `attempt` or a
- * `check-only` entry of this shop and seller with the same sale key), newest first; null if none.
- * A cart restored after a reload reuses it, so paying it again (online or on the device) can only
- * replay that bill, never record a second one.
+ * Whether a cart restored after a reload may take over `draftRef`, the attempt ref its own draft
+ * saved: only if that exact entry is still an unanswered online attempt (`attempt` / `check-only`)
+ * of this shop and seller, for the same sale (key). Never by sale key alone: an identical cart
+ * built for the next customer must not inherit an earlier customer's bill. Returns the ref or null.
  */
-export function matchingAttemptRef(
+export function adoptableRef(
+  draftRef: string | null | undefined,
   entries: OutboxEntry[],
   tenantId: string,
   sellerId: string,
   key: string,
 ): string | null {
-  let best: OutboxEntry | null = null;
-  for (const e of entries) {
-    if (e.tenantId !== tenantId || e.sellerId !== sellerId) continue;
-    if (e.state !== "attempt" && e.state !== "check-only") continue;
-    if (saleKey(e.input) !== key) continue;
-    if (best === null || e.createdAt > best.createdAt) best = e;
-  }
-  return best?.clientRef ?? null;
+  if (!draftRef) return null;
+  const e = entries.find((x) => x.clientRef === draftRef);
+  if (!e || e.tenantId !== tenantId || e.sellerId !== sellerId) return null;
+  if (e.state !== "attempt" && e.state !== "check-only") return null;
+  return saleKey(e.input) === key ? draftRef : null;
 }
 
 function isOrphan(e: OutboxEntry, now: number): boolean {

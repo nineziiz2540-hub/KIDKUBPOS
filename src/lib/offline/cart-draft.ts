@@ -19,6 +19,12 @@ export type CartDraft = {
     customerLabel: string | null;
   } | null;
   discount: { type: "percent" | "amount"; value: string; reason: string } | null;
+  /**
+   * The client_ref of this cart's online payment attempt, if one was started (it may have been
+   * saved with its answer lost). After a reload the POS reuses exactly this ref and no other, so
+   * the restored cart can only ever replay its own bill. Absent when no payment was tried.
+   */
+  attemptRef?: string;
 };
 
 /** What the screen hands over; the draft keeps exactly the listed fields of it. */
@@ -48,6 +54,9 @@ function cleanItem(i: CartItem): CartItem {
     note: i.note,
   };
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (x: unknown): x is string => typeof x === "string" && UUID_RE.test(x);
 
 export function draftKey(ids: Ids): string {
   return `cart:${ids.tenantId}:${ids.sellerId}`;
@@ -79,6 +88,7 @@ export function toDraft(state: DraftState, ids: Ids): CartDraft | null {
           reason: state.discount.reason,
         }
       : null,
+    ...(isUuid(state.attemptRef) ? { attemptRef: state.attemptRef } : {}),
   };
 }
 
@@ -167,6 +177,8 @@ export function restorable(d: unknown, ids: Ids, now?: number): CartDraft | null
     customer,
     activeHeld,
     discount,
+    // A malformed ref is dropped (the cart still comes back, it just adopts nothing).
+    ...(isUuid(d.attemptRef) ? { attemptRef: d.attemptRef } : {}),
   };
   // An empty cart with no held bill is not worth bringing back.
   if (draft.items.length === 0 && draft.activeHeld === null) return null;
