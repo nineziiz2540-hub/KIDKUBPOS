@@ -71,6 +71,24 @@ function mergeSnapshots(a: Snapshot, b: Snapshot | null, today: string): Snapsho
 }
 
 /**
+ * After a shift is closed (null) or opened (its id) on /shifts: the device's stored snapshot takes
+ * that shift with a fresh `at`, so a POS opened offline from a stale cached page doesn't sell into
+ * the old shift. Queue and PromptPay are kept as stored; with nothing stored nothing is written
+ * (the POS page brings a full snapshot itself). Best-effort, never throws; holds the same lock as
+ * takeNext so a queue number taken meanwhile in another tab is never overwritten.
+ */
+export function recordShiftOnDevice(tenantId: string, shiftId: string | null): void {
+  const write = async () => {
+    const stored = parseStored(await kvGet<unknown>(key(tenantId)));
+    if (!stored) return;
+    await kvSet(key(tenantId), { ...stored, shiftId, at: Date.now() });
+  };
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  const run = locks ? locks.request("kidkub-queue:" + tenantId, write) : write();
+  void Promise.resolve(run).catch(() => {});
+}
+
+/**
  * The device's copy of what an offline sale needs: the latest open shift, today's queue counter
  * and the PromptPay ID. It starts from the page (or what a previous run stored, if newer), follows
  * every heartbeat answer, and is saved in IndexedDB (kv "snapshot:<tenantId>"). Queue writes are

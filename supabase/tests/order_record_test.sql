@@ -171,6 +171,25 @@ begin
   r := r || jsonb_build_object('override_cash_current_shift',
     o.created and (select shift_id = s2 from public.orders where id = o.order_id));
 
+  -- R24a: a held bill paid offline whose held bill is since paid (stale). createOrder sends an
+  -- override WITHOUT the held bill (null id/version/reductions) and the device queue number (the
+  -- held bill's own number): it records, keeps that number, leaves the held bill alone, one row.
+  insert into public.held_bills (tenant_id, queue_number, business_date, items, created_by, status)
+  values (ta, 88, today, '[]', ua, 'paid') returning id into hb;
+  ref := gen_random_uuid();
+  select * into o from public.order_record(ta, ua, ref, transfer_order, items, null, null, null,
+    jsonb_build_object('sold_at', now(), 'queue_number', 88, 'shift_id', s2,
+      'override', ovr || jsonb_build_object('reason', 'ลูกค้าจ่ายแล้วตอนเน็ตหลุด · บิลพัก ' || left(hb::text, 8))));
+  r := r || jsonb_build_object('override_ignores_stale_held',
+    o.created and o.queue_number = 88
+    and (select queue_number = 88 and held_bill_id is null and sold_offline and client_ref = ref
+         from public.orders where id = o.order_id)
+    and (select status = 'paid' and version = 1 from public.held_bills where id = hb)
+    and not exists (select 1 from public.held_bill_events where held_bill_id = hb)
+    and (select count(*) = 1 from public.order_adjustments
+          where order_id = o.order_id and kind = 'offline_override'
+            and reason = 'ลูกค้าจ่ายแล้วตอนเน็ตหลุด · บิลพัก ' || left(hb::text, 8)));
+
   -- ── Sellers and approvers ───────────────────────────────────────────────
   update public.profiles set deactivated_at = now() where id = ux;
   begin

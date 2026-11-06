@@ -219,8 +219,17 @@ export async function createOrder(
 
   // 4b. Paying a held bill: its items are read only to audit reductions made right before paying.
   // order_record re-checks it is still open at the loaded version, under a row lock.
+  // Under an override (ruling R24a) the bill is recorded as charged WITHOUT touching the held bill
+  // (it may be paid or changed since): no link, no close-out; the bill keeps the device's queue
+  // number (for a held bill paid offline that is the held bill's own number) and the held bill is
+  // named in the override's reason for the audit.
+  const linkHeld = data.heldBillId !== undefined && !override;
+  if (data.heldBillId !== undefined && override) {
+    const note = ` · บิลพัก ${String(data.heldBillId).slice(0, 8)}`;
+    override.reason = override.reason.slice(0, 500 - note.length) + note;
+  }
   let reductions: ReturnType<typeof diffReductions> = [];
-  if (data.heldBillId !== undefined) {
+  if (linkHeld) {
     if (typeof data.heldBillId !== "string" || typeof data.heldBillVersion !== "number") {
       return stop("ข้อมูลบิลพักไม่ถูกต้อง");
     }
@@ -279,9 +288,9 @@ export async function createOrder(
       modifiers_snapshot: line.modifiersSnapshot,
       note: line.note,
     })) as unknown as Json,
-    p_held_bill_id: data.heldBillId ?? null,
-    p_held_bill_version: data.heldBillVersion ?? null,
-    p_held_reductions: reductions as unknown as Json,
+    p_held_bill_id: linkHeld ? (data.heldBillId ?? null) : null,
+    p_held_bill_version: linkHeld ? (data.heldBillVersion ?? null) : null,
+    p_held_reductions: linkHeld ? (reductions as unknown as Json) : null,
     p_offline: offline
       ? {
           sold_at: offline.soldAt,
@@ -338,7 +347,7 @@ export async function createOrder(
     if (deductError) {
       console.error("[createOrder] deduct_stock_for_order failed:", deductError.message);
     }
-    if (data.heldBillId !== undefined) revalidatePath("/pos");
+    if (linkHeld) revalidatePath("/pos");
     revalidatePath("/orders");
   }
 

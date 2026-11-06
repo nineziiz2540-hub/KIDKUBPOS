@@ -6,6 +6,7 @@ import { checkOpeningCount, startShift } from "@/app/actions/shifts";
 import { differenceLabel, parseAmount, type CountComparison } from "@/lib/shift-math";
 import { formatBaht } from "@/lib/order-history";
 import { AmountInput } from "./amount-input";
+import { recordShiftOnDevice } from "@/components/pos/use-device-snapshot";
 
 type Step =
   | { kind: "count1" }
@@ -17,7 +18,7 @@ type Step =
  * last night) is never on screen before the count: the server answers only after ตรวจยอด. A
  * mismatch asks for one recount; the recount is what the shift opens with.
  */
-export function OpenShiftCard() {
+export function OpenShiftCard({ tenantId }: { tenantId: string }) {
   const router = useRouter();
   const inputId = useId();
   const noteId = useId();
@@ -61,6 +62,8 @@ export function OpenShiftCard() {
         setError(res.error);
         return;
       }
+      // The device's offline snapshot follows the new shift straight away (best-effort).
+      recordShiftOnDevice(tenantId, res.shiftId);
       router.refresh();
     });
   }

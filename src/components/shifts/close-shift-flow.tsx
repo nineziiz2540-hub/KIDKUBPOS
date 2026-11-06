@@ -19,7 +19,12 @@ import { shiftErrorMessage } from "@/lib/shift-errors";
 import { AmountInput } from "./amount-input";
 import { usePendingCount } from "@/lib/offline/status-store";
 import { outboxAll } from "@/lib/offline/idb";
-import { counts } from "@/lib/offline/outbox-rules";
+import { closeBlockCounts } from "@/lib/offline/outbox-rules";
+import { withDeadline } from "@/lib/payment-attempt";
+import { recordShiftOnDevice } from "@/components/pos/use-device-snapshot";
+
+/** A stuck device store must not hang the close: the re-read gives up after this. */
+const DEVICE_READ_DEADLINE_MS = 5000;
 
 /** What finishShift returns when cash moved after the latest count (shift_close's expected_changed). */
 const EXPECTED_CHANGED = shiftErrorMessage("expected_changed");
@@ -73,7 +78,8 @@ export function CloseShiftFlow({
 }: Props) {
   const router = useRouter();
   const unsent = usePendingCount(tenantId);
-  // Unsent and refused bills still belong to this drawer, so the shift can't close without them.
+  // Unsent and refused bills still belong to this drawer, so the shift can't close without them
+  // (R24b: a refused bill that can never be recorded only warns, it never locks the close).
   const unsentTotal = unsent.pending + unsent.review;
   const closeBlocked = unsentTotal > 0;
   // Until the device count is known the close buttons stay off (no copy: nothing is wrong yet).
@@ -129,7 +135,10 @@ export function CloseShiftFlow({
     startTransition(async () => {
       // Re-read the device right before closing: a bill saved a moment ago must not slip past.
       try {
-        const c = counts(await outboxAll(), tenantId);
+        const c = closeBlockCounts(
+          await withDeadline(outboxAll(), DEVICE_READ_DEADLINE_MS),
+          tenantId
+        );
         if (c.pending + c.review > 0) {
           setError(`ยังมีบิลค้างส่ง ${c.pending + c.review} บิล · รอส่งให้ครบก่อนปิดกะ`);
           return;
@@ -149,6 +158,8 @@ export function CloseShiftFlow({
         setError(res.error);
         return;
       }
+      // The device's offline snapshot no longer has an open shift (best-effort).
+      recordShiftOnDevice(tenantId, null);
       router.push(`/shifts?closed=${shiftId}`);
     });
   }
@@ -175,6 +186,7 @@ export function CloseShiftFlow({
               ยังมีบิลค้างส่ง {unsentTotal} บิล · รอส่งให้ครบก่อนปิดกะ
             </p>
           )}
+          {unsent.unrecordable > 0 && <UnrecordableWarning count={unsent.unrecordable} />}
         </section>
       </>
     );
@@ -334,6 +346,7 @@ export function CloseShiftFlow({
                 ยังมีบิลค้างส่ง {unsentTotal} บิล · รอส่งให้ครบก่อนปิดกะ
               </p>
             )}
+            {unsent.unrecordable > 0 && <UnrecordableWarning count={unsent.unrecordable} />}
           </div>
         )}
 
@@ -377,6 +390,15 @@ function PersonalWarning({ amount }: { amount: number }) {
   return (
     <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-base font-semibold text-warning">
       เงินส่วนตัวยังอยู่ในลิ้นชัก {formatMoney(amount)}
+    </p>
+  );
+}
+
+/** Refused bills that can never be recorded (R24b): shown, never blocking the close. */
+function UnrecordableWarning({ count }: { count: number }) {
+  return (
+    <p className="rounded-xl border border-border bg-muted px-4 py-3 text-base font-medium text-muted-foreground">
+      มีบิลที่บันทึกไม่ได้ {count} บิล · ดูที่หน้า POS
     </p>
   );
 }

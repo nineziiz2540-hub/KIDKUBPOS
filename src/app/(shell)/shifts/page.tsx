@@ -79,7 +79,7 @@ export default async function ShiftsPage({ searchParams }: Props) {
               )}
             </div>
           )}
-        <OpenShiftCard />
+        <OpenShiftCard tenantId={profile.tenant_id} />
       </div>
     );
   }
