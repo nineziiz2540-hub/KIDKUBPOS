@@ -55,6 +55,9 @@ export function useCartDraft(args: Args): { discard: () => void } {
   // Set once the cart has been finished or a restore has happened: no (later) restore may run.
   const noRestoreRef = useRef(false);
   const ownerRef = useRef(false);
+  // The device store answered the restore read in time: only then does an emptied cart remove
+  // the draft. After a timed-out read the draft may still be there unread, so it is left alone.
+  const readOkRef = useRef(false);
   const latest = useRef(args);
   useEffect(() => {
     latest.current = args;
@@ -66,17 +69,24 @@ export function useCartDraft(args: Args): { discard: () => void } {
     let retry: ReturnType<typeof setTimeout> | null = null;
     noRestoreRef.current = false;
     ownerRef.current = false;
+    readOkRef.current = false;
 
     async function restore() {
       let saved: unknown;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = Symbol("timeout");
       try {
-        saved = await Promise.race([
+        const got = await Promise.race([
           kvGet<unknown>(key),
-          new Promise<undefined>((resolve) => {
-            timer = setTimeout(() => resolve(undefined), RESTORE_READ_TIMEOUT_MS);
+          new Promise<symbol>((resolve) => {
+            timer = setTimeout(() => resolve(timedOut), RESTORE_READ_TIMEOUT_MS);
           }),
         ]);
+        if (got === timedOut) saved = undefined;
+        else {
+          saved = got;
+          readOkRef.current = true;
+        }
       } catch {
         saved = undefined;
       } finally {
@@ -143,7 +153,14 @@ export function useCartDraft(args: Args): { discard: () => void } {
         { savedAt: Date.now(), items, orderType, paymentMethod, customer, activeHeld, discount },
         { tenantId, sellerId }
       );
-      (draft ? kvSet(key, draft) : kvDelete(key)).catch(() => {});
+      // Saving only writes. An emptied cart removes the draft only when the read said what was
+      // there; the explicit removal is discard().
+      if (draft) {
+        // Our own write now stands in the store, so a later emptying removes it as usual.
+        readOkRef.current = true;
+        kvSet(key, draft).catch(() => {});
+      }
+      else if (readOkRef.current) kvDelete(key).catch(() => {});
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
