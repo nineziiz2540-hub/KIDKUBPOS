@@ -6,7 +6,7 @@ import { PinPad } from "@/components/ui/pin-pad";
 import { formatPrice } from "@/lib/cash";
 import { formatDateTime } from "@/lib/bangkok-time";
 import { PAYMENT_DEADLINE_MS, withDeadline } from "@/lib/payment-attempt";
-import type { OutboxEntry } from "@/lib/offline/outbox-rules";
+import { MISSING_OFFLINE_MESSAGE, type OutboxEntry } from "@/lib/offline/outbox-rules";
 import { REVIEW_MESSAGES } from "@/lib/offline/sync-outcome";
 import type { SavedOrder } from "@/types/app";
 import { deviceQueueOf } from "./outbox-sale";
@@ -18,12 +18,6 @@ const DEFAULT_REASON = "บันทึกตามยอดที่เก็�
 function reasonOf(e: OutboxEntry): string {
   const msg = e.reviewCode ? REVIEW_MESSAGES[e.reviewCode] : "";
   return msg || e.lastError || DEFAULT_REASON;
-}
-
-/** The reason the server logs with the override (R20), at most 500 characters. */
-function overrideReason(e: OutboxEntry): string {
-  const msg = e.reviewCode ? REVIEW_MESSAGES[e.reviewCode] : "";
-  return (msg || e.lastError || DEFAULT_REASON).trim().slice(0, 500);
 }
 
 /**
@@ -49,12 +43,20 @@ export function ReviewPanel({
   const [busyRef, setBusyRef] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [recorded, setRecorded] = useState<string[]>([]);
+  // Recorded on the server: never offered again, even if the outbox still holds the entry.
+  const [doneRefs, setDoneRefs] = useState<string[]>([]);
   const busyLock = useRef(false);
 
-  const pinEntry = entries.find((e) => e.clientRef === pinFor) ?? null;
+  const shown = entries.filter((e) => !doneRefs.includes(e.clientRef));
+  const pinEntry = shown.find((e) => e.clientRef === pinFor) ?? null;
 
   async function record(entry: OutboxEntry, approverPin: string) {
-    if (busyLock.current || !entry.offline) return;
+    if (busyLock.current) return;
+    if (!entry.offline) {
+      setPinFor(null);
+      setErrors((prev) => ({ ...prev, [entry.clientRef]: MISSING_OFFLINE_MESSAGE }));
+      return;
+    }
     busyLock.current = true;
     setPinFor(null);
     setBusyRef(entry.clientRef);
@@ -69,7 +71,7 @@ export function ReviewPanel({
           ...entry.input,
           clientRef: entry.clientRef,
           offline: entry.offline,
-          override: { approverPin, reason: overrideReason(entry) },
+          override: { approverPin, reason: reasonOf(entry).trim().slice(0, 500) },
         }),
         PAYMENT_DEADLINE_MS,
       );
@@ -78,6 +80,7 @@ export function ReviewPanel({
         return;
       }
       setRecorded((prev) => [...prev, res.orderNumber]);
+      setDoneRefs((prev) => [...prev, entry.clientRef]);
       try {
         await remove(entry.clientRef);
       } catch {
@@ -102,7 +105,7 @@ export function ReviewPanel({
     >
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[92dvh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
-          <h2 className="text-lg font-bold text-sidebar">บิลที่ต้องตรวจ ({entries.length})</h2>
+          <h2 className="text-lg font-bold text-sidebar">บิลที่ต้องตรวจ ({shown.length})</h2>
           <button
             type="button"
             onClick={onClose}
@@ -122,10 +125,10 @@ export function ReviewPanel({
               บันทึกแล้ว ({n})
             </p>
           ))}
-          {entries.length === 0 && recorded.length === 0 && (
+          {shown.length === 0 && recorded.length === 0 && (
             <p className="text-center text-base text-muted-foreground py-10">ไม่มีบิลที่ต้องตรวจ</p>
           )}
-          {entries.map((e) => {
+          {shown.map((e) => {
             const queue = deviceQueueOf(e);
             const busy = busyRef === e.clientRef;
             const canRecord = e.reviewCode !== "product_missing";
