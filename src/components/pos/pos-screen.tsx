@@ -54,6 +54,8 @@ import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
 import { ReviewPanel } from "./review-panel";
+import { useCartDraft } from "./use-cart-draft";
+import type { CartDraft } from "@/lib/offline/cart-draft";
 
 const MAX_DISCOUNT_PIN_ATTEMPTS = 5;
 /** The online attempt's crash backup is best-effort: a slow device store never holds up a sale. */
@@ -173,6 +175,24 @@ export function PosScreen({
   const lastTryRef = useRef<{ clientRef: string; input: SaleInput; display: SaleDisplay } | null>(
     null
   );
+  // The cart in progress is kept on the device so a reload brings it back (spec call 16). The
+  // draft never holds the manager PIN: a restored discount that needs approval has no approval
+  // (hasApproverPin is false), so the cart asks for it again like a resumed held bill's.
+  const draftDiscount = useMemo(
+    () => (discountType === null ? null : { type: discountType, value: discountValue, reason: discountReason }),
+    [discountType, discountValue, discountReason]
+  );
+  const { discard: discardDraft } = useCartDraft({
+    tenantId,
+    sellerId,
+    items: cartItems,
+    orderType,
+    paymentMethod,
+    customer,
+    activeHeld,
+    discount: draftDiscount,
+    onRestore: restoreDraft,
+  });
   const heartbeat = useHeartbeat();
   // C1's no-crying-wolf rule: offline only after two failed checks (or the browser says so).
   const online = heartbeat.connectivity.status === "online";
@@ -368,7 +388,24 @@ export function PosScreen({
     setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
   }
 
+  function restoreDraft(d: CartDraft) {
+    setCartItems(repriceFromMenu(d.items));
+    setOrderType(d.orderType);
+    setPaymentMethod(d.paymentMethod);
+    setCustomer(d.customer);
+    if (d.discount) {
+      setDiscountType(d.discount.type);
+      setDiscountValue(d.discount.value);
+      setDiscountReason(d.discount.reason);
+    }
+    setActiveHeld(d.activeHeld);
+    // The held bill's loaded items are not known any more: treat it as edited (never loses edits).
+    setLoadedSnapshot(null);
+    setError("กู้ตะกร้าที่ค้างไว้");
+  }
+
   function clearCart() {
+    discardDraft();
     attemptRef.current = null;
     setUncertain(false);
     setLocalUnresolved(null);
@@ -397,6 +434,7 @@ export function PosScreen({
   // A sale is done: show its numbers and empty the cart. Shared by a normal success and by a
   // payment that ended without an answer and turned out (checkOrderSaved) to be saved.
   function applySuccess(sale: SavedSale) {
+    discardDraft();
     attemptRef.current = null;
     setUncertain(false);
     setLocalUnresolved(null);
@@ -547,6 +585,7 @@ export function PosScreen({
   // A sale stored on the device: show its queue number and empty the cart (spec goal 2). Called
   // only once the outbox write has resolved.
   function showOfflineResult(result: OfflineResult, clientRef: string) {
+    discardDraft();
     attemptRef.current = null;
     lastTryRef.current = null;
     setUncertain(false);
@@ -936,6 +975,7 @@ export function PosScreen({
   }
 
   function resetAfterPark(queueNumber: number, customerLabel: string | null, saved: boolean) {
+    discardDraft();
     setCartItems([]);
     setCustomer(null);
     resetDiscount();
@@ -947,7 +987,7 @@ export function PosScreen({
     setLastCashTender(null);
     setLastOffline(null);
     setLastHeld({ queueNumber, customerLabel, saved });
-    setResultShownAt(Date.now());
+    setResultShownAt(eventTime());
     router.refresh();
   }
 
