@@ -41,6 +41,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# the shop's own cost/price data (owner's Excel files) — stays on this PC, never on GitHub
+/shop-data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
