@@ -7,6 +7,7 @@ import {
   MAX_QTY,
   priceLines,
   priceLinesAsCharged,
+  isValidCartChoices,
   type CatalogModifier,
   type CatalogOption,
   type PricedLine,
@@ -38,7 +39,8 @@ async function loadPricingCatalog(
       typeof item.totalPrice !== "number" ||
       !Array.isArray(item.selectedModifiers) ||
       item.selectedModifiers.length > MAX_OPTIONS_PER_LINE ||
-      item.selectedModifiers.some((m) => typeof m?.optionId !== "string")
+      item.selectedModifiers.some((m) => typeof m?.optionId !== "string") ||
+      !isValidCartChoices(item.choices)
     ) {
       return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
     }

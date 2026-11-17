@@ -64,6 +64,23 @@ export type PricingCatalog = {
   stock: StockCatalog;
 };
 
+/** Shape check for a client's `choices` (undefined is fine: carts from before D1 have none). */
+export function isValidCartChoices(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+  const { slots, sweetness } = value as { slots?: unknown; sweetness?: unknown };
+  if (!Array.isArray(slots) || slots.length > 8) return false;
+  for (const s of slots) {
+    if (typeof s !== "object" || s === null) return false;
+    const { groupId, memberId } = s as { groupId?: unknown; memberId?: unknown };
+    if (typeof groupId !== "string" || typeof memberId !== "string") return false;
+  }
+  if (sweetness === undefined || sweetness === null) return true;
+  if (typeof sweetness !== "object") return false;
+  const { levelId, memberId } = sweetness as { levelId?: unknown; memberId?: unknown };
+  return typeof levelId === "string" && (memberId === null || typeof memberId === "string");
+}
+
 /** Keeps only the ids from the client's choices: its labels and prices are never trusted. */
 function toLineChoices(choices?: CartChoices): LineChoices | undefined {
   if (!choices) return undefined;
@@ -195,10 +212,15 @@ export function priceLinesAsCharged(
     if (!product) return { error: "product_missing" };
 
     const server = catalogLine(item, catalog);
-    // Stock still comes from the catalog even when the price is as charged; when the line can't be
-    // resolved (a stale choice) it deducts nothing rather than blocking the bill.
-    const resolved = resolveLine(product.id, item.quantity, toLineChoices(item.choices),
-      item.selectedModifiers.map((s) => s.optionId), catalog.stock);
+    // Stock still comes from the catalog even when the price is as charged; a line that still can't
+    // be resolved deducts nothing rather than blocking the bill.
+    const lineChoices = toLineChoices(item.choices);
+    const optionIds = item.selectedModifiers.map((s) => s.optionId);
+    let resolved = resolveLine(product.id, item.quantity, lineChoices, optionIds, catalog.stock);
+    // A special bean the menu no longer allows: keep the default bean, fixed materials and sweetener.
+    if ("error" in resolved && lineChoices) {
+      resolved = resolveLine(product.id, item.quantity, { ...lineChoices, slots: [] }, optionIds, catalog.stock);
+    }
     if ("error" in server || serverSatang === null) serverSatang = null;
     else serverSatang += server.unitSatang * item.quantity;
 

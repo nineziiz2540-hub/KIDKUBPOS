@@ -363,7 +363,7 @@ export function PosScreen({
           return {
             ...i,
             quantity: i.quantity + 1,
-            totalPrice: lineTotal(i.basePrice, i.selectedModifiers, i.quantity + 1),
+            totalPrice: lineTotal(i.basePrice, i.selectedModifiers, i.quantity + 1, i.choices),
           };
         });
       }
@@ -423,7 +423,7 @@ export function PosScreen({
       setCartItems((prev) =>
         prev.map((i) => {
           if (i.cartItemKey !== key) return i;
-          return { ...i, quantity: qty, totalPrice: lineTotal(i.basePrice, i.selectedModifiers, qty) };
+          return { ...i, quantity: qty, totalPrice: lineTotal(i.basePrice, i.selectedModifiers, qty, i.choices) };
         })
       );
     }
@@ -1222,7 +1222,7 @@ export function PosScreen({
         ...item,
         basePrice: product.price,
         selectedModifiers,
-        totalPrice: lineTotal(product.price, selectedModifiers, item.quantity),
+        totalPrice: lineTotal(product.price, selectedModifiers, item.quantity, item.choices),
       };
     });
   }

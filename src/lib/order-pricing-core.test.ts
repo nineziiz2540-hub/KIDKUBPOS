@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { priceLines, priceLinesAsCharged, STALE, type PricingCatalog } from "./order-pricing-core.ts";
+import { isValidCartChoices, priceLines, priceLinesAsCharged, STALE, type PricingCatalog } from "./order-pricing-core.ts";
 import type { CartItem } from "../types/app.ts";
 import { emptyStockCatalog, type StockCatalog } from "./stock/stock-core.ts";
 
@@ -202,4 +202,54 @@ test("as charged keeps the device total but still resolves stock", () => {
   assert.equal(r.serverSubtotal, 75);
   assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 18 }]);
   assert.equal(r.lines[0]!.choicesSnapshot.slots[0]!.memberId, "m_kenya");
+});
+
+test("a specialty bean is charged per cup on quantity 2", () => {
+  const r = priceLines([beanItem("m_kenya", 150, { quantity: 2 })], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in r));
+  assert.equal(r.lines[0]!.lineTotal, 150);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 36 }]);
+});
+
+test("a slot_add option charges the specialty price twice per cup and adds the bean stock", () => {
+  const stock = beanStock();
+  stock.optionEffects.set("pearl", [{ kind: "slot_add", groupId: "beans", qty: 9 }]);
+  const r = priceLines(
+    [beanItem("m_kenya", 100, { selectedModifiers: item(["small", "pearl"], 0).selectedModifiers })],
+    catalog({ stock })
+  );
+  assert.ok(!("error" in r), JSON.stringify(r));
+  // 55 + pearl 5 + kenya 20 twice
+  assert.equal(r.lines[0]!.unitPrice, 100);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 27 }]);
+});
+
+test("as charged keeps default stock and snapshot when the special bean is no longer allowed", () => {
+  const stock = beanStock();
+  stock.recipes.set("latte", [
+    { kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_house", allowSpecial: false },
+    { kind: "fixed", materialId: "milk", qty: 100 },
+  ]);
+  const r = priceLinesAsCharged([beanItem("m_kenya", 75)], catalog({ stock }));
+  assert.ok(!("error" in r));
+  assert.deepEqual(r.lines[0]!.stock, [
+    { materialId: "mat_m_house", qty: 18 },
+    { materialId: "milk", qty: 100 },
+  ]);
+  assert.equal(r.lines[0]!.choicesSnapshot.slots[0]!.memberId, "m_house");
+  assert.equal(r.serverSubtotal, null);
+});
+
+test("isValidCartChoices shape-checks the client's choices", () => {
+  assert.equal(isValidCartChoices(undefined), true);
+  assert.equal(isValidCartChoices({ slots: [{ groupId: "g", memberId: "m" }], sweetness: null }), true);
+  assert.equal(isValidCartChoices({ slots: [], sweetness: { levelId: "l", memberId: null } }), true);
+  assert.equal(isValidCartChoices(1), false);
+  assert.equal(isValidCartChoices(null), false);
+  assert.equal(isValidCartChoices({ slots: 1 }), false);
+  assert.equal(isValidCartChoices({ slots: {} }), false);
+  assert.equal(isValidCartChoices({ slots: [null] }), false);
+  assert.equal(isValidCartChoices({ slots: [{ groupId: "g" }] }), false);
+  assert.equal(isValidCartChoices({ slots: Array.from({ length: 9 }, () => ({ groupId: "g", memberId: "m" })) }), false);
+  assert.equal(isValidCartChoices({ slots: [], sweetness: { levelId: 1 } }), false);
 });

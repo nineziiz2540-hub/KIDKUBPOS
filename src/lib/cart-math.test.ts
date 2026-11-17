@@ -29,3 +29,13 @@ test("cart unitPrice adds the specialty price", () => {
   assert.equal(unitPrice(65, [], { slots: [], slotAddGroupIds: [], sweetness: null }), 65);
   assert.equal(unitPrice(65, []), 65);
 });
+
+test("lineTotal keeps the specialty price per cup", () => {
+  const choices = {
+    slots: [{ groupId: "beans", memberId: "k", label: "Kenya", tier: "special" as const, priceDelta: 20 }],
+    slotAddGroupIds: [],
+    sweetness: null,
+  };
+  assert.equal(lineTotal(65, [], 2, choices), (65 + 20) * 2);
+  assert.equal(lineTotal(65, [], 2), 130);
+});

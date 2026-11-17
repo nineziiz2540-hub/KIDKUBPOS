@@ -5,8 +5,13 @@ import type { CartChoices } from "../types/app.ts";
 import { toSatang } from "./cash.ts";
 import { cupPriceDeltaSatang } from "./stock/stock-core.ts";
 
-function unitSatang(basePrice: number, modifiers: { priceDelta: number }[]): number {
-  return modifiers.reduce((sum, m) => sum + toSatang(m.priceDelta), toSatang(basePrice));
+function unitSatang(
+  basePrice: number,
+  modifiers: { priceDelta: number }[],
+  choices?: CartChoices
+): number {
+  const specialty = choices ? cupPriceDeltaSatang(choices.slots, choices.slotAddGroupIds) : 0;
+  return modifiers.reduce((sum, m) => sum + toSatang(m.priceDelta), toSatang(basePrice)) + specialty;
 }
 
 /** Price of one unit: the menu price plus every chosen option's delta plus any specialty bean price. */
@@ -15,17 +20,17 @@ export function unitPrice(
   modifiers: { priceDelta: number }[],
   choices?: CartChoices
 ): number {
-  const specialty = choices ? cupPriceDeltaSatang(choices.slots, choices.slotAddGroupIds) : 0;
-  return (unitSatang(basePrice, modifiers) + specialty) / 100;
+  return unitSatang(basePrice, modifiers, choices) / 100;
 }
 
 /** A cart line's total: unit price × quantity. */
 export function lineTotal(
   basePrice: number,
   modifiers: { priceDelta: number }[],
-  quantity: number
+  quantity: number,
+  choices?: CartChoices
 ): number {
-  return (unitSatang(basePrice, modifiers) * quantity) / 100;
+  return (unitSatang(basePrice, modifiers, choices) * quantity) / 100;
 }
 
 /** Sum of the cart's line totals. */
