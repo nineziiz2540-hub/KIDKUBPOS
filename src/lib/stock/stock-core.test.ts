@@ -113,16 +113,49 @@ test("a special bean where the menu forbids it is stale", () => {
   assert.deepEqual(r, { error: STOCK_STALE });
 });
 
-test("an unknown member or level is stale", () => {
-  assert.deepEqual(
-    resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "nope" }] }, [], cat),
-    { error: STOCK_STALE });
-  assert.deepEqual(
-    resolveLine("latte", 1, { sweetness: { levelId: "nope", memberId: null } }, [], cat),
-    { error: STOCK_STALE });
+test("an unknown member or level falls back to the defaults", () => {
+  const plain = ok(resolveLine("latte", 1, undefined, [], cat));
+  const r = ok(resolveLine("latte", 1, {
+    slots: [{ groupId: "beans", memberId: "nope" }], sweetness: { levelId: "nope", memberId: null },
+  }, [], cat));
+  assert.deepEqual(r.stock, plain.stock);
+  assert.equal(r.priceDeltaSatang, 0);
+});
+
+test("a known sweetener member that is neither default nor allowed is stale", () => {
   assert.deepEqual(
     resolveLine("thai_tea", 1, { sweetness: { levelId: "less", memberId: "m_mix" } }, [], cat),
     { error: STOCK_STALE });
+});
+
+test("a vanished sweetener member or group skips the sweetener, never refuses", () => {
+  const noMember = build();
+  noMember.groups.get("sweet")!.members = noMember.groups.get("sweet")!.members.filter((m) => m.id !== "m_syrup");
+  const a = ok(resolveLine("latte", 1, undefined, [], noMember));
+  assert.deepEqual(a.stock, sorted([["ice", 150], ["med", 18], ["milk", 180]]));
+  assert.deepEqual(a.snapshot.sweetness, { levelId: "normal", levelName: "หวานปกติ", memberId: "m_syrup", label: null });
+  const noGroup = build();
+  noGroup.groups.delete("sweet");
+  const b = ok(resolveLine("latte", 1, undefined, [], noGroup));
+  assert.deepEqual(b.stock, sorted([["ice", 150], ["med", 18], ["milk", 180]]));
+});
+
+test("a no-special menu never defaults to a special bean", () => {
+  const c = build();
+  const g = c.groups.get("beans")!;
+  g.members = g.members.map((m) => ({ ...m, isDefault: m.id === "m_kenya" }));
+  c.recipes.set("espresso_house", [
+    { kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_kenya", allowSpecial: false },
+  ]);
+  const r = ok(resolveLine("espresso_house", 1, undefined, [], c));
+  assert.deepEqual(r.stock, sorted([["light", 18]]));
+  assert.equal(r.priceDeltaSatang, 0);
+  assert.equal(defaultSlotMember(g, { defaultMemberId: "m_kenya", allowSpecial: false })?.id, "m_light");
+});
+
+test("a no-special menu accepts a chosen house bean", () => {
+  const r = ok(resolveLine("espresso_house", 1, { slots: [{ groupId: "beans", memberId: "m_dark" }] }, [], cat));
+  assert.deepEqual(r.stock, sorted([["dark", 18]]));
 });
 
 test("a pre-D1 cart line (no choices) resolves with defaults", () => {

@@ -53,14 +53,19 @@ export type ResolvedLine = {
 
 export const STOCK_STALE = "รายการเมนูมีการเปลี่ยนแปลง กรุณาเลือกใหม่";
 
-/** Slot default: the line's own default (if still a member) → member flagged default → first house member → none. */
+/**
+ * Slot default: the line's own default (if still a member) → member flagged default → first house
+ * member → none. When the line forbids specials (allowSpecial === false) a special default is skipped.
+ */
 export function defaultSlotMember(
   group: ChoiceGroup,
-  line: { defaultMemberId: string | null }
+  line: { defaultMemberId: string | null; allowSpecial?: boolean }
 ): GroupMember | null {
-  const own = line.defaultMemberId && group.members.find((m) => m.id === line.defaultMemberId);
+  const usable = (m: GroupMember | undefined) =>
+    m && (line.allowSpecial !== false || m.tier !== "special") ? m : null;
+  const own = usable(group.members.find((m) => m.id === line.defaultMemberId));
   if (own) return own;
-  const flagged = group.members.find((m) => m.isDefault);
+  const flagged = usable(group.members.find((m) => m.isDefault));
   if (flagged) return flagged;
   const houses = group.members.filter((m) => m.tier === "house").sort((a, b) => a.sortOrder - b.sortOrder);
   return houses[0] ?? null;
@@ -115,14 +120,10 @@ export function resolveLine(
     const group = catalog.groups.get(line.groupId);
     if (!group || group.members.length === 0) continue;
     const chosenId = choices?.slots?.find((s) => s.groupId === line.groupId)?.memberId;
-    let member: GroupMember | null;
-    if (chosenId !== undefined) {
-      member = group.members.find((m) => m.id === chosenId) ?? null;
-      if (!member) return stale;
-      if (member.tier === "special" && !line.allowSpecial) return stale;
-    } else {
-      member = defaultSlotMember(group, line);
-    }
+    // An unknown chosen member falls back to the default chain: never block a sale over stock data.
+    let member: GroupMember | null = group.members.find((m) => m.id === chosenId) ?? null;
+    if (member && member.tier === "special" && !line.allowSpecial) return stale;
+    member ??= defaultSlotMember(group, line);
     if (!member) continue;
     add(member.materialId, line.qty);
     resolvedSlots.push({ member });
@@ -150,24 +151,21 @@ export function resolveLine(
   const sweetness = catalog.productSweetness.get(productId);
   if (sweetness) {
     const chosen = choices?.sweetness ?? null;
-    let level: SweetnessLevel | null;
-    if (chosen) {
-      level = catalog.levels.find((l) => l.id === chosen.levelId) ?? null;
-      if (!level) return stale;
-    } else {
-      level = defaultLevel(catalog.levels, sweetness);
-    }
+
+    const level: SweetnessLevel | null = (chosen && catalog.levels.find((l) => l.id === chosen.levelId)) || defaultLevel(catalog.levels, sweetness);
     if (level) {
       if (level.isNone) {
         snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId: null, label: null };
       } else {
         const memberId = chosen?.memberId ?? sweetness.defaultMemberId;
         if (memberId !== sweetness.defaultMemberId && !sweetness.allowedMemberIds.includes(memberId)) return stale;
+        // A config gap (member or group gone) skips the sweetener stock instead of refusing the sale.
         const member = catalog.groups.get(sweetness.groupId)?.members.find((m) => m.id === memberId);
-        if (!member) return stale;
-        const table = sweetness.custom ?? catalog.standardSweetness;
-        add(member.materialId, table.get(`${member.id}:${level.id}`) ?? 0);
-        snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId: member.id, label: member.label };
+        if (member) {
+          const table = sweetness.custom ?? catalog.standardSweetness;
+          add(member.materialId, table.get(`${member.id}:${level.id}`) ?? 0);
+        }
+        snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId, label: member?.label ?? null };
       }
     }
   }
