@@ -122,10 +122,10 @@ test("an unknown member or level falls back to the defaults", () => {
   assert.equal(r.priceDeltaSatang, 0);
 });
 
-test("a known sweetener member that is neither default nor allowed is stale", () => {
-  assert.deepEqual(
-    resolveLine("thai_tea", 1, { sweetness: { levelId: "less", memberId: "m_mix" } }, [], cat),
-    { error: STOCK_STALE });
+test("a sweetener member that is not allowed for the menu falls back to its default, never stale", () => {
+  const r = ok(resolveLine("thai_tea", 1, { sweetness: { levelId: "less", memberId: "m_mix" } }, [], cat));
+  assert.equal(r.snapshot.sweetness?.memberId, "m_condensed");
+  assert.deepEqual(r.stock, sorted([["condensed", 20]]));
 });
 
 test("a vanished sweetener member or group skips the sweetener, never refuses", () => {

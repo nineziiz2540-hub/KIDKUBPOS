@@ -2,9 +2,16 @@
 // it (tenant-scoped, see src/lib/order-pricing.ts), recompute every line in integer satang and
 // enforce option links and required/single-select rules. No database access here, so the rules
 // can be unit-tested.
-import type { CartItem } from "../types/app.ts";
+import type { CartChoices, CartItem } from "../types/app.ts";
 import { toSatang } from "./cash.ts";
 import { MAX_NOTE_LENGTH, normalizeNote } from "./notes.ts";
+import {
+  resolveLine,
+  type ChoiceSnapshot,
+  type LineChoices,
+  type StockCatalog,
+  type StockLine,
+} from "./stock/stock-core.ts";
 
 export const MAX_LINES = 100;
 export const MAX_QTY = 999;
@@ -21,6 +28,9 @@ export type PricedLine = {
   lineTotal: number;
   modifiersSnapshot: { group: string; option: string; priceDelta: number }[] | null;
   note: string | null;
+  /** materials this line deducts (already multiplied by quantity) */
+  stock: StockLine[];
+  choicesSnapshot: ChoiceSnapshot;
 };
 
 export type CatalogProduct = {
@@ -51,7 +61,19 @@ export type PricingCatalog = {
   /** only this tenant's modifiers linked to the cart's products */
   modifiers: Map<string, CatalogModifier>;
   options: Map<string, CatalogOption>;
+  stock: StockCatalog;
 };
+
+/** Keeps only the ids from the client's choices: its labels and prices are never trusted. */
+function toLineChoices(choices?: CartChoices): LineChoices | undefined {
+  if (!choices) return undefined;
+  return {
+    slots: (choices.slots ?? []).map((s) => ({ groupId: s.groupId, memberId: s.memberId })),
+    sweetness: choices.sweetness
+      ? { levelId: choices.sweetness.levelId, memberId: choices.sweetness.memberId }
+      : null,
+  };
+}
 
 /**
  * One cart line priced from the catalog alone (its unit price in satang and the option snapshot),
@@ -61,7 +83,13 @@ function catalogLine(
   item: CartItem,
   catalog: PricingCatalog
 ):
-  | { product: CatalogProduct; unitSatang: number; snapshot: NonNullable<PricedLine["modifiersSnapshot"]> }
+  | {
+      product: CatalogProduct;
+      unitSatang: number;
+      snapshot: NonNullable<PricedLine["modifiersSnapshot"]>;
+      stock: StockLine[];
+      choicesSnapshot: ChoiceSnapshot;
+    }
   | { error: string } {
   const product = catalog.products.get(item.productId);
   if (!product || !product.is_active || product.archived_at !== null) return { error: STALE };
@@ -94,8 +122,12 @@ function catalogLine(
     if (!modifier.is_multi_select && count > 1) return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
   }
 
+  const resolved = resolveLine(product.id, item.quantity, toLineChoices(item.choices), [...seen], catalog.stock);
+  if ("error" in resolved) return { error: STALE };
+  unitSatang += resolved.priceDeltaSatang;
+
   if (unitSatang < 0) return { error: STALE };
-  return { product, unitSatang, snapshot };
+  return { product, unitSatang, snapshot, stock: resolved.stock, choicesSnapshot: resolved.snapshot };
 }
 
 function categoryName(product: CatalogProduct): string | null {
@@ -119,7 +151,7 @@ export function priceLines(
     if (!normalizedNote.ok) return { error: "หมายเหตุไม่ถูกต้อง (ไม่เกิน 200 ตัวอักษร)" };
     const priced = catalogLine(item, catalog);
     if ("error" in priced) return priced;
-    const { product, unitSatang, snapshot } = priced;
+    const { product, unitSatang, snapshot, stock, choicesSnapshot } = priced;
 
     const lineSatang = unitSatang * item.quantity;
     if (toSatang(item.totalPrice) !== lineSatang) return { error: STALE };
@@ -134,6 +166,8 @@ export function priceLines(
       lineTotal: lineSatang / 100,
       modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
       note: normalizedNote.note,
+      stock,
+      choicesSnapshot,
     });
   }
 
@@ -161,6 +195,10 @@ export function priceLinesAsCharged(
     if (!product) return { error: "product_missing" };
 
     const server = catalogLine(item, catalog);
+    // Stock still comes from the catalog even when the price is as charged; when the line can't be
+    // resolved (a stale choice) it deducts nothing rather than blocking the bill.
+    const resolved = resolveLine(product.id, item.quantity, toLineChoices(item.choices),
+      item.selectedModifiers.map((s) => s.optionId), catalog.stock);
     if ("error" in server || serverSatang === null) serverSatang = null;
     else serverSatang += server.unitSatang * item.quantity;
 
@@ -187,6 +225,8 @@ export function priceLinesAsCharged(
       lineTotal: lineSatang / 100,
       modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
       note: note !== "" ? note : null,
+      stock: "error" in resolved ? [] : resolved.stock,
+      choicesSnapshot: "error" in resolved ? { slots: [], sweetness: null } : resolved.snapshot,
     });
   }
 

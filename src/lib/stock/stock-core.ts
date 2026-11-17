@@ -51,6 +51,13 @@ export type ResolvedLine = {
   snapshot: ChoiceSnapshot;
 };
 
+export function emptyStockCatalog(): StockCatalog {
+  return {
+    recipes: new Map(), groups: new Map(), levels: [], standardSweetness: new Map(),
+    productSweetness: new Map(), optionEffects: new Map(),
+  };
+}
+
 export const STOCK_STALE = "รายการเมนูมีการเปลี่ยนแปลง กรุณาเลือกใหม่";
 
 /**
@@ -158,14 +165,20 @@ export function resolveLine(
         snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId: null, label: null };
       } else {
         const memberId = chosen?.memberId ?? sweetness.defaultMemberId;
-        if (memberId !== sweetness.defaultMemberId && !sweetness.allowedMemberIds.includes(memberId)) return stale;
+        const group = catalog.groups.get(sweetness.groupId);
+        // Sweeteners carry no price, so an unknown or not-allowed choice falls back to the menu's
+        // default instead of refusing the sale.
+        const chosenOk =
+          memberId === sweetness.defaultMemberId ||
+          (sweetness.allowedMemberIds.includes(memberId) && group?.members.some((m) => m.id === memberId));
+        const finalId = chosenOk ? memberId : sweetness.defaultMemberId;
         // A config gap (member or group gone) skips the sweetener stock instead of refusing the sale.
-        const member = catalog.groups.get(sweetness.groupId)?.members.find((m) => m.id === memberId);
+        const member = group?.members.find((m) => m.id === finalId);
         if (member) {
           const table = sweetness.custom ?? catalog.standardSweetness;
           add(member.materialId, table.get(`${member.id}:${level.id}`) ?? 0);
         }
-        snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId, label: member?.label ?? null };
+        snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId: finalId, label: member?.label ?? null };
       }
     }
   }

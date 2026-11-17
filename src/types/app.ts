@@ -8,6 +8,17 @@ export type SelectedModifier = {
   priceDelta: number;
 };
 
+/**
+ * What the cashier chose for a line's bean/sweetness (round D1). Labels, tier, priceDelta and
+ * slotAddGroupIds are display/cart-maths only: the server re-resolves everything from the catalog.
+ */
+export type CartChoices = {
+  slots: { groupId: string; memberId: string; label: string; tier: "house" | "special"; priceDelta: number }[];
+  /** groups that the line's selected options add to (slot_add effects), for the specialty price */
+  slotAddGroupIds: string[];
+  sweetness: { levelId: string; levelName: string; memberId: string | null; memberLabel: string | null } | null;
+};
+
 export type CartItem = {
   cartItemKey: string;
   productId: string;
@@ -17,6 +28,8 @@ export type CartItem = {
   selectedModifiers: SelectedModifier[];
   totalPrice: number; // (basePrice + sum(priceDelta)) * quantity
   note: string | null; // per-cup note, see src/lib/notes.ts
+  /** Absent on carts and offline outbox entries saved before round D1. */
+  choices?: CartChoices;
 };
 
 export type CreateOrderInput = {

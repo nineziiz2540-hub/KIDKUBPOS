@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { priceLines, priceLinesAsCharged, STALE, type PricingCatalog } from "./order-pricing-core.ts";
 import type { CartItem } from "../types/app.ts";
+import { emptyStockCatalog, type StockCatalog } from "./stock/stock-core.ts";
 
 const BAD = "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง";
 
-function catalog(overrides: { archived?: boolean; price?: number } = {}): PricingCatalog {
+function catalog(overrides: { archived?: boolean; price?: number; stock?: StockCatalog } = {}): PricingCatalog {
   return {
     products: new Map([
       [
@@ -32,6 +33,7 @@ function catalog(overrides: { archived?: boolean; price?: number } = {}): Pricin
       ["pearl", { id: "pearl", name: "ไข่มุก", price_delta: 5, modifier_id: "topping" }],
       ["foreign", { id: "foreign", name: "แปลก", price_delta: 0, modifier_id: "other" }],
     ]),
+    stock: overrides.stock ?? emptyStockCatalog(),
   };
 }
 
@@ -127,4 +129,77 @@ test("as charged: a note over 200 characters is cut, not refused", () => {
   const r = priceLinesAsCharged([item(["large"], 130, { note: "ก".repeat(201) })], catalog());
   assert.ok(!("error" in r));
   assert.equal(r.lines[0]!.note, "ก".repeat(200));
+});
+
+// ---- round D1: bean/sweetness choices and specialty prices ----
+
+function beanStock(): StockCatalog {
+  const stock = emptyStockCatalog();
+  const m = (id: string, tier: "house" | "special", priceDelta: number, isDefault = false) => ({
+    id, groupId: "beans", materialId: `mat_${id}`, label: id, tier, priceDelta, isDefault, sortOrder: 1,
+  });
+  stock.groups.set("beans", {
+    id: "beans", kind: "bean", name: "เมล็ด",
+    members: [m("m_house", "house", 0, true), m("m_kenya", "special", 20)],
+  });
+  stock.recipes.set("latte", [
+    { kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_house", allowSpecial: true },
+  ]);
+  return stock;
+}
+
+function beanItem(memberId: string | null, totalPrice: number, extra: Partial<CartItem> = {}): CartItem {
+  return item(["small"], totalPrice, {
+    quantity: 1,
+    ...(memberId
+      ? {
+          choices: {
+            slots: [{ groupId: "beans", memberId, label: "x", tier: "special", priceDelta: 20 }],
+            slotAddGroupIds: [],
+            sweetness: null,
+          },
+        }
+      : {}),
+    ...extra,
+  });
+}
+
+test("a specialty bean is part of the server price", () => {
+  const r = priceLines([beanItem("m_kenya", 75)], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in r));
+  assert.equal(r.lines[0]!.unitPrice, 75);
+  assert.equal(r.subtotal, 75);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 18 }]);
+  assert.equal(r.lines[0]!.choicesSnapshot.slots[0]!.memberId, "m_kenya");
+});
+
+test("a client that leaves out the specialty price is stale", () => {
+  assert.deepEqual(priceLines([beanItem("m_kenya", 55)], catalog({ stock: beanStock() })), { error: STALE });
+});
+
+test("a client cannot lie its way to a cheaper bean through display fields", () => {
+  const cheat = beanItem("m_kenya", 55, {
+    choices: { slots: [{ groupId: "beans", memberId: "m_kenya", label: "x", tier: "house", priceDelta: 0 }], slotAddGroupIds: [], sweetness: null },
+  });
+  assert.deepEqual(priceLines([cheat], catalog({ stock: beanStock() })), { error: STALE });
+});
+
+test("a cart line without choices (pre-D1) prices as before", () => {
+  const r = priceLines([item(["large", "pearl"], 140)], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in r));
+  assert.equal(r.lines[0]!.unitPrice, 70);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_house", qty: 36 }]);
+  const plain = priceLines([item(["large", "pearl"], 140)], catalog());
+  assert.ok(!("error" in plain));
+  assert.deepEqual(plain.lines[0]!.stock, []);
+  assert.deepEqual(plain.lines[0]!.choicesSnapshot, { slots: [], sweetness: null });
+});
+
+test("as charged keeps the device total but still resolves stock", () => {
+  const r = priceLinesAsCharged([beanItem("m_kenya", 60)], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in r));
+  assert.equal(r.subtotal, 60);
+  assert.equal(r.serverSubtotal, 75);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 18 }]);
+  assert.equal(r.lines[0]!.choicesSnapshot.slots[0]!.memberId, "m_kenya");
 });

@@ -13,6 +13,8 @@ import {
   type PricingCatalog,
 } from "@/lib/order-pricing-core";
 
+import { emptyStockCatalog } from "@/lib/stock/stock-core";
+
 export type { PricedLine };
 
 /** retry: the catalog couldn't be read (a database blip), so the same cart may work next time. */
@@ -88,7 +90,7 @@ async function loadPricingCatalog(
   }
 
   return {
-    catalog: { products: productMap, linkedModifiers, modifiers: modifierMap, options: optionMap },
+    catalog: { products: productMap, linkedModifiers, modifiers: modifierMap, options: optionMap, stock: emptyStockCatalog() },
   };
 }
 
