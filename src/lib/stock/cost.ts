@@ -9,8 +9,10 @@ export function sumCost(rows: { cost_total: number | string | null }[]): { cost:
   let missingLines = 0;
   for (const row of rows) {
     const raw = row.cost_total;
-    const n = raw === null ? NaN : Number(raw);
-    if (raw === null || !Number.isFinite(n)) missingLines += 1;
+    // "" and whitespace would otherwise coerce to 0 and pass as a real zero cost
+    const blank = raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
+    const n = blank ? NaN : Number(raw);
+    if (!Number.isFinite(n)) missingLines += 1;
     else cost += n;
   }
   return { cost, missingLines };

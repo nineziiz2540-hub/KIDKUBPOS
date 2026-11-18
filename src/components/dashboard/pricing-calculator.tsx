@@ -39,6 +39,7 @@ export function PricingCalculator({
 }) {
   const [productId, setProductId] = useState("");
   const [ingredientCost, setIngredientCost] = useState<number | null>(null);
+  const [costNote, setCostNote] = useState<string | null>(null);
   const [packagingCost, setPackagingCost] = useState(0);
   const [wastePct, setWastePct] = useState(5);
   const [targetGpPct, setTargetGpPct] = useState(65);
@@ -48,10 +49,18 @@ export function PricingCalculator({
   function handleProductChange(id: string) {
     setProductId(id);
     setIngredientCost(null);
+    setCostNote(null);
     if (!id) return;
     startTransition(async () => {
       const cost = await fetchProductCost(id);
       setIngredientCost(cost.ingredientCost);
+      setCostNote(
+        cost.unresolved
+          ? "คำนวณสูตรของเมนูนี้ไม่ได้ กรุณาตรวจสูตรและตัวเลือกวัตถุดิบ"
+          : cost.missingMaterials && cost.missingMaterials.length > 0
+            ? `ยังไม่ได้ตั้งต้นทุน: ${cost.missingMaterials.join(", ")} ตัวเลขอาจไม่ครบถ้วน`
+            : null
+      );
     });
   }
 
@@ -98,6 +107,7 @@ export function PricingCalculator({
               ? `฿${ingredientCost.toFixed(2)}`
               : "—"}
           </div>
+          {costNote && <p className="text-xs text-muted-foreground">{costNote}</p>}
         </div>
 
         {/* Inputs */}

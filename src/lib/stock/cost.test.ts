@@ -21,3 +21,10 @@ test("sumCost never multiplies by quantity", () => {
   const rows = [{ cost_total: 18, quantity: 3 }];
   assert.equal(sumCost(rows).cost, 18);
 });
+test("sumCost counts empty and whitespace-only strings as missing, not zero", () => {
+  assert.deepEqual(sumCost([{ cost_total: "" }, { cost_total: "   " }, { cost_total: 4 }]), { cost: 4, missingLines: 2 });
+});
+test("sumCost counts non-finite numbers and strings as missing", () => {
+  const rows = [{ cost_total: NaN }, { cost_total: Infinity }, { cost_total: -Infinity }, { cost_total: "Infinity" }, { cost_total: "NaN" }];
+  assert.deepEqual(sumCost(rows), { cost: 0, missingLines: 5 });
+});

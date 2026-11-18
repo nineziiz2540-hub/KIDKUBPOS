@@ -8,6 +8,11 @@ import type { Reduction } from "@/lib/held-bill-diff";
 import { UNCATEGORIZED_LABEL } from "@/lib/dashboard-labels";
 import { bangkokDayRange, bangkokMonthRange } from "@/lib/bangkok-time";
 import type { HistoryRow } from "@/lib/order-history";
+import { sumCost } from "@/lib/stock/cost";
+import { loadStockCatalog } from "@/lib/stock/catalog";
+import { defaultChoices } from "@/lib/stock/pos-choices";
+import { resolveLine } from "@/lib/stock/stock-core";
+import { buildProductCost, type MaterialCost } from "@/lib/stock/product-cost";
 
 // Re-exported so existing server-side callers can keep importing this
 // constant from dal.ts. Client components must import it from
@@ -178,6 +183,53 @@ async function getOrderItemsInRange(
         category_name: row.category_name,
         quantity: row.quantity,
         subtotal: row.subtotal,
+      });
+    }
+    if (page.length < DB_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+type OrderItemCostRow = OrderItemRangeRow & { cost_total: number | string | null };
+
+/**
+ * Same shape as getOrderItemsInRange plus `cost_total` (cost frozen at sale). Reads through the admin
+ * client, so callers MUST have passed canViewCosts first. The tenant filter stays on the query and
+ * pagination (stable order by id) keeps the no-silent-truncation guarantee.
+ */
+async function getOrderItemCostsInRange(
+  tenantId: string,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<OrderItemCostRow[]> {
+  const admin = createAdminClient();
+  const rows: OrderItemCostRow[] = [];
+
+  for (let from = 0; ; from += DB_PAGE_SIZE) {
+    const { data, error } = await admin
+      .from("order_items")
+      .select(
+        "product_id, product_name, category_name, quantity, subtotal, cost_total, orders!inner(tenant_id, status, created_at)"
+      )
+      .eq("orders.tenant_id", tenantId)
+      .eq("orders.status", "completed")
+      .gte("orders.created_at", rangeStart.toISOString())
+      .lt("orders.created_at", rangeEnd.toISOString())
+      .order("id")
+      .range(from, from + DB_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = data ?? [];
+    for (const row of page) {
+      rows.push({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        category_name: row.category_name,
+        quantity: row.quantity,
+        subtotal: row.subtotal,
+        cost_total: row.cost_total,
       });
     }
     if (page.length < DB_PAGE_SIZE) break;
@@ -486,51 +538,57 @@ export async function getModifiersForProduct(
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+/**
+ * Server-side gate for anything that reads cost: the caller must be an active owner/manager of THIS
+ * tenant. Cost is read through the admin client, so this check is the only thing between a Staff
+ * session and the numbers - never skip it.
+ */
+async function canViewCosts(tenantId: string): Promise<boolean> {
+  const profile = await getProfile();
+  return !!profile && profile.tenant_id === tenantId && (profile.role === "owner" || profile.role === "manager");
+}
+
+/**
+ * Cost of one cup at CURRENT material prices: the menu's default cup (fixed rows + default bean /
+ * matcha / sweetener slots) resolved by the same stock core the till uses, then priced.
+ */
 export async function getProductCost(tenantId: string, productId: string): Promise<ProductCost> {
-  const supabase = await createClient();
+  const empty: ProductCost = { productId, ingredientCost: 0, recipes: [] };
+  if (!(await canViewCosts(tenantId))) return empty;
+
+  const admin = createAdminClient();
 
   // Verify product belongs to this tenant
-  const { data: productCheck } = await supabase
+  const { data: productCheck } = await admin
     .from("products")
     .select("id")
     .eq("id", productId)
     .eq("tenant_id", tenantId)
-    .single();
+    .maybeSingle();
+  if (!productCheck) return empty;
 
-  if (!productCheck) return { productId, ingredientCost: 0, recipes: [] };
+  const loaded = await loadStockCatalog(admin, tenantId, [productId], []);
+  if ("error" in loaded) return { ...empty, unresolved: true };
+  const { catalog } = loaded;
 
-  const { data } = await supabase
-    .from("product_recipes")
-    .select("quantity_used, raw_materials(name, unit, cost_per_unit)")
-    .eq("product_id", productId);
+  const resolved = resolveLine(productId, 1, defaultChoices(productId, catalog), [], catalog);
+  if ("error" in resolved) return { ...empty, unresolved: true };
 
-  if (!data) return { productId, ingredientCost: 0, recipes: [] };
+  const materialIds = [...new Set(resolved.stock.map((l) => l.materialId))];
+  const materials = new Map<string, MaterialCost>();
+  if (materialIds.length > 0) {
+    const { data, error } = await admin
+      .from("raw_materials")
+      .select("id, name, unit, cost_per_unit")
+      .eq("tenant_id", tenantId)
+      .in("id", materialIds);
+    if (error) throw error;
+    for (const m of data ?? []) {
+      materials.set(m.id, { name: m.name, unit: m.unit, costPerUnit: Number(m.cost_per_unit) });
+    }
+  }
 
-  type RecipeRow = {
-    quantity_used: number;
-    raw_materials: { name: string; unit: string; cost_per_unit: number } | null;
-  };
-
-  const recipes = (data as RecipeRow[])
-    .filter((r) => r.raw_materials !== null)
-    .map((r) => {
-      const mat = r.raw_materials!;
-      const quantityUsed = Number(r.quantity_used);
-      const costPerUnit = Number(mat.cost_per_unit);
-      return {
-        materialName: mat.name,
-        unit: mat.unit,
-        quantityUsed,
-        costPerUnit,
-        lineCost: quantityUsed * costPerUnit,
-      };
-    });
-
-  return {
-    productId,
-    ingredientCost: recipes.reduce((sum, r) => sum + r.lineCost, 0),
-    recipes,
-  };
+  return buildProductCost(productId, resolved.stock, materials);
 }
 
 export async function getSalesByHour(
@@ -696,45 +754,13 @@ export type CostProfitSummary = {
   hasUnrecipedItems: boolean;
 };
 
-/**
- * Batch-computes each product's unit cost (sum of recipe line costs) for a
- * set of product ids in a single query. `missing` holds the ids that had no
- * recipe rows at all — callers decide how to treat that (e.g. flag it, or
- * treat it as ฿0 cost) rather than this helper deciding for them.
- */
-async function unitCostByProductId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  productIds: string[]
-): Promise<{ costs: Map<string, number>; missing: Set<string> }> {
-  const costs = new Map<string, number>();
-  if (productIds.length === 0) return { costs, missing: new Set() };
-
-  const { data: recipeRows } = await supabase
-    .from("product_recipes")
-    .select("product_id, quantity_used, raw_materials(cost_per_unit)")
-    .in("product_id", productIds);
-
-  type RecipeRow = {
-    product_id: string;
-    quantity_used: number;
-    raw_materials: { cost_per_unit: number } | null;
-  };
-  for (const r of (recipeRows ?? []) as RecipeRow[]) {
-    if (!r.raw_materials) continue;
-    const lineCost = Number(r.quantity_used) * Number(r.raw_materials.cost_per_unit);
-    costs.set(r.product_id, (costs.get(r.product_id) ?? 0) + lineCost);
-  }
-
-  const missing = new Set(productIds.filter((id) => !costs.has(id)));
-  return { costs, missing };
-}
-
 export async function getCostProfit(
   tenantId: string,
   startDate: string, // "YYYY-MM-DD" Bangkok
   endDate: string,   // "YYYY-MM-DD" Bangkok (inclusive)
   daysInPeriod: number
 ): Promise<CostProfitSummary> {
+  if (!(await canViewCosts(tenantId))) throw new Error("Forbidden: cost is owner/manager only");
   const supabase = await createClient();
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
@@ -762,24 +788,10 @@ export async function getCostProfit(
     };
   }
 
-  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
-
-  const qtyByProduct = new Map<string, number>();
-  for (const item of items) {
-    if (!item.product_id) continue;
-    qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + item.quantity);
-  }
-  const productIds = [...qtyByProduct.keys()];
-
-  const { costs: costPerProduct, missing } = await unitCostByProductId(supabase, productIds);
-
-  let cogs = 0;
-  for (const [productId, qty] of qtyByProduct) {
-    const unitCost = costPerProduct.get(productId);
-    if (unitCost === undefined) continue;
-    cogs += unitCost * qty;
-  }
-  const hasUnrecipedItems = missing.size > 0;
+  // Cost frozen at sale: a line with no cost (null) is "missing", never counted as zero.
+  const items = await getOrderItemCostsInRange(tenantId, rangeStart, rangeEnd);
+  const { cost: cogs, missingLines } = sumCost(items);
+  const hasUnrecipedItems = missingLines > 0;
 
   const totalCost = cogs + fixedCostShare;
 
@@ -859,10 +871,10 @@ export async function getMenuProfitBreakdown(
   startDate: string, // "YYYY-MM-DD" Bangkok
   endDate: string    // "YYYY-MM-DD" Bangkok (inclusive)
 ): Promise<MenuProfitRow[]> {
-  const supabase = await createClient();
+  if (!(await canViewCosts(tenantId))) throw new Error("Forbidden: cost is owner/manager only");
   const { rangeStart, rangeEnd } = bangkokRange(startDate, endDate);
 
-  const items = await getOrderItemsInRange(supabase, tenantId, rangeStart, rangeEnd);
+  const items = await getOrderItemCostsInRange(tenantId, rangeStart, rangeEnd);
 
   // Group by product_id, not product_name — see getTopProducts for why.
   const byProduct = new Map<
@@ -873,30 +885,28 @@ export async function getMenuProfitBreakdown(
       category_name: string | null;
       qty: number;
       revenue: number;
+      costRows: { cost_total: number | string | null }[];
     }
   >();
   for (const row of items) {
     const key = row.product_id ?? row.product_name;
+    const costRows: { cost_total: number | string | null }[] = byProduct.get(key)?.costRows ?? [];
     const prev = byProduct.get(key) ?? { qty: 0, revenue: 0 };
+    costRows.push({ cost_total: row.cost_total });
     byProduct.set(key, {
       productId: row.product_id,
       productName: row.product_name,
       category_name: row.category_name,
       qty: prev.qty + row.quantity,
       revenue: prev.revenue + Number(row.subtotal),
+      costRows,
     });
   }
 
-  const productIds = [...byProduct.values()]
-    .map((v) => v.productId)
-    .filter((id): id is string => id !== null);
-
-  const { costs: unitCostMap } = await unitCostByProductId(supabase, productIds);
-
   return [...byProduct.values()]
     .map((v) => {
-      const unitCost = v.productId ? unitCostMap.get(v.productId) ?? 0 : 0;
-      const cost = unitCost * v.qty;
+      // frozen cost of every line of this menu; lines without a cost add nothing (as before)
+      const { cost } = sumCost(v.costRows);
       const profit = v.revenue - cost;
       return {
         productName: v.productName,

@@ -86,6 +86,10 @@ export type ProductCost = {
     costPerUnit: number;
     lineCost: number;
   }[];
+  /** materials in the cup with no usable cost (0 / unknown) — the total is then understated */
+  missingMaterials?: string[];
+  /** the menu's recipe could not be resolved (e.g. a chosen member was removed) */
+  unresolved?: boolean;
 };
 
 export type LowStockAlert = {
