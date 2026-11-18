@@ -2,7 +2,9 @@
 -- Run the whole file through execute_sql AFTER the migration. It never commits: it ends with
 -- raise exception 'RESULT <json>', so every row it creates is rolled back. Every key must be true.
 -- The migration's two data steps (opening rows, frozen costs) only touch rows that exist when it
--- runs, so the test replays the same two statements (verbatim) over the rows it builds itself.
+-- runs, so the test replays them over the rows it builds itself. The two replayed blocks mirror the
+-- migration's lines 130-148 (opening rows, frozen old costs), with only the alias (r2) and the
+-- test-tenant / test-order filter added.
 do $$
 declare
   r jsonb := '{}';
@@ -11,7 +13,7 @@ declare
   ta uuid;
   pa uuid; pb uuid;
   oa uuid;
-  m1 uuid; m2 uuid; m3 uuid; m4 uuid;
+  m1 uuid; m2 uuid; m3 uuid; m4 uuid; m5 uuid;
   g1 uuid; g2 uuid;
   cgm1 uuid; cgm2 uuid;
   lv1 uuid;
@@ -47,6 +49,9 @@ begin
   insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, min_stock_alert)
   values (ta, 'นมผง', 'g', 0.1, 0, 0) returning id into m4;
 
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, min_stock_alert)
+  values (ta, 'ติดลบ', 'g', 0.2, -4, 0) returning id into m5;
+
   -- old-style ledger row, as the deployed app wrote it (legacy by definition)
   insert into public.inventory_transactions (tenant_id, raw_material_id, type, quantity, legacy)
   values (ta, m3, 'deduct', -2, true);
@@ -62,7 +67,7 @@ begin
     (tenant_id, raw_material_id, type, quantity, unit_cost, note, occurred_at)
   select rm.tenant_id, rm.id, 'opening', rm.current_stock, rm.cost_per_unit, 'ยอดตั้งต้นรอบ D', now()
   from public.raw_materials rm
-  where rm.current_stock > 0
+  where rm.current_stock <> 0 and rm.tenant_id = ta
     and not exists (select 1 from public.inventory_transactions t
                     where t.raw_material_id = rm.id and t.type = 'opening' and not t.legacy);
   r := r || jsonb_build_object('opening_rows',
@@ -71,18 +76,24 @@ begin
     and (select count(*) = 0 from public.inventory_transactions where raw_material_id = m2)
     and (select current_stock = (select coalesce(sum(quantity), 0) from public.inventory_transactions
                                  where raw_material_id = m1 and not legacy)
-         from public.raw_materials where id = m1));
+         from public.raw_materials where id = m1)
+    -- negative stock gets a negative opening row and the balance equals the non-legacy ledger sum
+    and (select count(*) = 1 and bool_and(quantity = -4 and unit_cost = 0.2)
+         from public.inventory_transactions where raw_material_id = m5 and type = 'opening')
+    and (select current_stock = (select coalesce(sum(quantity), 0) from public.inventory_transactions
+                                 where raw_material_id = m5 and not legacy)
+         from public.raw_materials where id = m5));
 
   -- ── old rows are legacy; the new check accepts old types only for legacy rows ──
+  -- a type outside the list is still rejected unless the row is legacy
   ok := false;
   begin
     insert into public.inventory_transactions (tenant_id, raw_material_id, type, quantity)
-    values (ta, m3, 'deduct', -1);
+    values (ta, m3, 'bogus', -1);
   exception when check_violation then ok := true; end;
   r := r || jsonb_build_object('old_rows_legacy',
     ok
-    and (select legacy from public.inventory_transactions where raw_material_id = m3 and type = 'deduct')
-    and (select count(*) = 0 from public.inventory_transactions where type = 'deduct' and not legacy));
+    and (select legacy from public.inventory_transactions where raw_material_id = m3 and type = 'deduct' and quantity = -2));
 
   -- the old type check is gone: opening and sale rows insert fine
   ok := false;
@@ -92,6 +103,15 @@ begin
     ok := true;
   exception when others then ok := false; end;
   r := r || jsonb_build_object('old_type_check_gone', ok);
+
+  -- the deployed pre-D1 app still writes non-legacy 'deduct' rows
+  ok := false;
+  begin
+    insert into public.inventory_transactions (tenant_id, raw_material_id, type, quantity)
+    values (ta, m3, 'deduct', -1);
+    ok := true;
+  exception when others then ok := false; end;
+  r := r || jsonb_build_object('old_app_deduct_still_allowed', ok);
 
   -- the unique sale-per-item index (non-legacy) rejects a repeat
   insert into public.orders (tenant_id, created_by, status, payment_method, total, subtotal, shift_id)
@@ -219,7 +239,7 @@ begin
     join public.raw_materials rm on rm.id = pr.raw_material_id
     group by pr.product_id
   ) r2
-  where r2.product_id = oi.product_id and oi.cost_total is null;
+  where r2.product_id = oi.product_id and oi.cost_total is null and oi.order_id = oa;
   select cost_total into v from public.order_items where order_id = oa and product_id = pb;
   r := r || jsonb_build_object('frozen_cost',
     v = 18 and (select cost_total is null from public.order_items where id = item1));

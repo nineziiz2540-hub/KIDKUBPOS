@@ -108,8 +108,10 @@ alter table public.inventory_transactions
 update public.inventory_transactions set legacy = true, occurred_at = coalesce(created_at, occurred_at);
 
 alter table public.inventory_transactions drop constraint inventory_transactions_type_check;
+-- 'deduct' stays allowed: the deployed pre-D1 app's deduct_stock_for_order writes non-legacy 'deduct' rows;
+-- nothing writes it after Task 14 drops that function.
 alter table public.inventory_transactions add constraint inventory_transactions_type_check
-  check (legacy or type in ('opening','sale','void_restock','waste','receive','adjust'));
+  check (legacy or type in ('opening','sale','void_restock','waste','receive','adjust','deduct'));
 
 create unique index inventory_transactions_one_per_item_material_type
   on public.inventory_transactions (order_item_id, raw_material_id, type)
@@ -125,12 +127,12 @@ alter table public.order_items
   add column choices jsonb null,
   add column void_made boolean null;
 
--- ── opening rows: one per material with positive stock (idempotent) ────────
+-- ── opening rows: one per material with non-zero stock, negative included (idempotent) ────────
 insert into public.inventory_transactions
   (tenant_id, raw_material_id, type, quantity, unit_cost, note, occurred_at)
 select rm.tenant_id, rm.id, 'opening', rm.current_stock, rm.cost_per_unit, 'ยอดตั้งต้นรอบ D', now()
 from public.raw_materials rm
-where rm.current_stock > 0
+where rm.current_stock <> 0
   and not exists (select 1 from public.inventory_transactions t
                   where t.raw_material_id = rm.id and t.type = 'opening' and not t.legacy);
 
