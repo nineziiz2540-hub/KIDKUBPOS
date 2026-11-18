@@ -45,7 +45,7 @@ begin
   values (ta, m, 'opening', 1000, 0.05), (ta, m2, 'opening', -20, 0.05);
 
   -- ── Receive with a price: average blends, row keeps the lot's unit cost ──
-  l1 := public.stock_receive(ta, ua, m, 2000, 120);
+  l1 := public.stock_receive(ta, ua, m, 2000, 120, '  lot A  ');
   select * into v from public.raw_materials where id = m;
   r := r || jsonb_build_object('receive_with_price',
     l1 is not null and v.current_stock = 3000 and v.cost_per_unit = 0.056667
@@ -54,7 +54,7 @@ begin
          from public.inventory_transactions where id = l1));
 
   -- ── Receive without a price: average kept, row records it ───────────────
-  l2 := public.stock_receive(ta, ua, m, 500, null);
+  l2 := public.stock_receive(ta, ua, m, 500, null, null);
   select * into v from public.raw_materials where id = m;
   r := r || jsonb_build_object('receive_without_price_keeps_avg',
     v.current_stock = 3500 and v.cost_per_unit = 0.056667
@@ -62,22 +62,22 @@ begin
 
   -- ── Staff: no price forbidden, no-price receive fine ────────────────────
   begin
-    perform public.stock_receive(ta, us, m, 10, 5);
+    perform public.stock_receive(ta, us, m, 10, 5, null);
     ok := false;
   exception when others then
     ok := sqlerrm = 'forbidden_price' and (select current_stock = 3500 from public.raw_materials where id = m);
   end;
   r := r || jsonb_build_object('staff_price_forbidden', ok);
-  l3 := public.stock_receive(ta, us, m, 100, null);
+  l3 := public.stock_receive(ta, us, m, 100, null, null);
   r := r || jsonb_build_object('staff_receive_ok',
     (select current_stock = 3600 and cost_per_unit = 0.056667 from public.raw_materials where id = m)
     and (select created_by = us from public.inventory_transactions where id = l3));
 
   -- ── Balance <= 0: the new lot's unit cost; a free lot (price 0) is a free lot ──
-  perform public.stock_receive(ta, ua, m2, 1000, 60);
+  perform public.stock_receive(ta, ua, m2, 1000, 60, null);
   r := r || jsonb_build_object('negative_balance_uses_lot_cost',
     (select current_stock = 980 and cost_per_unit = 0.06 from public.raw_materials where id = m2));
-  perform public.stock_receive(ta, um, m2, 980, 0);
+  perform public.stock_receive(ta, um, m2, 980, 0, null);
   r := r || jsonb_build_object('free_receive_dilutes',
     (select current_stock = 1960 and cost_per_unit = 0.03 from public.raw_materials where id = m2)
     and exists (select 1 from public.inventory_transactions
@@ -85,25 +85,48 @@ begin
 
   -- ── Rejections ──────────────────────────────────────────────────────────
   ok := true;
-  begin perform public.stock_receive(ta, ua, m, 0, null); ok := false;
+  begin perform public.stock_receive(ta, ua, m, 0, null, null); ok := false;
   exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
-  begin perform public.stock_receive(ta, ua, m, 'NaN'::numeric, null); ok := false;
+  begin perform public.stock_receive(ta, ua, m, 'NaN'::numeric, null, null); ok := false;
   exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
-  begin perform public.stock_receive(ta, ua, m, 'Infinity'::numeric, null); ok := false;
+  begin perform public.stock_receive(ta, ua, m, 'Infinity'::numeric, null, null); ok := false;
   exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
-  begin perform public.stock_receive(ta, ua, m, 5, -1); ok := false;
+  begin perform public.stock_receive(ta, ua, m, 5, -1, null); ok := false;
   exception when others then ok := ok and sqlerrm = 'invalid_price'; end;
-  begin perform public.stock_receive(ta, ua, mb, 5, null); ok := false;   -- another tenant's material
+  begin perform public.stock_receive(ta, ua, mb, 5, null, null); ok := false;   -- another tenant's material
   exception when others then ok := ok and sqlerrm = 'material_not_found'; end;
-  begin perform public.stock_receive(ta, ua, m3, 5, null); ok := false;   -- archived
+  begin perform public.stock_receive(ta, ua, m3, 5, null, null); ok := false;   -- archived
   exception when others then ok := ok and sqlerrm = 'material_not_found'; end;
-  begin perform public.stock_receive(tb, ua, mb, 5, null); ok := false;   -- actor of another tenant
+  begin perform public.stock_receive(tb, ua, mb, 5, null, null); ok := false;   -- actor of another tenant
   exception when others then ok := ok and sqlerrm = 'forbidden'; end;
   update public.profiles set deactivated_at = now() where id = us2;
-  begin perform public.stock_receive(ta, us2, m, 5, null); ok := false;   -- deactivated actor
+  begin perform public.stock_receive(ta, us2, m, 5, null, null); ok := false;   -- deactivated actor
   exception when others then ok := ok and sqlerrm = 'forbidden'; end;
   r := r || jsonb_build_object('receive_rejections', ok
     and (select current_stock = 3600 from public.raw_materials where id = m));
+
+  -- bounds, note
+  ok := true;
+  begin perform public.stock_receive(ta, ua, m, 10000000, null, null); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
+  begin perform public.stock_receive(ta, ua, m, 5, 10000000, null); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_price'; end;
+  begin perform public.stock_receive(ta, ua, m, 0.001, 9999999, null); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_price'; end;
+  begin perform public.stock_receive(ta, ua, m, 5, null, repeat('ก', 501)); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_note'; end;
+  begin perform public.stock_adjust(ta, ua, m, 10000000, 'x'); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
+  r := r || jsonb_build_object('bounds_rejected', ok
+    and (select current_stock = 3600 from public.raw_materials where id = m));
+  ok := true;
+  begin perform public.stock_adjust(ta, ua, m, -1, 'x'); ok := false;
+  exception when others then ok := ok and sqlerrm = 'invalid_qty'; end;
+  r := r || jsonb_build_object('negative_balance_rejected', ok
+    and (select current_stock = 3600 from public.raw_materials where id = m));
+  r := r || jsonb_build_object('receive_note_stored',
+    (select note = 'lot A' from public.inventory_transactions where id = l1)
+    and (select note is null from public.inventory_transactions where id = l2));
 
   -- ── Adjust ──────────────────────────────────────────────────────────────
   ok := true;
@@ -131,7 +154,7 @@ begin
   r := r || jsonb_build_object('adjust_other_tenant', ok);
 
   -- ── Undo ────────────────────────────────────────────────────────────────
-  l4 := public.stock_receive(ta, us, m, 400, null);
+  l4 := public.stock_receive(ta, us, m, 400, null, null);
   ok := true;
   begin perform public.stock_receive_undo(ta, us2, l4); ok := false;     -- a different staff member
   exception when others then ok := ok and sqlerrm = 'forbidden'; end;     -- (us2 is deactivated here)
@@ -154,10 +177,10 @@ begin
     and (select current_stock = 3000 from public.raw_materials where id = m));
 
   -- a manager may undo someone else's receive; too late is refused; not-a-receive is refused
-  l4 := public.stock_receive(ta, us, m, 50, null);
+  l4 := public.stock_receive(ta, us, m, 50, null, null);
   perform public.stock_receive_undo(ta, um, l4);
   ok := (select current_stock = 3000 from public.raw_materials where id = m);
-  l4 := public.stock_receive(ta, us, m, 70, null);
+  l4 := public.stock_receive(ta, us, m, 70, null, null);
   update public.inventory_transactions set created_at = now() - interval '11 minutes' where id = l4;
   begin perform public.stock_receive_undo(ta, us, l4); ok := false;
   exception when others then ok := ok and sqlerrm = 'undo_expired'; end;
@@ -180,9 +203,9 @@ begin
     (select numeric_scale = 6 from information_schema.columns
       where table_schema = 'public' and table_name = 'raw_materials' and column_name = 'cost_per_unit'));
   r := r || jsonb_build_object('privileges',
-    not has_function_privilege('authenticated', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric)', 'execute')
-    and not has_function_privilege('anon', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric)', 'execute')
-    and has_function_privilege('service_role', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric)', 'execute')
+    not has_function_privilege('authenticated', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric,text)', 'execute')
+    and not has_function_privilege('anon', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric,text)', 'execute')
+    and has_function_privilege('service_role', 'public.stock_receive(uuid,uuid,uuid,numeric,numeric,text)', 'execute')
     and not has_function_privilege('authenticated', 'public.stock_adjust(uuid,uuid,uuid,numeric,text)', 'execute')
     and not has_function_privilege('anon', 'public.stock_adjust(uuid,uuid,uuid,numeric,text)', 'execute')
     and has_function_privilege('service_role', 'public.stock_adjust(uuid,uuid,uuid,numeric,text)', 'execute')

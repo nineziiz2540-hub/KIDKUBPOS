@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 
-export type InventoryState = { error?: string; success?: boolean } | undefined;
+export type InventoryState = { error?: string; success?: boolean; ledgerId?: string } | undefined;
 
 function isManagerOrOwner(role: string): boolean {
   return role === "owner" || role === "manager";
@@ -111,6 +111,7 @@ function stockErrorMessage(message: string): string {
   if (message.includes("reason_required")) return "กรุณากรอกเหตุผล (ไม่เกิน 500 ตัวอักษร)";
   if (message.includes("material_not_found")) return "ไม่พบวัตถุดิบ";
   if (message.includes("invalid_qty")) return "จำนวนไม่ถูกต้อง";
+  if (message.includes("invalid_note")) return "หมายเหตุยาวเกินไป (ไม่เกิน 500 ตัวอักษร)";
   if (message.includes("invalid_price")) return "ราคาไม่ถูกต้อง";
   return "บันทึกไม่สำเร็จ";
 }
@@ -154,6 +155,9 @@ export async function receiveStock(
   const rawMaterialId = formData.get("raw_material_id");
   const qtyRaw = formData.get("quantity");
   const priceRaw = formData.get("total_price");
+  const noteRaw = formData.get("note");
+  const note = typeof noteRaw === "string" && noteRaw.trim() !== "" ? noteRaw.trim() : null;
+  if (note !== null && note.length > 500) return { error: "หมายเหตุยาวเกินไป (ไม่เกิน 500 ตัวอักษร)" };
 
   if (typeof rawMaterialId !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
   const quantity = typeof qtyRaw === "string" ? parseFloat(qtyRaw) : NaN;
@@ -169,12 +173,13 @@ export async function receiveStock(
     }
   }
 
-  const { error } = await createAdminClient().rpc("stock_receive", {
+  const { data: ledgerId, error } = await createAdminClient().rpc("stock_receive", {
     p_tenant_id: profile.tenant_id,
     p_actor_id: profile.id,
     p_material_id: rawMaterialId,
     p_qty: quantity,
     p_total_price: totalPrice,
+    p_note: note,
   });
   if (error) {
     console.error("[receiveStock]", error.message);
@@ -182,7 +187,7 @@ export async function receiveStock(
   }
 
   revalidatePath("/inventory");
-  return { success: true };
+  return { success: true, ledgerId: ledgerId ?? undefined };
 }
 
 export async function adjustStock(

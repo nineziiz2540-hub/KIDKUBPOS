@@ -1816,6 +1816,7 @@ export type Database = {
         Args: {
           p_actor_id: string
           p_material_id: string
+          p_note: string | null
           p_qty: number
           p_tenant_id: string
           p_total_price: number | null

@@ -6,6 +6,8 @@
 -- would otherwise be truncated to 4 places on every receive. Widening never loses data and no
 -- view depends on the column; the deployed app reads it as a plain number.
 
+set lock_timeout = '5s';
+
 alter table public.raw_materials alter column cost_per_unit type numeric(14,6);
 
 -- One undo per receive: the undo row (an 'adjust' with this reason) points at the receive row.
@@ -18,7 +20,8 @@ create or replace function public.stock_receive(
   p_actor_id uuid,
   p_material_id uuid,
   p_qty numeric,
-  p_total_price numeric
+  p_total_price numeric,
+  p_note text
 )
 returns uuid
 language plpgsql
@@ -33,6 +36,7 @@ declare
   v_unit numeric;
   v_new_cost numeric;
   v_id uuid;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
 begin
   select p.role into v_role from public.profiles p
    where p.id = p_actor_id and p.tenant_id = p_tenant_id and p.deactivated_at is null;
@@ -41,18 +45,22 @@ begin
   end if;
 
   -- NaN sorts above everything in numeric, so the range test rejects NaN and Infinity together.
-  if p_qty is null or not (p_qty > 0 and p_qty < 1000000000) then
+  if p_qty is null or not (p_qty > 0 and p_qty < 10000000) then
     raise exception 'invalid_qty';
   end if;
   v_qty := round(p_qty, 3);
   if v_qty <= 0 then
     raise exception 'invalid_qty';
   end if;
+  if v_note is not null and char_length(v_note) > 500 then
+    raise exception 'invalid_note';
+  end if;
   if p_total_price is not null then
     if v_role not in ('owner', 'manager') then
       raise exception 'forbidden_price';
     end if;
-    if not (p_total_price >= 0 and p_total_price < 1000000000) then
+    if not (p_total_price >= 0 and p_total_price < 10000000)
+       or p_total_price / v_qty >= 100000000 then
       raise exception 'invalid_price';
     end if;
   end if;
@@ -82,8 +90,8 @@ begin
   end if;
 
   insert into public.inventory_transactions
-    (tenant_id, raw_material_id, type, quantity, unit_cost, occurred_at, created_by)
-  values (p_tenant_id, p_material_id, 'receive', v_qty, v_unit, now(), p_actor_id)
+    (tenant_id, raw_material_id, type, quantity, unit_cost, note, occurred_at, created_by)
+  values (p_tenant_id, p_material_id, 'receive', v_qty, v_unit, v_note, now(), p_actor_id)
   returning id into v_id;
 
   update public.raw_materials
@@ -125,7 +133,7 @@ begin
   if v_rec.created_by is distinct from p_actor_id and v_role not in ('owner', 'manager') then
     raise exception 'undo_forbidden';
   end if;
-  if now() - v_rec.created_at > interval '10 minutes' then
+  if v_rec.created_at is null or now() - v_rec.created_at > interval '10 minutes' then
     raise exception 'undo_expired';
   end if;
 
@@ -178,7 +186,7 @@ begin
   if v_reason = '' or char_length(v_reason) > 500 then
     raise exception 'reason_required';
   end if;
-  if p_new_balance is null or not (p_new_balance > -1000000000 and p_new_balance < 1000000000) then
+  if p_new_balance is null or not (p_new_balance >= 0 and p_new_balance < 10000000) then
     raise exception 'invalid_qty';
   end if;
   v_new := round(p_new_balance, 3);
@@ -200,9 +208,9 @@ begin
 end;
 $$;
 
-revoke all on function public.stock_receive(uuid, uuid, uuid, numeric, numeric) from public, anon, authenticated;
+revoke all on function public.stock_receive(uuid, uuid, uuid, numeric, numeric, text) from public, anon, authenticated;
 revoke all on function public.stock_receive_undo(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function public.stock_adjust(uuid, uuid, uuid, numeric, text) from public, anon, authenticated;
-grant execute on function public.stock_receive(uuid, uuid, uuid, numeric, numeric) to service_role;
+grant execute on function public.stock_receive(uuid, uuid, uuid, numeric, numeric, text) to service_role;
 grant execute on function public.stock_receive_undo(uuid, uuid, uuid) to service_role;
 grant execute on function public.stock_adjust(uuid, uuid, uuid, numeric, text) to service_role;

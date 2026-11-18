@@ -356,6 +356,7 @@ export async function getRawMaterials(tenantId: string): Promise<RawMaterial[]> 
     .from("raw_materials")
     .select("*")
     .eq("tenant_id", tenantId)
+    .is("archived_at", null)
     .order("name");
   return (data ?? []) as RawMaterial[];
 }
