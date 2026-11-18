@@ -100,7 +100,14 @@ export function MaterialRow({
             </MenuTrigger>
             <MenuPopup>{menuItems}</MenuPopup>
           </Menu>
-          <form ref={formRef} action={deleteRawMaterial} className="hidden">
+          <form
+            ref={formRef}
+            action={async (formData) => {
+              const result = await deleteRawMaterial(formData);
+              if (result?.error) alert(result.error);
+            }}
+            className="hidden"
+          >
             <input type="hidden" name="id" value={id} />
           </form>
         </td>

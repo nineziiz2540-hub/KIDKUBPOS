@@ -1802,6 +1802,30 @@ export type Database = {
           transfer_sales: number
         }[]
       }
+      stock_adjust: {
+        Args: {
+          p_actor_id: string
+          p_material_id: string
+          p_new_balance: number
+          p_reason: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      stock_receive: {
+        Args: {
+          p_actor_id: string
+          p_material_id: string
+          p_qty: number
+          p_tenant_id: string
+          p_total_price: number | null
+        }
+        Returns: string
+      }
+      stock_receive_undo: {
+        Args: { p_actor_id: string; p_ledger_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
       reorder_products: {
         Args: { p_category_id: string | null; p_ids: string[] }
         Returns: undefined

@@ -58,8 +58,15 @@ export function StockActionForm({ action, rawMaterialId, type, currentStock, uni
       )}
 
       <div className="space-y-1.5">
-        <Label htmlFor="sa-note">หมายเหตุ (ไม่บังคับ)</Label>
-        <Textarea id="sa-note" name="note" placeholder="เหตุผลที่ปรับสต็อก…" rows={2} />
+        <Label htmlFor="sa-note">{type === "adjust" ? "เหตุผล (จำเป็น)" : "หมายเหตุ (ไม่บังคับ)"}</Label>
+        <Textarea
+          id="sa-note"
+          name="note"
+          placeholder="เหตุผลที่ปรับสต็อก…"
+          rows={2}
+          required={type === "adjust"}
+          maxLength={500}
+        />
       </div>
 
       {state?.error && (

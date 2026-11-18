@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 
 export type InventoryState = { error?: string; success?: boolean } | undefined;
@@ -99,74 +100,86 @@ export async function updateRawMaterial(
   return { success: true };
 }
 
-export async function deleteRawMaterial(formData: FormData): Promise<void> {
+// Owner-facing words for the stock functions' error codes (supabase/migrations/20261118140000_*).
+function stockErrorMessage(message: string): string {
+  if (message.includes("forbidden_price")) return "ไม่มีสิทธิ์ใส่ราคา";
+  if (message.includes("undo_forbidden")) return "ไม่มีสิทธิ์ย้อนกลับรายการนี้";
+  if (message.includes("undo_expired")) return "ย้อนกลับไม่ได้แล้ว (เกิน 10 นาที)";
+  if (message.includes("already_undone")) return "รายการนี้ย้อนกลับไปแล้ว";
+  if (message.includes("not_a_receive")) return "ไม่ใช่รายการรับของ";
+  if (message.includes("forbidden")) return "ไม่มีสิทธิ์ดำเนินการนี้";
+  if (message.includes("reason_required")) return "กรุณากรอกเหตุผล (ไม่เกิน 500 ตัวอักษร)";
+  if (message.includes("material_not_found")) return "ไม่พบวัตถุดิบ";
+  if (message.includes("invalid_qty")) return "จำนวนไม่ถูกต้อง";
+  if (message.includes("invalid_price")) return "ราคาไม่ถูกต้อง";
+  return "บันทึกไม่สำเร็จ";
+}
+
+export async function deleteRawMaterial(formData: FormData): Promise<InventoryState> {
   const profile = await getProfile();
-  if (!profile || !isManagerOrOwner(profile.role)) return;
+  if (!profile || !isManagerOrOwner(profile.role)) {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
 
   const id = formData.get("id");
-  if (typeof id !== "string") return;
+  if (typeof id !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
 
-  const supabase = await createClient();
-  await supabase
+  // Archive, never delete: the ledger and recipes keep pointing at the material.
+  const { data, error } = await createAdminClient()
     .from("raw_materials")
-    .delete()
+    .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("tenant_id", profile.tenant_id);
+    .eq("tenant_id", profile.tenant_id)
+    .is("archived_at", null)
+    .select("id");
+
+  if (error) {
+    console.error("[deleteRawMaterial]", error.message);
+    return { error: "ลบวัตถุดิบไม่สำเร็จ" };
+  }
+  if (!data || data.length === 0) return { error: "ไม่พบวัตถุดิบ" };
 
   revalidatePath("/inventory");
+  return { success: true };
 }
 
 export async function receiveStock(
   prevState: InventoryState,
   formData: FormData
 ): Promise<InventoryState> {
+  // Staff may receive without a price; the price is only honoured for owner/manager.
   const profile = await getProfile();
-  if (!profile || !isManagerOrOwner(profile.role)) {
-    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
-  }
+  if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
 
   const rawMaterialId = formData.get("raw_material_id");
   const qtyRaw = formData.get("quantity");
-  const note = formData.get("note");
+  const priceRaw = formData.get("total_price");
 
   if (typeof rawMaterialId !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
   const quantity = typeof qtyRaw === "string" ? parseFloat(qtyRaw) : NaN;
-  if (isNaN(quantity) || quantity <= 0) {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
     return { error: "กรุณากรอกจำนวนที่ถูกต้อง (> 0)" };
   }
 
-  const supabase = await createClient();
+  let totalPrice: number | null = null;
+  if (isManagerOrOwner(profile.role) && typeof priceRaw === "string" && priceRaw.trim() !== "") {
+    totalPrice = parseFloat(priceRaw);
+    if (!Number.isFinite(totalPrice) || totalPrice < 0) {
+      return { error: "กรุณากรอกราคาที่ถูกต้อง" };
+    }
+  }
 
-  // Fetch current stock (tenant-scoped)
-  const { data: mat } = await supabase
-    .from("raw_materials")
-    .select("current_stock")
-    .eq("id", rawMaterialId)
-    .eq("tenant_id", profile.tenant_id)
-    .single();
-
-  if (!mat) return { error: "ไม่พบวัตถุดิบ" };
-
-  const newStock = Number(mat.current_stock) + quantity;
-
-  const { error: updateErr } = await supabase
-    .from("raw_materials")
-    .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-    .eq("id", rawMaterialId)
-    .eq("tenant_id", profile.tenant_id);
-
-  if (updateErr) return { error: "อัปเดตสต็อกไม่สำเร็จ" };
-
-  const { error: txErr } = await supabase.from("inventory_transactions").insert({
-    tenant_id: profile.tenant_id,
-    raw_material_id: rawMaterialId,
-    type: "receive",
-    quantity,
-    note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
-    created_by: profile.id,
+  const { error } = await createAdminClient().rpc("stock_receive", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_material_id: rawMaterialId,
+    p_qty: quantity,
+    p_total_price: totalPrice,
   });
-
-  if (txErr) return { error: "บันทึกประวัติไม่สำเร็จ" };
+  if (error) {
+    console.error("[receiveStock]", error.message);
+    return { error: stockErrorMessage(error.message) };
+  }
 
   revalidatePath("/inventory");
   return { success: true };
@@ -183,45 +196,48 @@ export async function adjustStock(
 
   const rawMaterialId = formData.get("raw_material_id");
   const newStockRaw = formData.get("new_stock");
-  const note = formData.get("note");
+  const reason = formData.get("reason") ?? formData.get("note");
 
   if (typeof rawMaterialId !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
   const newStock = typeof newStockRaw === "string" ? parseFloat(newStockRaw) : NaN;
-  if (isNaN(newStock) || newStock < 0) {
+  if (!Number.isFinite(newStock) || newStock < 0) {
     return { error: "กรุณากรอกจำนวนสต็อกที่ถูกต้อง (>= 0)" };
   }
+  if (typeof reason !== "string" || reason.trim() === "" || reason.trim().length > 500) {
+    return { error: "กรุณากรอกเหตุผล (ไม่เกิน 500 ตัวอักษร)" };
+  }
 
-  const supabase = await createClient();
-
-  const { data: mat } = await supabase
-    .from("raw_materials")
-    .select("current_stock")
-    .eq("id", rawMaterialId)
-    .eq("tenant_id", profile.tenant_id)
-    .single();
-
-  if (!mat) return { error: "ไม่พบวัตถุดิบ" };
-
-  const delta = newStock - Number(mat.current_stock);
-
-  const { error: updateErr } = await supabase
-    .from("raw_materials")
-    .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-    .eq("id", rawMaterialId)
-    .eq("tenant_id", profile.tenant_id);
-
-  if (updateErr) return { error: "อัปเดตสต็อกไม่สำเร็จ" };
-
-  const { error: txErr } = await supabase.from("inventory_transactions").insert({
-    tenant_id: profile.tenant_id,
-    raw_material_id: rawMaterialId,
-    type: "adjust",
-    quantity: delta,
-    note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
-    created_by: profile.id,
+  const { error } = await createAdminClient().rpc("stock_adjust", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_material_id: rawMaterialId,
+    p_new_balance: newStock,
+    p_reason: reason.trim(),
   });
+  if (error) {
+    console.error("[adjustStock]", error.message);
+    return { error: stockErrorMessage(error.message) };
+  }
 
-  if (txErr) return { error: "บันทึกประวัติไม่สำเร็จ" };
+  revalidatePath("/inventory");
+  return { success: true };
+}
+
+/** Undo a receive within 10 minutes (the receiver, or an owner/manager). Used by Task 10's UI. */
+export async function undoReceive(ledgerId: string): Promise<InventoryState> {
+  const profile = await getProfile();
+  if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  if (typeof ledgerId !== "string" || ledgerId === "") return { error: "ข้อมูลไม่ถูกต้อง" };
+
+  const { error } = await createAdminClient().rpc("stock_receive_undo", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_ledger_id: ledgerId,
+  });
+  if (error) {
+    console.error("[undoReceive]", error.message);
+    return { error: stockErrorMessage(error.message) };
+  }
 
   revalidatePath("/inventory");
   return { success: true };
