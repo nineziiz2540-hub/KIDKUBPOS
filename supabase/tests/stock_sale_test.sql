@@ -9,7 +9,7 @@ declare
   ub uuid := gen_random_uuid();   -- owner, tenant B (foreign materials)
   ta uuid; tb uuid;
   pa uuid; sa uuid;
-  kenya uuid; milk uuid; ice uuid; small uuid; archived uuid; foreign_m uuid;
+  huge uuid; edge uuid; kenya uuid; milk uuid; ice uuid; small uuid; archived uuid; foreign_m uuid;
   ref uuid;
   first record; again record; o record;
   cash_order jsonb;
@@ -42,9 +42,13 @@ begin
   values (ta, 'เก่า', 'g', 1, 100, true, now()) returning id into archived;
   insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock)
   values (tb, 'ของร้านอื่น', 'g', 1, 500, true) returning id into foreign_m;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock)
+  values (ta, 'ใกล้ล้น', 'g', 1, -9999990, true) returning id into huge;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock)
+  values (ta, 'ขอบปัด', 'g', 1, 10, true) returning id into edge;
   insert into public.inventory_transactions (tenant_id, raw_material_id, type, quantity, unit_cost, note)
   select tenant_id, id, 'opening', current_stock, cost_per_unit, 'test'
-    from public.raw_materials where id in (kenya, milk, small, archived, foreign_m);
+    from public.raw_materials where id in (kenya, milk, small, archived, foreign_m, huge, edge);
 
   cash_order := jsonb_build_object(
     'payment_method', 'cash', 'order_type', 'dine_in', 'subtotal', 55, 'total', 55,
@@ -194,12 +198,52 @@ begin
     and (select count(*) = n_before from public.inventory_transactions where tenant_id = ta)
     and (select cost_total is null and choices is null from public.order_items where order_id = o.order_id));
 
+  -- ── overflow_never_refuses: balance near the numeric(10,3) limit, a sale of 18 ──
+  items := jsonb_build_array(jsonb_build_object(
+    'product_id', pa, 'product_name', 'ลาเต้', 'unit_price', 55, 'quantity', 1, 'subtotal', 55,
+    'stock', jsonb_build_array(jsonb_build_object('material_id', huge, 'qty', 18))));
+  select * into o from public.order_record(ta, ua, gen_random_uuid(), cash_order, items, null, null, '[]', null);
+  r := r || jsonb_build_object('overflow_never_refuses',
+    o.created
+    and exists (select 1 from public.orders where id = o.order_id)
+    and not exists (select 1 from public.inventory_transactions where raw_material_id = huge and type = 'sale')
+    and (select current_stock = -9999990 from public.raw_materials where id = huge)
+    and (select cost_total is null from public.order_items where order_id = o.order_id));
+
+  -- ── rounding_edges: 0.0005 -> 0.001 kept; 1e6 skipped; bill created ────────
+  items := jsonb_build_array(jsonb_build_object(
+    'product_id', pa, 'product_name', 'ลาเต้', 'unit_price', 55, 'quantity', 1, 'subtotal', 55,
+    'stock', jsonb_build_array(
+      jsonb_build_object('material_id', edge, 'qty', 0.0005),
+      jsonb_build_object('material_id', edge, 'qty', 1000000))));
+  select * into o from public.order_record(ta, ua, gen_random_uuid(), cash_order, items, null, null, '[]', null);
+  r := r || jsonb_build_object('rounding_edges',
+    o.created
+    and (select count(*) = 1 and sum(quantity) = -0.001 from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = edge and type = 'sale')
+    and (select current_stock = 9.999 from public.raw_materials where id = edge));
+
+  -- ── works_as_service_role: the real caller ──────────────────────────────────
+  items := jsonb_build_array(jsonb_build_object(
+    'product_id', pa, 'product_name', 'ลาเต้', 'unit_price', 55, 'quantity', 1, 'subtotal', 55,
+    'stock', jsonb_build_array(jsonb_build_object('material_id', milk, 'qty', 7))));
+  select current_stock into bal_before from public.raw_materials where id = milk;
+  set local role service_role;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(), cash_order, items, null, null, '[]', null);
+  reset role;
+  r := r || jsonb_build_object('works_as_service_role',
+    o.created
+    and (select current_stock = bal_before - 7 from public.raw_materials where id = milk)
+    and (select count(*) = 1 and sum(quantity) = -7 from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = milk and type = 'sale')
+    and (select cost_total = 0.35 from public.order_items where order_id = o.order_id));
+
   -- ── balance_equals_ledger ───────────────────────────────────────────────────
   r := r || jsonb_build_object('balance_equals_ledger',
     (select bool_and(rm.current_stock = coalesce((
               select sum(t.quantity) from public.inventory_transactions t
                where t.raw_material_id = rm.id and not t.legacy), 0))
-       from public.raw_materials rm where rm.id in (kenya, milk, small, ice, archived, foreign_m)));
+       from public.raw_materials rm where rm.id in (kenya, milk, small, ice, archived, foreign_m, huge, edge)));
 
   raise exception 'RESULT %', r;
 end;

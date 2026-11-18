@@ -67,6 +67,7 @@ declare
   v_line jsonb;
   v_lines jsonb := '[]'::jsonb;
   v_qty numeric;
+  v_locked uuid[];
 begin
   if v_offline then
     if jsonb_typeof(p_offline -> 'override') = 'object' then
@@ -244,16 +245,22 @@ begin
   end loop;
 
   if jsonb_array_length(v_lines) > 0 then
+   -- Never refuse a sale because of stock: any error in this block (e.g. numeric overflow of a
+   -- balance nobody restocks) rolls back to this savepoint only. The bill stays and its items keep
+   -- cost_total null, which the owner later sees as "missing cost".
+   begin
     -- Lock every material of the bill in id order before touching any of them. ORDER BY under
     -- FOR UPDATE locks rows in sorted order, so concurrent bills sharing materials queue up
     -- instead of deadlocking, and each one reads the other's committed balance (no lost update).
-    perform 1
-      from public.raw_materials rm
-     where rm.tenant_id = p_tenant_id
-       and rm.archived_at is null
-       and rm.id in (select (l ->> 'mat')::uuid from jsonb_array_elements(v_lines) as l)
-     order by rm.id
-       for update;
+    -- The locked ids are kept: the statement below uses exactly that set.
+    select array_agg(s.id) into v_locked
+      from (select rm.id
+              from public.raw_materials rm
+             where rm.tenant_id = p_tenant_id
+               and rm.archived_at is null
+               and rm.id in (select (l ->> 'mat')::uuid from jsonb_array_elements(v_lines) as l)
+             order by rm.id
+               for update) s;
 
     -- One statement (fresh snapshot, after the locks): aggregate per (item, material), write one
     -- 'sale' row per tracked material, move the balances, freeze each item's cost.
@@ -266,8 +273,8 @@ begin
     valid as (
       select a.item_id, a.mat_id, a.qty, rm.cost_per_unit, rm.track_stock
         from agg a
-        join public.raw_materials rm
-          on rm.id = a.mat_id and rm.tenant_id = p_tenant_id and rm.archived_at is null
+        join public.raw_materials rm on rm.id = a.mat_id
+       where a.mat_id = any(v_locked)
     ),
     led as (
       insert into public.inventory_transactions
@@ -290,6 +297,9 @@ begin
        set cost_total = round(c.total, 4)
       from (select v.item_id, sum(v.qty * v.cost_per_unit) as total from valid v group by v.item_id) c
      where oi.id = c.item_id;
+   exception when others then
+     raise warning 'order_record stock skipped: % %', sqlstate, sqlerrm;
+   end;
   end if;
 
   if v_held_id is not null then
