@@ -18,7 +18,8 @@ export async function loadStockCatalog(
 
   const [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects] =
     await Promise.all([
-      supabase.from("raw_materials").select("id, archived_at").eq("tenant_id", tenantId),
+      // archived and unknown materials are treated the same by the builder, so skip reading archived ones
+      supabase.from("raw_materials").select("id, archived_at").eq("tenant_id", tenantId).is("archived_at", null),
       none(productIds)
         ? null
         : supabase
@@ -70,7 +71,11 @@ export async function loadStockCatalog(
     ]);
 
   const all = [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects];
-  if (all.some((r) => r?.error)) return { ...FAIL };
+  const failed = all.find((r) => r?.error);
+  if (failed?.error) {
+    console.error("[loadStockCatalog] query failed:", failed.error.message);
+    return { ...FAIL };
+  }
 
   const rows = {
     materials: materials.data ?? [],

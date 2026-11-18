@@ -49,6 +49,9 @@ async function loadPricingCatalog(
   const productIds = [...new Set(items.map((i) => i.productId))];
   const optionIds = [...new Set(items.flatMap((i) => i.selectedModifiers.map((m) => m.optionId)))];
 
+  // Started now so it runs alongside the queries below; awaited where it is used.
+  const stockPromise = loadStockCatalog(supabase, tenantId, productIds, optionIds);
+
   const { data: products, error: productsError } = await supabase
     .from("products")
     .select("id, name, price, is_active, archived_at, categories(name)")
@@ -91,7 +94,7 @@ async function loadPricingCatalog(
     for (const o of options ?? []) optionMap.set(o.id, o);
   }
 
-  const stock = await loadStockCatalog(supabase, tenantId, productIds, optionIds);
+  const stock = await stockPromise;
   if ("error" in stock) return stock;
 
   return {
