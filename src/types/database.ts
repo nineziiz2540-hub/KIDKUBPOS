@@ -1729,6 +1729,17 @@ export type Database = {
         }
         Returns: undefined
       }
+      order_void: {
+        Args: {
+          p_actor_id: string
+          p_approver_id: string
+          p_made: Json
+          p_order_id: string
+          p_reason: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
       queue_counter_raise: {
         Args: {
           p_actor_id: string
@@ -1825,6 +1836,16 @@ export type Database = {
       }
       stock_receive_undo: {
         Args: { p_actor_id: string; p_ledger_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
+      stock_waste: {
+        Args: {
+          p_actor_id: string
+          p_lines: Json
+          p_reason: string
+          p_ref_id: string | null
+          p_tenant_id: string
+        }
         Returns: undefined
       }
       reorder_products: {

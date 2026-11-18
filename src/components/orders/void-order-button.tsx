@@ -5,14 +5,21 @@ import { voidOrder, type VoidOrderState } from "@/app/actions/orders";
 import { PinPad } from "@/components/ui/pin-pad";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { MadeQuestion, type MadeChoice } from "@/components/orders/made-question";
+import { buildMade, totalCups, type VoidItem } from "@/lib/void-made";
 
 const MAX_PIN_ATTEMPTS = 5;
 
-export function VoidOrderButton({ orderId }: { orderId: string }) {
+export type VoidableItem = VoidItem & { name: string };
+
+export function VoidOrderButton({ orderId, items }: { orderId: string; items: VoidableItem[] }) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [attempts, setAttempts] = useState(0);
+  // No default: the PIN pad stays locked until the cashier says whether the drinks were made.
+  const [made, setMade] = useState<MadeChoice>(null);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, action, pending] = useActionState<VoidOrderState, FormData>(
     voidOrder,
@@ -36,6 +43,8 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
         // budget, not immediately re-trip the cap on the next wrong guess.
         setIsOpen(false);
         setReason("");
+        setMade(null);
+        setCounts({});
         setAttempts(0);
       } else {
         setAttempts(next);
@@ -54,6 +63,8 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
   function close() {
     setIsOpen(false);
     setReason("");
+    setMade(null);
+    setCounts({});
     setAttempts(0);
   }
 
@@ -71,12 +82,17 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
+      <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4 max-h-[95dvh] overflow-y-auto">
         <h2 className="text-lg font-bold text-sidebar text-center">ยกเลิกบิล</h2>
 
         <form ref={formRef} action={action} className="space-y-4">
           <input type="hidden" name="order_id" value={orderId} />
           <input type="hidden" name="pin" />
+          <input
+            type="hidden"
+            name="made"
+            value={made === null ? "" : JSON.stringify(buildMade(made, counts, items))}
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor="reason">เหตุผลที่ยกเลิก</Label>
@@ -92,10 +108,24 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
             />
           </div>
 
+          <MadeQuestion
+            value={made}
+            onChange={setMade}
+            partial={
+              totalCups(items) > 1
+                ? {
+                    items,
+                    counts,
+                    onCount: (id, count) => setCounts((c) => ({ ...c, [id]: count })),
+                  }
+                : undefined
+            }
+          />
+
           <div className="space-y-1.5">
             <Label>PIN ของ Manager/Owner เพื่ออนุมัติ</Label>
             <PinPad
-              disabled={pending || reason.trim() === ""}
+              disabled={pending || reason.trim() === "" || made === null}
               onComplete={(pin) => {
                 if (!formRef.current) return;
                 const hidden = formRef.current.elements.namedItem(
@@ -110,9 +140,11 @@ export function VoidOrderButton({ orderId }: { orderId: string }) {
                 hidden.value = "";
               }}
             />
-            {reason.trim() === "" && (
+            {(reason.trim() === "" || made === null) && (
               <p className="text-xs text-muted-foreground text-center">
-                กรอกเหตุผลก่อนกดตัวเลข
+                {reason.trim() === ""
+                  ? "กรอกเหตุผลก่อนกดตัวเลข"
+                  : "เลือกว่าเครื่องดื่มชงไปแล้วหรือยังก่อนกดตัวเลข"}
               </p>
             )}
           </div>

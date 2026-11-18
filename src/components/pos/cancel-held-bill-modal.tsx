@@ -3,6 +3,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/ui/pin-pad";
 import { cancelHeldBill } from "@/app/actions/held-bills";
+import { MadeQuestion, type MadeChoice } from "@/components/orders/made-question";
 
 const QUICK_REASONS = ["ลูกค้ายกเลิก", "พักบิลซ้ำ", "สั่งผิด"];
 
@@ -19,12 +20,14 @@ type Props = {
 export function CancelHeldBillModal({ billId, queueNumber, customerLabel, onDone, onCancel }: Props) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // No default: the PIN pad stays locked until the cashier says whether the drinks were made.
+  const [made, setMade] = useState<MadeChoice>(null);
   const [pending, startTransition] = useTransition();
 
   function submit(pin: string) {
     setError(null);
     startTransition(async () => {
-      const result = await cancelHeldBill(billId, reason.trim(), pin);
+      const result = await cancelHeldBill(billId, reason.trim(), pin, made === "all" ? "all" : "none");
       if ("error" in result) setError(result.error);
       else onDone();
     });
@@ -67,13 +70,17 @@ export function CancelHeldBillModal({ billId, queueNumber, customerLabel, onDone
             className="w-full h-12 rounded-lg border border-input px-3 text-base"
           />
         </div>
+        <MadeQuestion value={made} onChange={setMade} />
         <div className="space-y-2">
           <p className="text-sm font-medium text-sidebar text-center">
             PIN ของ Manager/Owner เพื่ออนุมัติ
           </p>
-          <PinPad disabled={reason.trim() === "" || pending} onComplete={submit} />
+          <PinPad disabled={reason.trim() === "" || made === null || pending} onComplete={submit} />
           {reason.trim() === "" && (
             <p className="text-sm text-muted-foreground text-center">เลือกหรือพิมพ์เหตุผลก่อนกด PIN</p>
+          )}
+          {reason.trim() !== "" && made === null && (
+            <p className="text-sm text-muted-foreground text-center">เลือกว่าเครื่องดื่มชงไปแล้วหรือยังก่อนกด PIN</p>
           )}
         </div>
         {error && <p className="text-sm text-destructive font-medium text-center">{error}</p>}

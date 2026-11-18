@@ -6,6 +6,9 @@ import { getProfile } from "@/lib/dal";
 import { verifyManagerPin } from "@/lib/manager-pin";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
 import { priceCartItems } from "@/lib/order-pricing";
+import { toLineChoices } from "@/lib/order-pricing-core";
+import { loadStockCatalog } from "@/lib/stock/catalog";
+import { resolveLine } from "@/lib/stock/stock-core";
 import { normalizeHeldItems } from "@/lib/held-bill-items";
 import { diffReductions } from "@/lib/held-bill-diff";
 import type { CartItem } from "@/types/app";
@@ -216,15 +219,45 @@ export async function updateHeldBill(
   return { version: updated[0]!.version };
 }
 
+/** Whole-bill material usage of a held bill, from the live recipes. Lines that no longer resolve
+ *  (a menu changed since it was parked) contribute nothing. */
+async function heldBillStockLines(
+  admin: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  items: CartItem[]
+): Promise<{ material_id: string; qty: number }[]> {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const productIds = [...new Set(items.map((i) => i.productId))];
+  const optionIds = [...new Set(items.flatMap((i) => (i.selectedModifiers ?? []).map((m) => m.optionId)))];
+  const loaded = await loadStockCatalog(admin, tenantId, productIds, optionIds);
+  if ("error" in loaded) throw new Error(loaded.error);
+
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    const resolved = resolveLine(
+      item.productId,
+      item.quantity,
+      toLineChoices(item.choices),
+      (item.selectedModifiers ?? []).map((m) => m.optionId),
+      loaded.catalog
+    );
+    if ("error" in resolved) continue;
+    for (const l of resolved.stock) totals.set(l.materialId, (totals.get(l.materialId) ?? 0) + l.qty);
+  }
+  return [...totals].map(([material_id, qty]) => ({ material_id, qty }));
+}
+
 export async function cancelHeldBill(
   id: string,
   reason: string,
-  pin: string
+  pin: string,
+  made: "none" | "all"
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getProfile();
   if (!profile) return { error: "กรุณาเข้าสู่ระบบก่อน" };
   if (typeof reason !== "string" || reason.trim() === "") return { error: "กรุณาระบุเหตุผล" };
   if (typeof pin !== "string" || !/^\d{6}$/.test(pin)) return { error: "PIN ไม่ถูกต้อง" };
+  if (made !== "none" && made !== "all") return { error: "กรุณาเลือกว่าเครื่องดื่มชงไปแล้วหรือยัง" };
 
   const admin = createAdminClient();
   // Active owners/managers only: a deactivated manager's PIN must not approve anything.
@@ -245,7 +278,7 @@ export async function cancelHeldBill(
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
     .eq("status", "open")
-    .select("id");
+    .select("id, items");
   if (error) return { error: "ยกเลิกบิลพักไม่สำเร็จ" };
   if (!updated || updated.length === 0) return { error: CONFLICT };
 
@@ -254,8 +287,32 @@ export async function cancelHeldBill(
     tenant_id: profile.tenant_id,
     actor_id: profile.id,
     event_type: "cancelled",
-    detail: { reason: reason.trim(), approved_by: approverId },
+    detail: { reason: reason.trim(), approved_by: approverId, made },
   });
+
+  // The drinks were made and are now thrown away: record them as waste. Only after the cancel
+  // succeeded, and a failure here is logged, never surfaced: the cancel stands either way.
+  if (made === "all") {
+    try {
+      const lines = await heldBillStockLines(
+        admin,
+        profile.tenant_id,
+        updated[0]!.items as unknown as CartItem[]
+      );
+      if (lines.length > 0) {
+        const { error: wasteError } = await admin.rpc("stock_waste", {
+          p_tenant_id: profile.tenant_id,
+          p_actor_id: profile.id,
+          p_lines: lines as unknown as Json,
+          p_reason: "ยกเลิกบิลพักหลังชง",
+          p_ref_id: id,
+        });
+        if (wasteError) console.error("[cancelHeldBill] stock_waste failed:", wasteError.message);
+      }
+    } catch (e) {
+      console.error("[cancelHeldBill] waste lines failed:", e);
+    }
+  }
 
   revalidatePath("/pos");
   return { success: true };

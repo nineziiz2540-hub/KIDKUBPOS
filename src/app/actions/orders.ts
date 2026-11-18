@@ -441,6 +441,17 @@ export async function voidOrder(
   if (!/^\d{6}$/.test(pin)) {
     return { error: "PIN ไม่ถูกต้อง" };
   }
+  // The dialog's "ชงแล้วหรือยัง" answer per item; no answer is never read as "not made".
+  const madeRaw = formData.get("made");
+  let made: unknown = null;
+  try {
+    made = typeof madeRaw === "string" ? JSON.parse(madeRaw) : null;
+  } catch {
+    made = null;
+  }
+  if (made === null || typeof made !== "object" || Array.isArray(made)) {
+    return { error: "กรุณาเลือกว่าเครื่องดื่มชงไปแล้วหรือยัง" };
+  }
 
   const supabase = await createClient();
 
@@ -466,57 +477,36 @@ export async function voidOrder(
 
   const admin = createAdminClient();
 
-  // Written via the admin client, not the regular one: orders_update_own_tenant RLS has no
-  // WITH CHECK, so any tenant member could otherwise PATCH status/cancelled_* directly through
-  // the Data API and skip this PIN check entirely. A BEFORE UPDATE trigger
-  // (prevent_direct_order_void) rejects this exact write from any caller whose auth.uid() is
-  // non-null — i.e. everyone except this service_role call — so the trigger and this client
-  // choice must be changed together.
-  const { data: updated, error: updateError } = await admin
-    .from("orders")
-    .update({
-      status: "cancelled",
-      cancelled_at: new Date().toISOString(),
-      cancelled_by: profile.id,
-      cancelled_approved_by: approverId,
-      cancel_reason: reason.trim(),
-    })
-    .eq("id", orderId)
-    .eq("tenant_id", profile.tenant_id)
-    .eq("status", "completed")
-    .select("id");
-
-  if (updateError || !updated || updated.length === 0) {
-    if (!updateError) {
-      // 0 rows with no error means the status/tenant/id filter didn't match — most likely
-      // someone else's concurrent void already won the race, not a real failure.
+  // One transaction in order_void: the status update (same columns as before) plus, per item, the
+  // made/not-made answer that decides what goes back on the shelf. Via the admin client because
+  // the prevent_direct_order_void trigger rejects this exact write from any caller whose
+  // auth.uid() is non-null (so the trigger and this client choice must be changed together), and
+  // the function's EXECUTE is service_role only, so it can't be called through the Data API to
+  // inflate stock. order_void re-checks that every item has a valid answer.
+  const { error: voidError } = await admin.rpc("order_void", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_approver_id: approverId,
+    p_order_id: orderId,
+    p_reason: reason.trim(),
+    p_made: made as Json,
+  });
+  if (voidError) {
+    if (voidError.message.includes("not_completed")) {
+      // A concurrent void/refund won the race: say what the bill is now.
       const { data: recheck } = await admin
         .from("orders")
         .select("status")
         .eq("id", orderId)
         .maybeSingle();
-      if (recheck?.status === "cancelled") {
-        return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
-      }
+      if (recheck?.status === "cancelled") return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
+      if (recheck?.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว ไม่สามารถยกเลิกได้" };
+      if (recheck?.status === "unpaid") return { error: "บิลนี้ถูกแจ้งว่าไม่ได้รับเงิน" };
+    } else if (voidError.message.includes("invalid_made")) {
+      return { error: "กรุณาเลือกว่าเครื่องดื่มชงไปแล้วหรือยัง" };
     }
-    console.error(
-      "voidOrder: failed to update order:",
-      updateError ?? "update matched 0 rows (row missing or tenant mismatch)"
-    );
+    console.error("voidOrder: order_void failed:", voidError.message);
     return { error: "ยกเลิกบิลไม่สำเร็จ" };
-  }
-
-  // Also via the admin client: restock_for_voided_order's EXECUTE grant was revoked from
-  // authenticated/anon so it can't be called directly (and looped) through the Data API to
-  // inflate stock without ever actually voiding an order.
-  const { error: restockError } = await admin.rpc("restock_for_voided_order", {
-    p_order_id: orderId,
-  });
-  if (restockError) {
-    console.error(
-      "[voidOrder] restock_for_voided_order failed:",
-      restockError.message
-    );
   }
 
   revalidatePath(`/orders/${orderId}`);

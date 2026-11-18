@@ -414,7 +414,10 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
             shiftOpen={shiftOpen}
           />
           {isTransfer && <MarkUnpaidButton orderId={order.id} />}
-          <VoidOrderButton orderId={order.id} />
+          <VoidOrderButton
+            orderId={order.id}
+            items={order.order_items.map((i) => ({ id: i.id, name: i.product_name, quantity: i.quantity }))}
+          />
           <RefundOrderButton orderId={order.id} />
         </div>
       )}

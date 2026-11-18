@@ -84,7 +84,7 @@ export function isValidCartChoices(value: unknown): boolean {
 }
 
 /** Keeps only the ids from the client's choices: its labels and prices are never trusted. */
-function toLineChoices(choices?: CartChoices): LineChoices | undefined {
+export function toLineChoices(choices?: CartChoices): LineChoices | undefined {
   if (!choices) return undefined;
   return {
     slots: (choices.slots ?? []).map((s) => ({ groupId: s.groupId, memberId: s.memberId })),
