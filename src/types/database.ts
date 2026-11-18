@@ -107,6 +107,99 @@ export type Database = {
           },
         ]
       }
+      choice_group_members: {
+        Row: {
+          group_id: string
+          id: string
+          is_default: boolean
+          label: string
+          price_delta: number
+          raw_material_id: string
+          sort_order: number
+          tenant_id: string
+          tier: string
+        }
+        Insert: {
+          group_id: string
+          id?: string
+          is_default?: boolean
+          label: string
+          price_delta?: number
+          raw_material_id: string
+          sort_order?: number
+          tenant_id: string
+          tier: string
+        }
+        Update: {
+          group_id?: string
+          id?: string
+          is_default?: boolean
+          label?: string
+          price_delta?: number
+          raw_material_id?: string
+          sort_order?: number
+          tenant_id?: string
+          tier?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "choice_group_members_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "choice_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "choice_group_members_raw_material_id_fkey"
+            columns: ["raw_material_id"]
+            isOneToOne: false
+            referencedRelation: "raw_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "choice_group_members_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      choice_groups: {
+        Row: {
+          created_at: string | null
+          id: string
+          kind: string
+          name: string
+          sort_order: number
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          kind: string
+          name: string
+          sort_order?: number
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          sort_order?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "choice_groups_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           created_at: string | null
@@ -278,31 +371,52 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           id: string
+          legacy: boolean
           note: string | null
+          occurred_at: string
+          order_id: string | null
+          order_item_id: string | null
           quantity: number
           raw_material_id: string
+          reason: string | null
+          ref_id: string | null
           tenant_id: string
           type: string
+          unit_cost: number | null
         }
         Insert: {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          legacy?: boolean
           note?: string | null
+          occurred_at?: string
+          order_id?: string | null
+          order_item_id?: string | null
           quantity: number
           raw_material_id: string
+          reason?: string | null
+          ref_id?: string | null
           tenant_id: string
           type: string
+          unit_cost?: number | null
         }
         Update: {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          legacy?: boolean
           note?: string | null
+          occurred_at?: string
+          order_id?: string | null
+          order_item_id?: string | null
           quantity?: number
           raw_material_id?: string
+          reason?: string | null
+          ref_id?: string | null
           tenant_id?: string
           type?: string
+          unit_cost?: number | null
         }
         Relationships: [
           {
@@ -310,6 +424,20 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_transactions_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_transactions_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
             referencedColumns: ["id"]
           },
           {
@@ -377,6 +505,65 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      modifier_option_effects: {
+        Row: {
+          amount: number
+          group_id: string | null
+          id: string
+          kind: string
+          option_id: string
+          raw_material_id: string | null
+          tenant_id: string
+        }
+        Insert: {
+          amount: number
+          group_id?: string | null
+          id?: string
+          kind: string
+          option_id: string
+          raw_material_id?: string | null
+          tenant_id: string
+        }
+        Update: {
+          amount?: number
+          group_id?: string | null
+          id?: string
+          kind?: string
+          option_id?: string
+          raw_material_id?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "modifier_option_effects_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "choice_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "modifier_option_effects_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "modifier_options"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "modifier_option_effects_raw_material_id_fkey"
+            columns: ["raw_material_id"]
+            isOneToOne: false
+            referencedRelation: "raw_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "modifier_option_effects_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -508,6 +695,8 @@ export type Database = {
       order_items: {
         Row: {
           category_name: string | null
+          choices: Json | null
+          cost_total: number | null
           created_at: string
           id: string
           modifiers_snapshot: Json | null
@@ -518,9 +707,12 @@ export type Database = {
           quantity: number
           subtotal: number
           unit_price: number
+          void_made: boolean | null
         }
         Insert: {
           category_name?: string | null
+          choices?: Json | null
+          cost_total?: number | null
           created_at?: string
           id?: string
           modifiers_snapshot?: Json | null
@@ -531,9 +723,12 @@ export type Database = {
           quantity?: number
           subtotal: number
           unit_price: number
+          void_made?: boolean | null
         }
         Update: {
           category_name?: string | null
+          choices?: Json | null
+          cost_total?: number | null
           created_at?: string
           id?: string
           modifiers_snapshot?: Json | null
@@ -544,6 +739,7 @@ export type Database = {
           quantity?: number
           subtotal?: number
           unit_price?: number
+          void_made?: boolean | null
         }
         Relationships: [
           {
@@ -806,27 +1002,53 @@ export type Database = {
       }
       product_recipes: {
         Row: {
+          allow_special: boolean
+          default_member_id: string | null
+          group_id: string | null
           id: string
+          line_kind: string
           product_id: string
           quantity_used: number
-          raw_material_id: string
+          raw_material_id: string | null
           tenant_id: string
         }
         Insert: {
+          allow_special?: boolean
+          default_member_id?: string | null
+          group_id?: string | null
           id?: string
+          line_kind?: string
           product_id: string
           quantity_used: number
-          raw_material_id: string
+          raw_material_id?: string | null
           tenant_id: string
         }
         Update: {
+          allow_special?: boolean
+          default_member_id?: string | null
+          group_id?: string | null
           id?: string
+          line_kind?: string
           product_id?: string
           quantity_used?: number
-          raw_material_id?: string
+          raw_material_id?: string | null
           tenant_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "product_recipes_default_member_id_fkey"
+            columns: ["default_member_id"]
+            isOneToOne: false
+            referencedRelation: "choice_group_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_recipes_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "choice_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "product_recipes_product_id_fkey"
             columns: ["product_id"]
@@ -843,6 +1065,72 @@ export type Database = {
           },
           {
             foreignKeyName: "product_recipes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_sweetness: {
+        Row: {
+          allowed_member_ids: string[]
+          default_level_id: string | null
+          default_member_id: string
+          group_id: string
+          product_id: string
+          tenant_id: string
+          use_custom: boolean
+        }
+        Insert: {
+          allowed_member_ids?: string[]
+          default_level_id?: string | null
+          default_member_id: string
+          group_id: string
+          product_id: string
+          tenant_id: string
+          use_custom?: boolean
+        }
+        Update: {
+          allowed_member_ids?: string[]
+          default_level_id?: string | null
+          default_member_id?: string
+          group_id?: string
+          product_id?: string
+          tenant_id?: string
+          use_custom?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_sweetness_default_level_id_fkey"
+            columns: ["default_level_id"]
+            isOneToOne: false
+            referencedRelation: "sweetness_levels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_sweetness_default_member_id_fkey"
+            columns: ["default_member_id"]
+            isOneToOne: false
+            referencedRelation: "choice_group_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_sweetness_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "choice_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_sweetness_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_sweetness_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -971,35 +1259,50 @@ export type Database = {
       }
       raw_materials: {
         Row: {
+          archived_at: string | null
+          category: string
           cost_per_unit: number
           created_at: string | null
           current_stock: number
           id: string
           min_stock_alert: number
           name: string
+          purchase_size: number | null
+          purchase_unit: string | null
           tenant_id: string
+          track_stock: boolean
           unit: string
           updated_at: string | null
         }
         Insert: {
+          archived_at?: string | null
+          category?: string
           cost_per_unit?: number
           created_at?: string | null
           current_stock?: number
           id?: string
           min_stock_alert?: number
           name: string
+          purchase_size?: number | null
+          purchase_unit?: string | null
           tenant_id: string
+          track_stock?: boolean
           unit: string
           updated_at?: string | null
         }
         Update: {
+          archived_at?: string | null
+          category?: string
           cost_per_unit?: number
           created_at?: string | null
           current_stock?: number
           id?: string
           min_stock_alert?: number
           name?: string
+          purchase_size?: number | null
+          purchase_unit?: string | null
           tenant_id?: string
+          track_stock?: boolean
           unit?: string
           updated_at?: string | null
         }
@@ -1177,6 +1480,97 @@ export type Database = {
           },
           {
             foreignKeyName: "shifts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sweetness_amounts: {
+        Row: {
+          amount: number
+          id: string
+          level_id: string
+          member_id: string
+          product_id: string | null
+          tenant_id: string
+        }
+        Insert: {
+          amount: number
+          id?: string
+          level_id: string
+          member_id: string
+          product_id?: string | null
+          tenant_id: string
+        }
+        Update: {
+          amount?: number
+          id?: string
+          level_id?: string
+          member_id?: string
+          product_id?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sweetness_amounts_level_id_fkey"
+            columns: ["level_id"]
+            isOneToOne: false
+            referencedRelation: "sweetness_levels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sweetness_amounts_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "choice_group_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sweetness_amounts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sweetness_amounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sweetness_levels: {
+        Row: {
+          id: string
+          is_default: boolean
+          is_none: boolean
+          name: string
+          sort_order: number
+          tenant_id: string
+        }
+        Insert: {
+          id?: string
+          is_default?: boolean
+          is_none?: boolean
+          name: string
+          sort_order?: number
+          tenant_id: string
+        }
+        Update: {
+          id?: string
+          is_default?: boolean
+          is_none?: boolean
+          name?: string
+          sort_order?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sweetness_levels_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"

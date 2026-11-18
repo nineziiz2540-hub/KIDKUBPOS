@@ -83,10 +83,17 @@ export default async function EditMenuPage({
         isActive: product.is_active,
         // Same order every visit: the order materials appear in the picker (by name).
         recipes: (recipes ?? [])
-          .map((r) => ({
-            rawMaterialId: r.raw_material_id,
-            quantityUsed: String(Number(r.quantity_used)),
-          }))
+          // Slot lines (choice groups) have no material of their own; this editor only shows fixed lines.
+          .flatMap((r) =>
+            r.raw_material_id
+              ? [
+                  {
+                    rawMaterialId: r.raw_material_id,
+                    quantityUsed: String(Number(r.quantity_used)),
+                  },
+                ]
+              : []
+          )
           .sort(
             (a, b) =>
               rawMaterials.findIndex((m) => m.id === a.rawMaterialId) -
