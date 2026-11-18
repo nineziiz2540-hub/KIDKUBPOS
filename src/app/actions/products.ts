@@ -2,7 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/dal";
-import { parseMenuDraft, type MenuDraft } from "@/lib/product-input";
+import { menuSavePayload, parseMenuDraft, DUPLICATE_SLOT_GROUP, type MenuDraft } from "@/lib/menu-draft";
+import type { Json } from "@/types/database";
 import {
   MAX_PRODUCT_IMAGE_BYTES,
   PRODUCT_IMAGE_BUCKET,
@@ -27,6 +28,12 @@ const RPC_ERRORS: Record<string, string> = {
   invalid_modifier: "กลุ่มตัวเลือกไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_quantity: "ปริมาณวัตถุดิบไม่ถูกต้อง",
   invalid_category: "หมวดหมู่ไม่ถูกต้อง",
+  invalid_group: "กลุ่มเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า",
+  invalid_group_member: "ค่าเริ่มต้นของเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า",
+  duplicate_slot_group: DUPLICATE_SLOT_GROUP,
+  invalid_recipe_line: "สูตรเมนูไม่ถูกต้อง กรุณารีเฟรชหน้า",
+  invalid_sweetness: "การตั้งค่าความหวานไม่ถูกต้อง กรุณารีเฟรชหน้า",
+  sweetness_table_incomplete: "ปริมาณเฉพาะเมนูนี้ยังไม่ครบทุกระดับความหวาน กรุณารีเฟรชหน้าแล้วกรอกให้ครบ",
 };
 
 function isManagerOrOwner(role: string): boolean {
@@ -146,9 +153,10 @@ function rpcError(message: string | undefined): string {
 }
 
 /**
- * The one-page menu editor's single save: menu fields, recipe and option links in one
- * transaction (save_menu). The database puts a new or re-categorised menu at the end of its
- * category.
+ * The one-page menu editor's single save: menu fields, recipe lines (fixed and bean/matcha lines),
+ * option links and the menu's sweetness in one transaction (save_menu). The database checks every
+ * referenced id against the caller's shop and puts a new or re-categorised menu at the end of its
+ * category. A draft without `sweetness` leaves the menu's sweetness as it is.
  */
 export async function saveMenu(
   productId: string | null,
@@ -156,30 +164,24 @@ export async function saveMenu(
 ): Promise<{ ok: true; id: string; categoryId: string | null } | { error: string }> {
   const profile = await requireManager();
   if (!profile) return { error: FORBIDDEN };
+  if (productId !== null && (typeof productId !== "string" || productId === "")) return { error: NOT_FOUND };
 
   const parsed = parseMenuDraft(draft);
   if ("error" in parsed) return { error: parsed.error };
-  const { menu, recipes, modifierIds } = parsed.value;
+  const payload = menuSavePayload(parsed.value);
 
   const supabase = await createClient();
   const { data: id, error } = await supabase.rpc("save_menu", {
     p_id: productId,
-    p_menu: {
-      name: menu.name,
-      price: menu.price,
-      description: menu.description,
-      category_id: menu.categoryId,
-      drink_type: menu.drinkType,
-      is_active: menu.isActive,
-    },
-    p_recipes: recipes.map((r) => ({ raw_material_id: r.rawMaterialId, quantity_used: r.quantityUsed })),
-    p_modifier_ids: modifierIds,
+    p_menu: payload.p_menu as unknown as Json,
+    p_recipes: payload.p_recipes as unknown as Json,
+    p_modifier_ids: payload.p_modifier_ids,
   });
   if (error || !id) return { error: rpcError(error?.message) };
 
   revalidateMenu();
   revalidatePath(`/products/${id}/edit`);
-  return { ok: true, id, categoryId: menu.categoryId };
+  return { ok: true, id, categoryId: parsed.value.menu.categoryId };
 }
 
 /** "ลบรูป" in the editor: the menu goes back to having no photo, and the file is removed. */

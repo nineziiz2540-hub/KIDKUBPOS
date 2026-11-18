@@ -2,23 +2,26 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, Plus, Trash2 } from "lucide-react";
+import { Camera } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToastManager } from "@/components/ui/toast";
 import { saveMenu, uploadProductImage, removeProductImage } from "@/app/actions/products";
 import { formatPrice } from "@/lib/cash";
+import { comparableDraft, type MenuDraft } from "@/lib/menu-draft";
+import { costPreviewText, menuCostPreview } from "@/lib/stock/menu-cost-preview";
 import { resizeImageForUpload } from "@/lib/resize-image";
 import { MAX_PRODUCT_IMAGE_BYTES, PRODUCT_IMAGE_TYPES } from "@/lib/product-images";
 import {
   HIGH_PRICE_CONFIRM,
   MAX_PRODUCT_DESCRIPTION,
   MAX_PRODUCT_NAME,
-  MAX_RECIPE_QTY,
   type DrinkType,
-  type MenuDraft,
 } from "@/lib/product-input";
 import type { ModifierWithOptions } from "@/types/app";
+import { RecipeLinesEditor } from "./recipe-lines-editor";
+import { MenuSweetnessEditor } from "./menu-sweetness-editor";
+import type { EditorAmount, EditorGroup, EditorLevel, EditorMaterial } from "./menu-editor-types";
 
 type MenuEditorProps = {
   productId: string | null;
@@ -26,7 +29,13 @@ type MenuEditorProps = {
   imageUrl: string | null;
   categories: { id: string; name: string }[];
   modifiers: ModifierWithOptions[];
-  rawMaterials: { id: string; name: string; unit: string; costPerUnit: number }[];
+  /** active materials (with cost: these pages are owner/manager only) and archived ones the menu still uses */
+  materials: EditorMaterial[];
+  /** the shop's choice groups (bean / matcha / sweetener / other) with their members */
+  groups: EditorGroup[];
+  /** the shop's sweetness levels in order, and its standard sweetness table */
+  levels: EditorLevel[];
+  standardAmounts: EditorAmount[];
   /** Set when a create landed here because the photo upload failed. */
   photoFailed?: boolean;
 };
@@ -43,10 +52,8 @@ const DRINK_TYPES: { value: DrinkType | null; label: string }[] = [
 ];
 
 const LABEL = "block text-base font-medium text-sidebar mb-2";
-// No width here: recipe rows size their select/qty inputs themselves (w-full would win over w-[92px]).
-const FIELD_BASE =
-  "h-[50px] rounded-xl border border-input bg-white text-[17px] text-sidebar focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
-const FIELD = `w-full px-4 ${FIELD_BASE}`;
+const FIELD =
+  "w-full px-4 h-[50px] rounded-xl border border-input bg-white text-[17px] text-sidebar focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
 const CARD = "rounded-2xl bg-white p-5 space-y-4 min-w-0";
 const CHIP_GRID = "grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]";
 
@@ -64,7 +71,10 @@ export function MenuEditor({
   imageUrl,
   categories,
   modifiers,
-  rawMaterials,
+  materials,
+  groups,
+  levels,
+  standardAmounts,
   photoFailed = false,
 }: MenuEditorProps) {
   const router = useRouter();
@@ -89,26 +99,22 @@ export function MenuEditor({
   }, [photoPreview]);
 
   const shownPhoto = photoPreview ?? (removePhoto ? null : imageUrl);
-  // Option links are a set: unticking and re-ticking one isn't a change.
-  const comparable = (d: MenuDraft) => JSON.stringify({ ...d, modifierIds: [...d.modifierIds].sort() });
-  const dirty = comparable(draft) !== comparable(initial) || photoFile !== null || removePhoto;
+  // Sets (option links, allowed sweeteners) are compared as sets; an own table that is switched off is ignored.
+  const dirty = comparableDraft(draft) !== comparableDraft(initial) || photoFile !== null || removePhoto;
   // Cancel/discard returns to the tab the menu is actually in, not one picked but not saved.
   const listHref = `/products?category=${initial.categoryId ?? "none"}`;
   const priceIsHigh =
     Number(draft.price) >= HIGH_PRICE_CONFIRM && draft.price.trim() !== initial.price.trim();
-  const units = new Map(rawMaterials.map((m) => [m.id, m]));
-  const cost = draft.recipes.reduce((sum, r) => {
-    const m = units.get(r.rawMaterialId);
-    const q = Number(r.quantityUsed);
-    return m && Number.isFinite(q) ? sum + m.costPerUnit * q : sum;
-  }, 0);
+  const lineGroups = groups.filter((g) => g.kind !== "sweetener");
+  const sweetenerGroups = groups.filter((g) => g.kind === "sweetener");
+  // Cost per cup at today's material costs, resolved exactly as the till would (owner/manager pages only).
+  const preview = menuCostPreview({ draft, groups, levels, standardAmounts, materials });
+  const previewText = draft.recipes.some((r) => (r.kind === "fixed" ? r.rawMaterialId : r.groupId) !== "") || draft.sweetness
+    ? costPreviewText(preview)
+    : null;
 
   function update(patch: Partial<MenuDraft>) {
     setDraft((d) => ({ ...d, ...patch }));
-  }
-
-  function updateRecipe(index: number, patch: Partial<MenuDraft["recipes"][number]>) {
-    setDraft((d) => ({ ...d, recipes: d.recipes.map((r, i) => (i === index ? { ...r, ...patch } : r)) }));
   }
 
   function toggleModifier(id: string) {
@@ -421,68 +427,47 @@ export function MenuEditor({
           <section className={CARD}>
             <h2 className="text-[19px] font-semibold text-sidebar">สูตรเมนู</h2>
             <p className="text-[15px] text-muted-foreground">วัตถุดิบที่ใช้ต่อ 1 แก้ว ระบบจะหักสต๊อกอัตโนมัติเมื่อขาย</p>
-            {rawMaterials.length === 0 ? (
+            {materials.every((m) => m.archived) && (
               <p className="text-base text-muted-foreground">
                 ยังไม่มีวัตถุดิบ —{" "}
                 <Link href="/inventory" className="text-accent font-medium hover:underline">
                   ไปเพิ่มที่หน้า Inventory
                 </Link>
               </p>
-            ) : (
-              <>
-                {draft.recipes.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <select
-                      aria-label="วัตถุดิบ"
-                      value={r.rawMaterialId}
-                      onChange={(e) => updateRecipe(i, { rawMaterialId: e.target.value })}
-                      className={`${FIELD_BASE} flex-1 min-w-0 px-3`}
-                    >
-                      <option value="">— เลือกวัตถุดิบ —</option>
-                      {rawMaterials.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      aria-label="ปริมาณ"
-                      inputMode="decimal"
-                      value={r.quantityUsed}
-                      max={MAX_RECIPE_QTY}
-                      onChange={(e) => updateRecipe(i, { quantityUsed: e.target.value })}
-                      placeholder="ปริมาณ"
-                      className={`${FIELD_BASE} w-[92px] shrink-0 px-3`}
-                    />
-                    <span className="w-11 shrink-0 text-[15px] text-muted-foreground truncate">
-                      {units.get(r.rawMaterialId)?.unit ?? ""}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="ลบวัตถุดิบ"
-                      onClick={() => setDraft((d) => ({ ...d, recipes: d.recipes.filter((_, j) => j !== i) }))}
-                      className="w-[50px] h-[50px] shrink-0 rounded-xl bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20"
-                    >
-                      <Trash2 size={20} />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setDraft((d) => ({ ...d, recipes: [...d.recipes, { rawMaterialId: "", quantityUsed: "" }] }))}
-                  className="w-full h-12 rounded-xl border border-dashed border-accent text-accent text-base font-semibold flex items-center justify-center gap-2 hover:bg-accent/5"
-                >
-                  <Plus size={18} />
-                  เพิ่มวัตถุดิบ
-                </button>
-                {cost > 0 && (
-                  <p className="rounded-xl bg-muted/50 px-4 py-3 text-base text-sidebar">
-                    ต้นทุนวัตถุดิบรวม <span className="font-semibold">฿{formatPrice(Math.round(cost * 100) / 100)}</span>
-                  </p>
-                )}
-              </>
             )}
+            <RecipeLinesEditor
+              lines={draft.recipes}
+              onChange={(recipes) => update({ recipes })}
+              materials={materials}
+              groups={lineGroups}
+            />
           </section>
+
+          <section className={CARD}>
+            <h2 className="text-[19px] font-semibold text-sidebar">ความหวาน</h2>
+            <MenuSweetnessEditor
+              value={draft.sweetness ?? null}
+              onChange={(sweetness) => update({ sweetness })}
+              groups={sweetenerGroups}
+              levels={levels}
+              standardAmounts={standardAmounts}
+            />
+          </section>
+
+          {previewText && (
+            <section className={CARD} aria-live="polite">
+              <p className="text-[17px] font-medium text-sidebar">{previewText}</p>
+              {preview.missingMaterials.length > 0 && (
+                <p className="text-[15px] font-medium text-sidebar">
+                  <span className="mr-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-[13px] font-semibold">
+                    ยังไม่มีราคาทุน
+                  </span>
+                  {preview.missingMaterials.join(", ")} — ต้นทุนจริงสูงกว่านี้ ใส่ราคาที่หน้าวัตถุดิบ
+                </p>
+              )}
+              <p className="text-[13px] text-muted-foreground">คิดจากค่าเริ่มต้นของเมนู ราคาวัตถุดิบล่าสุด ไม่รวมตัวเลือกเพิ่มเติม</p>
+            </section>
+          )}
         </div>
       </div>
 

@@ -1,7 +1,9 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import { checkEffectInputs, effectRows, type EffectInput } from "@/lib/stock/option-effects";
 
 export type ModifierState = { error?: string; success?: boolean } | undefined;
 
@@ -174,4 +176,99 @@ export async function deleteModifierOption(formData: FormData): Promise<void> {
   await supabase.from("modifier_options").delete().eq("id", id);
 
   revalidatePath("/modifiers");
+}
+
+/**
+ * "ผลต่อสต๊อก" of one option (round D1): replaces the option's stock effects as a set. Writes go through
+ * the user client (RLS: owner/manager of the row's shop); on top of that the option's modifier and every
+ * group / material id are checked against the caller's shop here, because RLS alone does not check
+ * where a referenced id belongs. The tenant always comes from the profile, never from the caller.
+ */
+export async function saveOptionEffects(optionId: string, effects: EffectInput[]): Promise<ModifierState> {
+  const profile = await getProfile();
+  if (!profile || !isManagerOrOwner(profile.role)) {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+  if (typeof optionId !== "string" || optionId === "" || optionId.length > 64) return { error: "ข้อมูลไม่ถูกต้อง" };
+  const checked = checkEffectInputs(effects);
+  if ("error" in checked) return { error: checked.error };
+  const tenantId = profile.tenant_id;
+  const SAVE_FAIL = "บันทึกผลต่อสต๊อกไม่สำเร็จ — ลองอีกครั้ง";
+
+  const supabase = await createClient();
+
+  // The option must belong to one of this shop's modifier groups.
+  const { data: option, error: optionError } = await supabase
+    .from("modifier_options")
+    .select("id, modifiers!inner(tenant_id)")
+    .eq("id", optionId)
+    .eq("modifiers.tenant_id", tenantId)
+    .maybeSingle();
+  if (optionError) return { error: SAVE_FAIL };
+  if (!option) return { error: "ไม่พบตัวเลือกนี้ กรุณารีเฟรชหน้า" };
+
+  // "เพิ่มในช่องเมล็ด/มัทฉะ": this shop's bean / matcha (or other) groups — never the sweetener group.
+  const groupIds = [...new Set(checked.value.flatMap((e) => (e.kind === "slot_add" ? [e.groupId] : [])))];
+  if (groupIds.length > 0) {
+    const { data: groups, error } = await supabase
+      .from("choice_groups")
+      .select("id, kind")
+      .eq("tenant_id", tenantId)
+      .in("id", groupIds);
+    if (error) return { error: SAVE_FAIL };
+    if ((groups ?? []).length !== groupIds.length || (groups ?? []).some((g) => g.kind === "sweetener")) {
+      return { error: "กลุ่มเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า" };
+    }
+  }
+
+  // "เพิ่มวัตถุดิบ": this shop's materials that are still in use (not archived).
+  const materialIds = [...new Set(checked.value.flatMap((e) => (e.kind === "material_add" ? [e.materialId] : [])))];
+  if (materialIds.length > 0) {
+    const { data: mats, error } = await createAdminClient()
+      .from("raw_materials")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .is("archived_at", null)
+      .in("id", materialIds);
+    if (error) return { error: SAVE_FAIL };
+    if ((mats ?? []).length !== materialIds.length) return { error: "ไม่พบวัตถุดิบนี้ หรือปิดใช้แล้ว — เลือกวัตถุดิบอื่น" };
+  }
+
+  // Replace as a set. New rows first, then the old ones go, so a failed write never leaves the option with
+  // its effects gone; if removing the old ones fails, the new ones are taken back. (Two writes, not one
+  // transaction: a sale landing between them would count both sets once.)
+  const { data: old, error: oldError } = await supabase
+    .from("modifier_option_effects")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("option_id", optionId);
+  if (oldError) return { error: SAVE_FAIL };
+
+  let newIds: string[] = [];
+  if (checked.value.length > 0) {
+    const { data: inserted, error } = await supabase
+      .from("modifier_option_effects")
+      .insert(effectRows(tenantId, optionId, checked.value))
+      .select("id");
+    if (error || !inserted) return { error: SAVE_FAIL };
+    newIds = inserted.map((r) => r.id);
+  }
+  const oldIds = (old ?? []).map((r) => r.id);
+  if (oldIds.length > 0) {
+    const { error } = await supabase
+      .from("modifier_option_effects")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", oldIds);
+    if (error) {
+      if (newIds.length > 0) {
+        await supabase.from("modifier_option_effects").delete().eq("tenant_id", tenantId).in("id", newIds);
+      }
+      return { error: SAVE_FAIL };
+    }
+  }
+
+  revalidatePath("/modifiers");
+  revalidatePath("/pos");
+  return { success: true };
 }

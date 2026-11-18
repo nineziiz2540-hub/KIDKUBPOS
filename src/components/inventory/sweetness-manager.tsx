@@ -136,6 +136,70 @@ function AddLevel() {
   );
 }
 
+/**
+ * The sweetener × level amount grid. Shared by the shop's standard table (below) and the menu editor's
+ * "ใช้ปริมาณเฉพาะเมนูนี้" table. The ไม่หวาน column is always 0 and not editable.
+ */
+export function SweetnessGridTable({
+  sweeteners,
+  levels,
+  grid,
+  onChange,
+}: {
+  sweeteners: SweetenerRow[];
+  levels: Pick<LevelProps, "id" | "name" | "isNone">[];
+  grid: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border bg-white">
+      <table className="w-full text-base">
+        <thead className="border-b bg-muted/30">
+          <tr>
+            <th className="px-4 py-3 text-left font-medium text-sidebar">สารให้ความหวาน (หน่วย)</th>
+            {levels.map((l) => (
+              <th key={l.id} className="px-3 py-3 text-center font-medium text-sidebar">
+                {l.name}
+                {l.isNone && <span className="block text-xs font-normal text-muted-foreground">ไม่ใช้ = 0</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sweeteners.map((s) => (
+            <tr key={s.id} className="border-b last:border-b-0">
+              <th scope="row" className="px-4 py-2 text-left font-medium text-sidebar">
+                {s.label} ({s.unit})
+              </th>
+              {levels.map((l) => {
+                const k = gridKey(s.id, l.id);
+                return (
+                  <td key={l.id} className="px-2 py-2">
+                    {l.isNone ? (
+                      <div className="flex h-14 min-w-24 items-center justify-center rounded-lg border bg-muted/30 text-lg text-muted-foreground">
+                        0
+                      </div>
+                    ) : (
+                      <input
+                        aria-label={`${s.label} · ${l.name}`}
+                        inputMode="decimal"
+                        value={grid[k] ?? ""}
+                        placeholder="0"
+                        onChange={(e) => onChange(k, e.target.value)}
+                        className="h-14 w-full min-w-24 rounded-lg border bg-white px-2 text-center text-lg text-sidebar"
+                      />
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function StandardGrid({
   sweeteners,
   levels,
@@ -159,51 +223,12 @@ function StandardGrid({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-lg border bg-white">
-        <table className="w-full text-base">
-          <thead className="border-b bg-muted/30">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium text-sidebar">สารให้ความหวาน (หน่วย)</th>
-              {levels.map((l) => (
-                <th key={l.id} className="px-3 py-3 text-center font-medium text-sidebar">
-                  {l.name}
-                  {l.isNone && <span className="block text-xs font-normal text-muted-foreground">ไม่ใช้ = 0</span>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sweeteners.map((s) => (
-              <tr key={s.id} className="border-b last:border-b-0">
-                <th scope="row" className="px-4 py-2 text-left font-medium text-sidebar">
-                  {s.label} ({s.unit})
-                </th>
-                {levels.map((l) => {
-                  const k = gridKey(s.id, l.id);
-                  return (
-                    <td key={l.id} className="px-2 py-2">
-                      {l.isNone ? (
-                        <div className="flex h-14 min-w-24 items-center justify-center rounded-lg border bg-muted/30 text-lg text-muted-foreground">
-                          0
-                        </div>
-                      ) : (
-                        <input
-                          aria-label={`${s.label} · ${l.name}`}
-                          inputMode="decimal"
-                          value={grid[k] ?? ""}
-                          placeholder="0"
-                          onChange={(e) => setGrid((g) => ({ ...g, [k]: e.target.value }))}
-                          className="h-14 w-full min-w-24 rounded-lg border bg-white px-2 text-center text-lg text-sidebar"
-                        />
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SweetnessGridTable
+        sweeteners={sweeteners}
+        levels={levels}
+        grid={grid}
+        onChange={(k, v) => setGrid((g) => ({ ...g, [k]: v }))}
+      />
       <Button
         type="button"
         disabled={busy !== null}

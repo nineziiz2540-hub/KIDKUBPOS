@@ -22,14 +22,13 @@ export type ProductInput = {
 };
 
 const PRICE_ERROR = "ราคาต้องอยู่ระหว่าง 0–100,000 บาท และมีทศนิยมไม่เกิน 2 ตำแหน่ง";
-const QTY_ERROR = "ปริมาณวัตถุดิบไม่ถูกต้อง";
 
 function text(formData: FormData, key: string): string {
   const v = formData.get(key);
   return typeof v === "string" ? v : "";
 }
 
-type RawMenuFields = {
+export type RawMenuFields = {
   name: string;
   price: string;
   description: string;
@@ -38,8 +37,8 @@ type RawMenuFields = {
   isActive: boolean;
 };
 
-/** The single place the menu field rules live; both the form parser and the editor draft use it. */
-function validateMenuFields(raw: RawMenuFields): { value: ProductInput } | { error: string } {
+/** The single place the menu field rules live; both the form parser and the editor draft (menu-draft.ts) use it. */
+export function validateMenuFields(raw: RawMenuFields): { value: ProductInput } | { error: string } {
   const name = raw.name.trim();
   if (name.length < 1 || name.length > MAX_PRODUCT_NAME) {
     return { error: "ชื่อเมนูต้องมี 1–100 ตัวอักษร" };
@@ -82,58 +81,7 @@ export function parseProductInput(formData: FormData): { value: ProductInput } |
   });
 }
 
-export type RecipeRowInput = { rawMaterialId: string; quantityUsed: number };
-
-/** Rows with no material or no quantity are blank editor rows and are dropped. */
-export function parseRecipeRows(
-  rows: { rawMaterialId: string; quantityUsed: string }[]
-): { value: RecipeRowInput[] } | { error: string } {
-  const filled = rows.filter((r) => r.rawMaterialId !== "" && r.quantityUsed.trim() !== "");
-  if (filled.length > MAX_RECIPE_ROWS) return { error: QTY_ERROR };
-
-  const value: RecipeRowInput[] = [];
-  for (const row of filled) {
-    const raw = row.quantityUsed.trim();
-    if (!/^\d+(\.\d{1,3})?$/.test(raw)) return { error: QTY_ERROR };
-    const qty = Number(raw);
-    if (qty <= 0 || qty > MAX_RECIPE_QTY) return { error: QTY_ERROR };
-    value.push({ rawMaterialId: row.rawMaterialId, quantityUsed: qty });
-  }
-  return { value };
-}
-
-/** Everything the one-page menu editor sends in a single save. */
-export type MenuDraft = {
-  name: string;
-  price: string;
-  description: string;
-  categoryId: string | null;
-  drinkType: DrinkType | null;
-  isActive: boolean;
-  recipes: { rawMaterialId: string; quantityUsed: string }[];
-  modifierIds: string[];
-};
-
-export function parseMenuDraft(
-  d: MenuDraft
-): { value: { menu: ProductInput; recipes: RecipeRowInput[]; modifierIds: string[] } } | { error: string } {
-  const menu = validateMenuFields({
-    name: d.name,
-    price: d.price,
-    description: d.description,
-    categoryId: d.categoryId ?? "",
-    drinkType: d.drinkType ?? "",
-    isActive: d.isActive,
-  });
-  if ("error" in menu) return menu;
-
-  const recipes = parseRecipeRows(d.recipes);
-  if ("error" in recipes) return recipes;
-
-  return {
-    value: { menu: menu.value, recipes: recipes.value, modifierIds: [...new Set(d.modifierIds)] },
-  };
-}
+// The editor's draft (recipe lines, sweetness) and its parser live in menu-draft.ts.
 
 export const MAX_CATEGORY_NAME = 50;
 

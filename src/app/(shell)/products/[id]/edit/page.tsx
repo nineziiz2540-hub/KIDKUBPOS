@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
-import { getProfile, getModifiers, getRawMaterials } from "@/lib/dal";
+import { getProfile, getModifiers } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { loadMenuEditorRefs } from "@/lib/menu-editor-refs";
+import { fillSweetnessGrid, menuDraftFromRows, menuSweeteners } from "@/lib/menu-draft";
 import { MenuEditor } from "@/components/products/menu-editor";
 import { RestoreProductButton } from "@/components/products/restore-product-button";
-import type { DrinkType } from "@/lib/product-input";
 
 export default async function EditMenuPage({
   params,
@@ -48,68 +49,95 @@ export default async function EditMenuPage({
     );
   }
 
-  const [{ data: categories }, modifiers, rawMaterials, { data: recipes }, { data: links }] =
-    await Promise.all([
-      supabase
-        .from("categories")
-        .select("id, name")
-        .eq("tenant_id", profile.tenant_id)
-        .order("sort_order")
-        .order("name"),
-      getModifiers(profile.tenant_id),
-      getRawMaterials(profile.tenant_id),
-      supabase
-        .from("product_recipes")
-        .select("raw_material_id, quantity_used")
-        .eq("product_id", id)
-        .eq("tenant_id", profile.tenant_id),
-      supabase
-        .from("product_modifiers")
-        .select("modifier_id")
-        .eq("product_id", id)
-        .eq("tenant_id", profile.tenant_id),
-    ]);
+  const [{ data: categories }, modifiers, refs, recipes, links, sweetness, customAmounts] = await Promise.all([
+    supabase
+      .from("categories")
+      .select("id, name")
+      .eq("tenant_id", profile.tenant_id)
+      .order("sort_order")
+      .order("name"),
+    getModifiers(profile.tenant_id),
+    loadMenuEditorRefs(profile.tenant_id),
+    supabase
+      .from("product_recipes")
+      .select("line_kind, raw_material_id, group_id, quantity_used, default_member_id, allow_special")
+      .eq("product_id", id)
+      .eq("tenant_id", profile.tenant_id),
+    supabase
+      .from("product_modifiers")
+      .select("modifier_id")
+      .eq("product_id", id)
+      .eq("tenant_id", profile.tenant_id),
+    supabase
+      .from("product_sweetness")
+      .select("group_id, default_member_id, allowed_member_ids, default_level_id, use_custom")
+      .eq("product_id", id)
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle(),
+    supabase
+      .from("sweetness_amounts")
+      .select("member_id, level_id, amount")
+      .eq("product_id", id)
+      .eq("tenant_id", profile.tenant_id),
+  ]);
+
+  // The editor saves the whole menu at once: never open it on a partial read, or saving would drop
+  // the recipe lines, option links or sweetness that failed to load.
+  if (recipes.error || links.error || sweetness.error || customAmounts.error) {
+    console.error(
+      "[EditMenuPage] load failed:",
+      (recipes.error ?? links.error ?? sweetness.error ?? customAmounts.error)?.message
+    );
+    return (
+      <div className="space-y-6">
+        <h1 className="text-[26px] font-bold text-sidebar leading-tight">แก้ไขเมนู</h1>
+        <p role="alert" className="max-w-lg rounded-xl border border-warning/30 bg-warning/10 p-4 text-base font-medium text-sidebar">
+          โหลดข้อมูลเมนูไม่ครบ กรุณารีเฟรชหน้าอีกครั้ง
+        </p>
+      </div>
+    );
+  }
+
+  const recipeRows = recipes.data ?? [];
+  // Archived materials are hidden from the picker, but a line that still uses one is shown (ปิดใช้แล้ว)
+  // and kept until the owner replaces or removes it.
+  const usedMaterialIds = new Set(recipeRows.flatMap((r) => (r.raw_material_id ? [r.raw_material_id] : [])));
+  const materials = [
+    ...refs.materials,
+    ...refs.archivedMaterials.filter((m) => usedMaterialIds.has(m.id)),
+  ].sort((a, b) => a.name.localeCompare(b.name, "th"));
+
+  const initial = menuDraftFromRows({
+    product,
+    recipes: recipeRows,
+    modifierIds: (links.data ?? []).map((l) => l.modifier_id),
+    sweetness: sweetness.data,
+    customAmounts: customAmounts.data ?? [],
+    materialOrder: materials.map((m) => m.id),
+    groupOrder: refs.groups.map((g) => g.id),
+  });
+  if (initial.sweetness?.useCustom) {
+    // A level or sweetener added since the menu's own table was saved gets a cell to fill.
+    initial.sweetness.custom = fillSweetnessGrid(
+      initial.sweetness.custom,
+      menuSweeteners(initial.sweetness),
+      refs.levels,
+      refs.standardAmounts
+    );
+  }
 
   return (
     <MenuEditor
       key={product.id}
       productId={product.id}
-      initial={{
-        name: product.name,
-        price: String(Number(product.price)),
-        description: product.description ?? "",
-        categoryId: product.category_id,
-        drinkType: (product.drink_type as DrinkType | null) ?? null,
-        isActive: product.is_active,
-        // Same order every visit: the order materials appear in the picker (by name).
-        recipes: (recipes ?? [])
-          // Slot lines (choice groups) have no material of their own; this editor only shows fixed lines.
-          .flatMap((r) =>
-            r.raw_material_id
-              ? [
-                  {
-                    rawMaterialId: r.raw_material_id,
-                    quantityUsed: String(Number(r.quantity_used)),
-                  },
-                ]
-              : []
-          )
-          .sort(
-            (a, b) =>
-              rawMaterials.findIndex((m) => m.id === a.rawMaterialId) -
-              rawMaterials.findIndex((m) => m.id === b.rawMaterialId)
-          ),
-        modifierIds: (links ?? []).map((l) => l.modifier_id),
-      }}
+      initial={initial}
       imageUrl={product.image_url}
       categories={categories ?? []}
       modifiers={modifiers}
-      rawMaterials={rawMaterials.map((m) => ({
-        id: m.id,
-        name: m.name,
-        unit: m.unit,
-        costPerUnit: Number(m.cost_per_unit),
-      }))}
+      materials={materials}
+      groups={refs.groups}
+      levels={refs.levels}
+      standardAmounts={refs.standardAmounts}
       photoFailed={photo === "failed"}
     />
   );

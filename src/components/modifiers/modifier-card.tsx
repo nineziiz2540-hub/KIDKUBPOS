@@ -3,14 +3,19 @@ import { deleteModifier, deleteModifierOption } from "@/app/actions/modifiers";
 import type { ModifierWithOptions } from "@/types/app";
 import { Badge } from "@/components/ui/badge";
 import { DeleteButton } from "@/components/ui/delete-button";
-import { ModifierOptionForm } from "./modifier-option-form";
+import type { EffectDraft } from "@/lib/stock/option-effects";
+import { ModifierOptionForm, OptionStockEffects, type EffectGroup, type EffectMaterial } from "./modifier-option-form";
 
 type Props = {
   modifier: ModifierWithOptions;
   isEditing: boolean;
+  /** "ผลต่อสต๊อก" per option id (plain rows for the client form); null = they could not be read */
+  effectsByOption: Record<string, EffectDraft[]> | null;
+  effectGroups: EffectGroup[];
+  effectMaterials: EffectMaterial[];
 };
 
-export function ModifierCard({ modifier }: Props) {
+export function ModifierCard({ modifier, effectsByOption, effectGroups, effectMaterials }: Props) {
   return (
     <div className="rounded-lg border bg-white p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
@@ -46,19 +51,32 @@ export function ModifierCard({ modifier }: Props) {
       {modifier.options.length > 0 && (
         <div className="rounded-md border divide-y text-sm">
           {modifier.options.map((opt) => (
-            <div key={opt.id} className="flex items-center justify-between px-3 py-2">
-              <span>
-                {opt.name}
-                {opt.priceDelta !== 0 && (
-                  <span className="ml-1 text-muted-foreground">
-                    ({opt.priceDelta > 0 ? "+" : ""}{opt.priceDelta} บาท)
-                  </span>
-                )}
-              </span>
-              <form action={deleteModifierOption}>
-                <input type="hidden" name="id" value={opt.id} />
-                <DeleteButton message={`ลบตัวเลือก "${opt.name}"?`} />
-              </form>
+            <div key={opt.id} className="space-y-2 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <span>
+                  {opt.name}
+                  {opt.priceDelta !== 0 && (
+                    <span className="ml-1 text-muted-foreground">
+                      ({opt.priceDelta > 0 ? "+" : ""}{opt.priceDelta} บาท)
+                    </span>
+                  )}
+                </span>
+                <form action={deleteModifierOption}>
+                  <input type="hidden" name="id" value={opt.id} />
+                  <DeleteButton message={`ลบตัวเลือก "${opt.name}"?`} />
+                </form>
+              </div>
+              {effectsByOption ? (
+                <OptionStockEffects
+                  optionId={opt.id}
+                  optionName={opt.name}
+                  initial={effectsByOption[opt.id] ?? []}
+                  groups={effectGroups}
+                  materials={effectMaterials}
+                />
+              ) : (
+                <p className="text-[15px] text-muted-foreground">โหลดผลต่อสต๊อกไม่สำเร็จ — รีเฟรชหน้าเพื่อดูและแก้ไข</p>
+              )}
             </div>
           ))}
         </div>

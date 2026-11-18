@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { getProfile, getModifiers, getRawMaterials } from "@/lib/dal";
+import { getProfile, getModifiers } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
+import { loadMenuEditorRefs } from "@/lib/menu-editor-refs";
 import { MenuEditor } from "@/components/products/menu-editor";
 
 export default async function NewMenuPage({
@@ -16,7 +17,7 @@ export default async function NewMenuPage({
 
   const { category } = await searchParams;
   const supabase = await createClient();
-  const [{ data: categories }, modifiers, rawMaterials] = await Promise.all([
+  const [{ data: categories }, modifiers, refs] = await Promise.all([
     supabase
       .from("categories")
       .select("id, name")
@@ -24,7 +25,7 @@ export default async function NewMenuPage({
       .order("sort_order")
       .order("name"),
     getModifiers(profile.tenant_id),
-    getRawMaterials(profile.tenant_id),
+    loadMenuEditorRefs(profile.tenant_id),
   ]);
 
   // Opened from a category tab: start in that category.
@@ -42,16 +43,15 @@ export default async function NewMenuPage({
         isActive: true,
         recipes: [],
         modifierIds: [],
+        sweetness: null,
       }}
       imageUrl={null}
       categories={categories ?? []}
       modifiers={modifiers}
-      rawMaterials={rawMaterials.map((m) => ({
-        id: m.id,
-        name: m.name,
-        unit: m.unit,
-        costPerUnit: Number(m.cost_per_unit),
-      }))}
+      materials={refs.materials}
+      groups={refs.groups}
+      levels={refs.levels}
+      standardAmounts={refs.standardAmounts}
     />
   );
 }

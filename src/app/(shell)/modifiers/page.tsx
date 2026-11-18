@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Sliders } from "lucide-react";
-import { getProfile, getModifiers } from "@/lib/dal";
+import { getProfile, getModifiers, getChoiceGroups, getRawMaterials, getArchivedRawMaterials } from "@/lib/dal";
+import { createClient } from "@/lib/supabase/server";
 import { createModifier, updateModifier } from "@/app/actions/modifiers";
 import { ModifierForm } from "@/components/modifiers/modifier-form";
 import { ModifierCard } from "@/components/modifiers/modifier-card";
+import type { EffectGroup, EffectMaterial } from "@/components/modifiers/modifier-option-form";
+import { effectDraftsFromRows, type EffectDraft } from "@/lib/stock/option-effects";
 
 export default async function ModifiersPage({
   searchParams,
@@ -16,7 +19,34 @@ export default async function ModifiersPage({
   if (profile.role !== "owner" && profile.role !== "manager") redirect("/");
 
   const { action, id } = await searchParams;
-  const modifiers = await getModifiers(profile.tenant_id);
+  const supabase = await createClient();
+  const [modifiers, groups, activeMaterials, archivedMaterials, { data: effectRows, error: effectsError }] = await Promise.all([
+    getModifiers(profile.tenant_id),
+    getChoiceGroups(profile.tenant_id),
+    getRawMaterials(profile.tenant_id),
+    getArchivedRawMaterials(profile.tenant_id),
+    supabase
+      .from("modifier_option_effects")
+      .select("option_id, kind, group_id, raw_material_id, amount")
+      .eq("tenant_id", profile.tenant_id)
+      .order("id"),
+  ]);
+
+  // "ผลต่อสต๊อก": names and units only (no cost leaves the server from this page).
+  const effectsByOption: Record<string, EffectDraft[]> = {};
+  for (const row of effectRows ?? []) {
+    (effectsByOption[row.option_id] ??= []).push(...effectDraftsFromRows([row]));
+  }
+  const usedMaterialIds = new Set((effectRows ?? []).flatMap((r) => (r.raw_material_id ? [r.raw_material_id] : [])));
+  const effectMaterials: EffectMaterial[] = [
+    ...activeMaterials.map((m) => ({ id: m.id, name: m.name, unit: m.unit, archived: false })),
+    ...archivedMaterials
+      .filter((m) => usedMaterialIds.has(m.id))
+      .map((m) => ({ id: m.id, name: m.name, unit: m.unit, archived: true })),
+  ];
+  const effectGroups: EffectGroup[] = groups
+    .filter((g) => g.kind !== "sweetener")
+    .map((g) => ({ id: g.id, name: g.name, unit: g.members.find((m) => !m.archived)?.unit ?? "" }));
 
   const editTarget =
     action === "edit" && id
@@ -73,6 +103,12 @@ export default async function ModifiersPage({
               key={mod.id}
               modifier={mod}
               isEditing={editTarget?.id === mod.id}
+              // A failed read must not open an editor that would save "no effects" over the real ones.
+              effectsByOption={
+                effectsError ? null : Object.fromEntries(mod.options.map((o) => [o.id, effectsByOption[o.id] ?? []]))
+              }
+              effectGroups={effectGroups}
+              effectMaterials={effectMaterials}
             />
           ))}
         </div>
