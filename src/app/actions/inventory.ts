@@ -1,6 +1,5 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 
@@ -37,8 +36,8 @@ export async function createRawMaterial(
   const minStock =
     typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("raw_materials").insert({
+  // Owner/manager only (checked above); the user client can no longer write stock tables.
+  const { error } = await createAdminClient().from("raw_materials").insert({
     tenant_id: profile.tenant_id,
     name: name.trim(),
     unit: unit.trim(),
@@ -81,8 +80,7 @@ export async function updateRawMaterial(
   const minStock =
     typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
 
-  const supabase = await createClient();
-  const { error } = await supabase
+  const { error } = await createAdminClient()
     .from("raw_materials")
     .update({
       name: name.trim(),

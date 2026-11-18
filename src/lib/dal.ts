@@ -402,11 +402,16 @@ export async function getCustomerByPhone(
   return data as Customer | null;
 }
 
+/**
+ * Materials WITH cost, for the owner/manager pages only. Costs are not selectable by the user client
+ * (column grants), so this reads through the admin client behind the same owner/manager check as
+ * every other cost read; anyone else gets an empty list.
+ */
 export async function getRawMaterials(tenantId: string): Promise<RawMaterial[]> {
-  const supabase = await createClient();
-  const { data } = await supabase
+  if (!(await canViewCosts(tenantId))) return [];
+  const { data } = await createAdminClient()
     .from("raw_materials")
-    .select("*")
+    .select("id, tenant_id, name, unit, cost_per_unit, current_stock, min_stock_alert, created_at, updated_at")
     .eq("tenant_id", tenantId)
     .is("archived_at", null)
     .order("name");
