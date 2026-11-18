@@ -63,6 +63,7 @@ export function CancelHeldBillModal({ billId, queueNumber, customerLabel, onDone
           </div>
           <input
             type="text"
+            maxLength={500}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="หรือพิมพ์เหตุผลเอง"

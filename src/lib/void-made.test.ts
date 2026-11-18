@@ -33,3 +33,20 @@ test("totalCups sums quantities", () => {
   assert.equal(totalCups(items), 4);
   assert.equal(totalCups([]), 0);
 });
+
+import { isMadeComplete } from "./void-made.ts";
+
+test("isMadeComplete: nothing chosen is incomplete, none/all are complete", () => {
+  assert.equal(isMadeComplete(null, {}, items), false);
+  assert.equal(isMadeComplete("none", {}, items), true);
+  assert.equal(isMadeComplete("all", {}, items), true);
+});
+
+test("isMadeComplete: some needs at least one cup made", () => {
+  assert.equal(isMadeComplete("some", {}, items), false);
+  assert.equal(isMadeComplete("some", { a: 0, b: 0 }, items), false);
+  assert.equal(isMadeComplete("some", { a: -4 }, items), false);
+  assert.equal(isMadeComplete("some", { b: 1 }, items), true);
+  assert.equal(isMadeComplete("some", { a: 9 }, items), true);
+  assert.equal(isMadeComplete("some", { zzz: 2 }, items), false);
+});

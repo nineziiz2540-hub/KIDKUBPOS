@@ -30,3 +30,15 @@ export function buildMade(
 export function totalCups(items: VoidItem[]): number {
   return items.reduce((sum, i) => sum + i.quantity, 0);
 }
+
+/** Is the answer a real one? Nothing chosen is not an answer, and "some" with every counter at 0
+ *  would silently restock everything, so it needs at least one cup made. */
+export function isMadeComplete(
+  mode: MadeMode | null,
+  counts: Record<string, number>,
+  items: VoidItem[]
+): boolean {
+  if (mode === null) return false;
+  if (mode !== "some") return true;
+  return items.some((i) => clampMade(counts[i.id], i.quantity) > 0);
+}

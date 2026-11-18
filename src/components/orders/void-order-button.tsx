@@ -6,7 +6,7 @@ import { PinPad } from "@/components/ui/pin-pad";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { MadeQuestion, type MadeChoice } from "@/components/orders/made-question";
-import { buildMade, totalCups, type VoidItem } from "@/lib/void-made";
+import { buildMade, isMadeComplete, totalCups, type VoidItem } from "@/lib/void-made";
 
 const MAX_PIN_ATTEMPTS = 5;
 
@@ -20,6 +20,7 @@ export function VoidOrderButton({ orderId, items }: { orderId: string; items: Vo
   // No default: the PIN pad stays locked until the cashier says whether the drinks were made.
   const [made, setMade] = useState<MadeChoice>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const madeComplete = isMadeComplete(made, counts, items);
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, action, pending] = useActionState<VoidOrderState, FormData>(
     voidOrder,
@@ -91,7 +92,7 @@ export function VoidOrderButton({ orderId, items }: { orderId: string; items: Vo
           <input
             type="hidden"
             name="made"
-            value={made === null ? "" : JSON.stringify(buildMade(made, counts, items))}
+            value={!madeComplete || made === null ? "" : JSON.stringify(buildMade(made, counts, items))}
           />
 
           <div className="space-y-1.5">
@@ -103,6 +104,7 @@ export function VoidOrderButton({ orderId, items }: { orderId: string; items: Vo
               onChange={(e) => setReason(e.target.value)}
               required
               rows={2}
+              maxLength={500}
               className="w-full rounded-md border border-input px-3 py-2 text-sm"
               placeholder="เช่น สั่งผิด, ลูกค้ายกเลิก"
             />
@@ -125,7 +127,7 @@ export function VoidOrderButton({ orderId, items }: { orderId: string; items: Vo
           <div className="space-y-1.5">
             <Label>PIN ของ Manager/Owner เพื่ออนุมัติ</Label>
             <PinPad
-              disabled={pending || reason.trim() === "" || made === null}
+              disabled={pending || reason.trim() === "" || !madeComplete}
               onComplete={(pin) => {
                 if (!formRef.current) return;
                 const hidden = formRef.current.elements.namedItem(
@@ -140,7 +142,7 @@ export function VoidOrderButton({ orderId, items }: { orderId: string; items: Vo
                 hidden.value = "";
               }}
             />
-            {(reason.trim() === "" || made === null) && (
+            {(reason.trim() === "" || !madeComplete) && (
               <p className="text-xs text-muted-foreground text-center">
                 {reason.trim() === ""
                   ? "กรอกเหตุผลก่อนกดตัวเลข"

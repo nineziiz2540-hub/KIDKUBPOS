@@ -234,14 +234,18 @@ async function heldBillStockLines(
 
   const totals = new Map<string, number>();
   for (const item of items) {
-    const resolved = resolveLine(
-      item.productId,
-      item.quantity,
-      toLineChoices(item.choices),
-      (item.selectedModifiers ?? []).map((m) => m.optionId),
-      loaded.catalog
-    );
-    if ("error" in resolved) continue;
+    const lineChoices = toLineChoices(item.choices);
+    const optionIds = (item.selectedModifiers ?? []).map((m) => m.optionId);
+    let resolved = resolveLine(item.productId, item.quantity, lineChoices, optionIds, loaded.catalog);
+    // A special bean the menu no longer allows: keep the default bean, fixed materials (milk, cups)
+    // and sweetener, as priceLinesAsCharged does.
+    if ("error" in resolved && lineChoices) {
+      resolved = resolveLine(item.productId, item.quantity, { ...lineChoices, slots: [] }, optionIds, loaded.catalog);
+    }
+    if ("error" in resolved) {
+      console.error("[cancelHeldBill] held line skipped for waste:", item.productId);
+      continue;
+    }
     for (const l of resolved.stock) totals.set(l.materialId, (totals.get(l.materialId) ?? 0) + l.qty);
   }
   return [...totals].map(([material_id, qty]) => ({ material_id, qty }));

@@ -502,6 +502,8 @@ export async function voidOrder(
       if (recheck?.status === "cancelled") return { error: "บิลนี้ถูกยกเลิกไปแล้ว" };
       if (recheck?.status === "refunded") return { error: "บิลนี้ถูกคืนเงินไปแล้ว ไม่สามารถยกเลิกได้" };
       if (recheck?.status === "unpaid") return { error: "บิลนี้ถูกแจ้งว่าไม่ได้รับเงิน" };
+    } else if (voidError.message.includes("reason_required")) {
+      return { error: "กรุณาระบุเหตุผล (ไม่เกิน 500 ตัวอักษร)" };
     } else if (voidError.message.includes("invalid_made")) {
       return { error: "กรุณาเลือกว่าเครื่องดื่มชงไปแล้วหรือยัง" };
     }

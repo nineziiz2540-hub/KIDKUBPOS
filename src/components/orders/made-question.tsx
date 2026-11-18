@@ -1,5 +1,5 @@
 "use client";
-import type { MadeMode, VoidItem } from "@/lib/void-made";
+import { isMadeComplete, type MadeMode, type VoidItem } from "@/lib/void-made";
 
 export type MadeChoice = MadeMode | null;
 
@@ -83,6 +83,9 @@ export function MadeQuestion({ value, onChange, partial }: Props) {
             );
           })}
         </ul>
+      )}
+      {partial && value === "some" && !isMadeComplete(value, partial.counts, partial.items) && (
+        <p className="text-sm text-muted-foreground text-center">เลือกจำนวนแก้วที่ชงแล้วอย่างน้อย 1 แก้ว</p>
       )}
     </div>
   );
