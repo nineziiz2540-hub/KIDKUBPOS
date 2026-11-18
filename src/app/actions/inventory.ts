@@ -9,6 +9,63 @@ function isManagerOrOwner(role: string): boolean {
   return role === "owner" || role === "manager";
 }
 
+type MaterialFields = {
+  name: string;
+  unit: string;
+  cost_per_unit: number;
+  min_stock_alert: number;
+  category: string;
+  purchase_unit: string | null;
+  purchase_size: number | null;
+  track_stock: boolean;
+};
+
+function parseMaterialFields(formData: FormData): { fields?: MaterialFields; error?: string } {
+  const name = formData.get("name");
+  const unit = formData.get("unit");
+  const costRaw = formData.get("cost_per_unit");
+  const minRaw = formData.get("min_stock_alert");
+  const categoryRaw = formData.get("category");
+  const purchaseUnitRaw = formData.get("purchase_unit");
+  const purchaseSizeRaw = formData.get("purchase_size");
+
+  if (typeof name !== "string" || name.trim() === "") return { error: "กรุณากรอกชื่อวัตถุดิบ" };
+  if (typeof unit !== "string" || unit.trim() === "") return { error: "กรุณากรอกหน่วย" };
+  const costPerUnit = typeof costRaw === "string" && costRaw !== "" ? parseFloat(costRaw) : 0;
+  if (!Number.isFinite(costPerUnit) || costPerUnit < 0) return { error: "กรุณากรอกต้นทุนที่ถูกต้อง" };
+  const minStock = typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
+  if (!Number.isFinite(minStock) || minStock < 0) return { error: "กรุณากรอกจำนวนเตือนที่ถูกต้อง" };
+
+  const category =
+    typeof categoryRaw === "string" && categoryRaw.trim() !== ""
+      ? categoryRaw.trim().slice(0, 60)
+      : "วัตถุดิบทั่วไป";
+
+  const purchaseUnit =
+    typeof purchaseUnitRaw === "string" && purchaseUnitRaw.trim() !== "" ? purchaseUnitRaw.trim() : null;
+  let purchaseSize: number | null = null;
+  if (typeof purchaseSizeRaw === "string" && purchaseSizeRaw.trim() !== "") {
+    purchaseSize = parseFloat(purchaseSizeRaw);
+    if (!Number.isFinite(purchaseSize) || purchaseSize <= 0) return { error: "กรุณากรอกขนาดที่ซื้อให้ถูกต้อง" };
+  }
+  if ((purchaseUnit === null) !== (purchaseSize === null)) {
+    return { error: "ซื้อเป็น: กรอกทั้งชื่อหน่วยและขนาด หรือเว้นว่างทั้งคู่" };
+  }
+
+  return {
+    fields: {
+      name: name.trim(),
+      unit: unit.trim(),
+      cost_per_unit: costPerUnit,
+      min_stock_alert: minStock,
+      category,
+      purchase_unit: purchaseUnit,
+      purchase_size: purchaseSize,
+      track_stock: formData.get("track_stock") === "on",
+    },
+  };
+}
+
 export async function createRawMaterial(
   prevState: InventoryState,
   formData: FormData
@@ -17,34 +74,14 @@ export async function createRawMaterial(
   if (!profile || !isManagerOrOwner(profile.role)) {
     return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
   }
-
-  const name = formData.get("name");
-  const unit = formData.get("unit");
-  const costRaw = formData.get("cost_per_unit");
-  const minRaw = formData.get("min_stock_alert");
-
-  if (typeof name !== "string" || name.trim() === "") {
-    return { error: "กรุณากรอกชื่อวัตถุดิบ" };
-  }
-  if (typeof unit !== "string" || unit.trim() === "") {
-    return { error: "กรุณากรอกหน่วย" };
-  }
-  const costPerUnit = typeof costRaw === "string" ? parseFloat(costRaw) : NaN;
-  if (isNaN(costPerUnit) || costPerUnit < 0) {
-    return { error: "กรุณากรอกต้นทุนที่ถูกต้อง" };
-  }
-  const minStock =
-    typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
+  const parsed = parseMaterialFields(formData);
+  if (!parsed.fields) return { error: parsed.error };
 
   // Owner/manager only (checked above); the user client can no longer write stock tables.
   const { error } = await createAdminClient().from("raw_materials").insert({
     tenant_id: profile.tenant_id,
-    name: name.trim(),
-    unit: unit.trim(),
-    cost_per_unit: costPerUnit,
-    min_stock_alert: isNaN(minStock) ? 0 : minStock,
+    ...parsed.fields,
   });
-
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
   revalidatePath("/inventory");
@@ -59,39 +96,16 @@ export async function updateRawMaterial(
   if (!profile || !isManagerOrOwner(profile.role)) {
     return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
   }
-
   const id = formData.get("id");
-  const name = formData.get("name");
-  const unit = formData.get("unit");
-  const costRaw = formData.get("cost_per_unit");
-  const minRaw = formData.get("min_stock_alert");
-
   if (typeof id !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
-  if (typeof name !== "string" || name.trim() === "") {
-    return { error: "กรุณากรอกชื่อวัตถุดิบ" };
-  }
-  if (typeof unit !== "string" || unit.trim() === "") {
-    return { error: "กรุณากรอกหน่วย" };
-  }
-  const costPerUnit = typeof costRaw === "string" ? parseFloat(costRaw) : NaN;
-  if (isNaN(costPerUnit) || costPerUnit < 0) {
-    return { error: "กรุณากรอกต้นทุนที่ถูกต้อง" };
-  }
-  const minStock =
-    typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
+  const parsed = parseMaterialFields(formData);
+  if (!parsed.fields) return { error: parsed.error };
 
   const { error } = await createAdminClient()
     .from("raw_materials")
-    .update({
-      name: name.trim(),
-      unit: unit.trim(),
-      cost_per_unit: costPerUnit,
-      min_stock_alert: isNaN(minStock) ? 0 : minStock,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ ...parsed.fields, updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id);
-
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
 
   revalidatePath("/inventory");
@@ -134,7 +148,32 @@ export async function deleteRawMaterial(formData: FormData): Promise<InventorySt
 
   if (error) {
     console.error("[deleteRawMaterial]", error.message);
-    return { error: "ลบวัตถุดิบไม่สำเร็จ" };
+    return { error: "ปิดใช้ไม่สำเร็จ" };
+  }
+  if (!data || data.length === 0) return { error: "ไม่พบวัตถุดิบ" };
+
+  revalidatePath("/inventory");
+  return { success: true };
+}
+
+export async function unarchiveRawMaterial(formData: FormData): Promise<InventoryState> {
+  const profile = await getProfile();
+  if (!profile || !isManagerOrOwner(profile.role)) {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+  const id = formData.get("id");
+  if (typeof id !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
+
+  const { data, error } = await createAdminClient()
+    .from("raw_materials")
+    .update({ archived_at: null, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("tenant_id", profile.tenant_id)
+    .not("archived_at", "is", null)
+    .select("id");
+  if (error) {
+    console.error("[unarchiveRawMaterial]", error.message);
+    return { error: "เปิดใช้ไม่สำเร็จ" };
   }
   if (!data || data.length === 0) return { error: "ไม่พบวัตถุดิบ" };
 

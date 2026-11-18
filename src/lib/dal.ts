@@ -355,8 +355,23 @@ export type RawMaterial = {
   cost_per_unit: number;
   current_stock: number;
   min_stock_alert: number;
+  category: string;
+  purchase_unit: string | null;
+  purchase_size: number | null;
+  track_stock: boolean;
+  archived_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type MaterialHistoryRow = {
+  id: string;
+  type: string;
+  quantity: number;
+  reason: string | null;
+  legacy: boolean;
+  occurred_at: string;
+  order_number: string | null;
 };
 
 export async function getTeamMembers(tenantId: string): Promise<TeamMember[]> {
@@ -407,15 +422,66 @@ export async function getCustomerByPhone(
  * (column grants), so this reads through the admin client behind the same owner/manager check as
  * every other cost read; anyone else gets an empty list.
  */
+const RAW_MATERIAL_COLUMNS =
+  "id, tenant_id, name, unit, cost_per_unit, current_stock, min_stock_alert, category, purchase_unit, purchase_size, track_stock, archived_at, created_at, updated_at";
+
 export async function getRawMaterials(tenantId: string): Promise<RawMaterial[]> {
   if (!(await canViewCosts(tenantId))) return [];
   const { data } = await createAdminClient()
     .from("raw_materials")
-    .select("id, tenant_id, name, unit, cost_per_unit, current_stock, min_stock_alert, created_at, updated_at")
+    .select(RAW_MATERIAL_COLUMNS)
     .eq("tenant_id", tenantId)
     .is("archived_at", null)
     .order("name");
   return (data ?? []) as RawMaterial[];
+}
+
+/** Archived (ปิดใช้แล้ว) materials. Owner/manager only; admin client behind canViewCosts. */
+export async function getArchivedRawMaterials(tenantId: string): Promise<RawMaterial[]> {
+  if (!(await canViewCosts(tenantId))) return [];
+  const { data } = await createAdminClient()
+    .from("raw_materials")
+    .select(RAW_MATERIAL_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .not("archived_at", "is", null)
+    .order("name");
+  return (data ?? []) as RawMaterial[];
+}
+
+/** Last 50 ledger rows of one material (newest first), with the bill number for sale rows. Owner/manager only. */
+export async function getMaterialHistory(
+  tenantId: string,
+  materialId: string
+): Promise<MaterialHistoryRow[]> {
+  if (!(await canViewCosts(tenantId))) return [];
+  const { data } = await createAdminClient()
+    .from("inventory_transactions")
+    .select("id, type, quantity, reason, legacy, occurred_at, orders(order_number)")
+    .eq("tenant_id", tenantId)
+    .eq("raw_material_id", materialId)
+    .order("occurred_at", { ascending: false })
+    .limit(50);
+  type Row = {
+    id: string;
+    type: string;
+    quantity: number;
+    reason: string | null;
+    legacy: boolean;
+    occurred_at: string;
+    orders: { order_number: string | null } | { order_number: string | null }[] | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const o = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+    return {
+      id: r.id,
+      type: r.type,
+      quantity: Number(r.quantity),
+      reason: r.reason,
+      legacy: r.legacy,
+      occurred_at: r.occurred_at,
+      order_number: o?.order_number ?? null,
+    };
+  });
 }
 
 export async function getModifiers(tenantId: string): Promise<ModifierWithOptions[]> {

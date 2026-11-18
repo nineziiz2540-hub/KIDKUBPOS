@@ -31,6 +31,10 @@ function Toaster() {
               {toast.type === "error" ? <X size={12} /> : <Check size={12} />}
             </span>
             <ToastPrimitive.Title className="text-sm font-medium" />
+            {/* Renders only when the toast was added with actionProps (e.g. "ย้อนกลับ"). */}
+            {toast.actionProps && (
+              <ToastPrimitive.Action className="ml-2 min-h-14 rounded-md border border-current px-4 text-base font-semibold" />
+            )}
           </ToastPrimitive.Root>
         ))}
       </ToastPrimitive.Viewport>

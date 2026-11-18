@@ -1,17 +1,29 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FlaskConical } from "lucide-react";
-import { getProfile, getRawMaterials } from "@/lib/dal";
 import {
-  createRawMaterial,
-  updateRawMaterial,
-  receiveStock,
-  adjustStock,
-} from "@/app/actions/inventory";
+  getProfile,
+  getRawMaterials,
+  getArchivedRawMaterials,
+  getMaterialHistory,
+} from "@/lib/dal";
+import { createRawMaterial, updateRawMaterial } from "@/app/actions/inventory";
 import { RawMaterialForm } from "@/components/inventory/raw-material-form";
 import { StockActionForm } from "@/components/inventory/stock-action-form";
 import { MaterialRow } from "@/components/inventory/material-row";
+import { MaterialHistory } from "@/components/inventory/material-history";
+import { ArchivedMaterialsSection } from "@/components/inventory/archived-materials-section";
 import { SearchFilter } from "@/components/ui/search-filter";
+
+const DEFAULT_CATEGORIES = [
+  "วัตถุดิบทั่วไป",
+  "เมล็ดกาแฟ",
+  "มัทฉะ",
+  "นม & ครีม",
+  "ไซรัป & สารให้ความหวาน",
+  "บรรจุภัณฑ์",
+  "ของผสมเตรียม",
+];
 
 export default async function InventoryPage({
   searchParams,
@@ -23,117 +35,145 @@ export default async function InventoryPage({
   if (profile.role !== "owner" && profile.role !== "manager") redirect("/");
 
   const { action, id } = await searchParams;
-  const materials = await getRawMaterials(profile.tenant_id);
+  const [materials, archived] = await Promise.all([
+    getRawMaterials(profile.tenant_id),
+    getArchivedRawMaterials(profile.tenant_id),
+  ]);
 
   const editTarget =
-    action === "edit" && id
-      ? (materials.find((m) => m.id === id) ?? null)
-      : null;
+    action === "edit" && id ? (materials.find((m) => m.id === id) ?? null) : null;
   const stockTarget =
     (action === "receive" || action === "adjust") && id
       ? (materials.find((m) => m.id === id) ?? null)
       : null;
+  const historyTarget =
+    action === "history" && id ? (materials.find((m) => m.id === id) ?? null) : null;
+  const history = historyTarget
+    ? await getMaterialHistory(profile.tenant_id, historyTarget.id)
+    : [];
+
+  const categories = Array.from(
+    new Set([...DEFAULT_CATEGORIES, ...materials.map((m) => m.category), ...archived.map((m) => m.category)])
+  );
+
+  // Group the active list by หมวด: shop categories in the usual order, then any custom ones.
+  const grouped = categories
+    .map((c) => ({ category: c, items: materials.filter((m) => m.category === c) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-sidebar flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-sidebar">
             <FlaskConical size={24} />
             วัตถุดิบ
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            จัดการวัตถุดิบและสต็อก
-          </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">จัดการวัตถุดิบและสต๊อก</p>
         </div>
         {action !== "new" && (
           <Link
             href="/inventory?action=new"
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            className="inline-flex h-14 items-center gap-1.5 rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent/90"
           >
             + เพิ่มวัตถุดิบ
           </Link>
         )}
       </div>
 
-      {/* Create form */}
       {action === "new" && (
-        <div className="rounded-lg border bg-white p-5 space-y-4">
+        <div className="space-y-4 rounded-lg border bg-white p-5">
           <h2 className="text-base font-semibold text-sidebar">เพิ่มวัตถุดิบใหม่</h2>
-          <RawMaterialForm action={createRawMaterial} />
+          <RawMaterialForm action={createRawMaterial} categories={categories} />
         </div>
       )}
 
-      {/* Edit form */}
       {editTarget && (
-        <div className="rounded-lg border bg-white p-5 space-y-4">
-          <h2 className="text-base font-semibold text-sidebar">
-            แก้ไข: {editTarget.name}
-          </h2>
-          <RawMaterialForm action={updateRawMaterial} defaults={editTarget} />
-        </div>
-      )}
-
-      {/* Stock action form */}
-      {stockTarget && (
-        <div className="rounded-lg border bg-white p-5 space-y-4">
-          <h2 className="text-base font-semibold text-sidebar">
-            {action === "receive" ? "รับสินค้าเข้าสต็อก" : "ปรับสต็อก"}: {stockTarget.name}
-          </h2>
-          <StockActionForm
-            action={action === "receive" ? receiveStock : adjustStock}
-            rawMaterialId={stockTarget.id}
-            type={action as "receive" | "adjust"}
-            materialName={stockTarget.name}
-            currentStock={Number(stockTarget.current_stock)}
-            unit={stockTarget.unit}
+        <div className="space-y-4 rounded-lg border bg-white p-5">
+          <h2 className="text-base font-semibold text-sidebar">แก้ไข: {editTarget.name}</h2>
+          <RawMaterialForm
+            key={editTarget.id}
+            action={updateRawMaterial}
+            defaults={editTarget}
+            categories={categories}
           />
         </div>
       )}
 
-      {/* Materials table */}
+      {stockTarget && (
+        <div className="space-y-4 rounded-lg border bg-white p-5">
+          <h2 className="text-base font-semibold text-sidebar">
+            {action === "receive" ? "รับของเข้า" : "ปรับยอด"}: {stockTarget.name}
+          </h2>
+          <StockActionForm
+            key={`${action}-${stockTarget.id}`}
+            type={action as "receive" | "adjust"}
+            rawMaterialId={stockTarget.id}
+            materialName={stockTarget.name}
+            currentStock={Number(stockTarget.current_stock)}
+            unit={stockTarget.unit}
+            purchaseUnit={stockTarget.purchase_unit}
+            purchaseSize={stockTarget.purchase_size === null ? null : Number(stockTarget.purchase_size)}
+            role={profile.role}
+          />
+        </div>
+      )}
+
+      {historyTarget && (
+        <MaterialHistory name={historyTarget.name} unit={historyTarget.unit} rows={history} />
+      )}
+
       {materials.length === 0 ? (
-        <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="overflow-hidden rounded-lg border bg-white">
           <div className="p-8 text-center text-muted-foreground">
             ยังไม่มีวัตถุดิบ — กด &quot;เพิ่มวัตถุดิบ&quot; เพื่อเริ่มต้น
           </div>
         </div>
       ) : (
         <SearchFilter placeholder="ค้นหาวัตถุดิบ..." emptyMessage="ไม่พบวัตถุดิบที่ค้นหา">
-          <div className="rounded-lg border bg-white overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/30 border-b">
-                <tr>
-                  <th className="text-left px-4 py-3 font-medium text-sidebar">ชื่อ</th>
-                  <th className="text-left px-4 py-3 font-medium text-sidebar">หน่วย</th>
-                  <th className="text-right px-4 py-3 font-medium text-sidebar">ต้นทุน/หน่วย</th>
-                  <th className="text-right px-4 py-3 font-medium text-sidebar">สต็อก</th>
-                  <th className="text-right px-4 py-3 font-medium text-sidebar">แจ้งเตือน ≤</th>
-                  <th className="text-right px-4 py-3 font-medium text-sidebar">การดำเนินการ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {materials.map((m) => {
-                  const isLow =
-                    Number(m.min_stock_alert) > 0 &&
-                    Number(m.current_stock) <= Number(m.min_stock_alert);
-                  return (
-                    <MaterialRow
-                      key={m.id}
-                      id={m.id}
-                      name={m.name}
-                      unit={m.unit}
-                      costPerUnit={Number(m.cost_per_unit)}
-                      currentStock={Number(m.current_stock)}
-                      minStockAlert={Number(m.min_stock_alert)}
-                      isLow={isLow}
-                    />
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-5">
+            {grouped.map((g) => (
+              <section key={g.category} className="space-y-2">
+                <h2 className="text-base font-semibold text-sidebar">{g.category}</h2>
+                <div className="overflow-hidden rounded-lg border bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="border-b bg-muted/30">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-sidebar">ชื่อ</th>
+                        <th className="px-4 py-3 text-right font-medium text-sidebar">คงเหลือ</th>
+                        <th className="px-4 py-3 text-right font-medium text-sidebar">ต้นทุน/หน่วย</th>
+                        <th className="px-4 py-3 text-left font-medium text-sidebar">สถานะ</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.items.map((m) => (
+                        <MaterialRow
+                          key={m.id}
+                          id={m.id}
+                          name={m.name}
+                          unit={m.unit}
+                          costPerUnit={Number(m.cost_per_unit)}
+                          currentStock={Number(m.current_stock)}
+                          minStockAlert={Number(m.min_stock_alert)}
+                          purchaseUnit={m.purchase_unit}
+                          purchaseSize={m.purchase_size === null ? null : Number(m.purchase_size)}
+                          trackStock={m.track_stock}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
           </div>
         </SearchFilter>
+      )}
+
+      {archived.length > 0 && (
+        <ArchivedMaterialsSection
+          materials={archived.map((m) => ({ id: m.id, name: m.name, category: m.category }))}
+        />
       )}
     </div>
   );
