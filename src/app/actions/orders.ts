@@ -8,6 +8,7 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems, priceCartItemsAsCharged } from "@/lib/order-pricing";
 import { STALE } from "@/lib/order-pricing-core";
+import { orderItemsPayload } from "@/lib/order-items-payload";
 import { diffReductions } from "@/lib/held-bill-diff";
 import { createFailureOutcome, HELD_BILL_STALE_MESSAGE, OLD_TAB_MESSAGE } from "@/lib/order-create-errors";
 import {
@@ -278,16 +279,7 @@ export async function createOrder(
       customer_id: data.customerId ?? null,
       note: data.note ?? null,
     },
-    p_items: priced.lines.map((line) => ({
-      product_id: line.productId,
-      product_name: line.productName,
-      unit_price: line.unitPrice,
-      quantity: line.quantity,
-      subtotal: line.lineTotal,
-      category_name: line.categoryName,
-      modifiers_snapshot: line.modifiersSnapshot,
-      note: line.note,
-    })) as unknown as Json,
+    p_items: orderItemsPayload(priced.lines) as unknown as Json,
     p_held_bill_id: data.heldBillId ?? null,
     p_held_bill_version: data.heldBillVersion ?? null,
     p_held_reductions: reductions as unknown as Json,
@@ -339,14 +331,7 @@ export async function createOrder(
   }
 
   if (created.created) {
-    // 9. Deduct stock (best-effort — don't block on failure). Only for a new bill: a replay's
-    // stock was deducted when it was first saved.
-    const { error: deductError } = await supabase.rpc("deduct_stock_for_order", {
-      p_order_id: created.order_id,
-    });
-    if (deductError) {
-      console.error("[createOrder] deduct_stock_for_order failed:", deductError.message);
-    }
+    // Stock was deducted inside order_record, in the bill's own transaction.
     if (data.heldBillId !== undefined) revalidatePath("/pos");
     revalidatePath("/orders");
   }

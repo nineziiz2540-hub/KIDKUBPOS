@@ -14,7 +14,7 @@ import {
   type PricingCatalog,
 } from "@/lib/order-pricing-core";
 
-import { emptyStockCatalog } from "@/lib/stock/stock-core";
+import { loadStockCatalog } from "@/lib/stock/catalog";
 
 export type { PricedLine };
 
@@ -91,8 +91,11 @@ async function loadPricingCatalog(
     for (const o of options ?? []) optionMap.set(o.id, o);
   }
 
+  const stock = await loadStockCatalog(supabase, tenantId, productIds, optionIds);
+  if ("error" in stock) return stock;
+
   return {
-    catalog: { products: productMap, linkedModifiers, modifiers: modifierMap, options: optionMap, stock: emptyStockCatalog() },
+    catalog: { products: productMap, linkedModifiers, modifiers: modifierMap, options: optionMap, stock: stock.catalog },
   };
 }
 
