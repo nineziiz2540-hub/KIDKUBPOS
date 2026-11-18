@@ -192,7 +192,8 @@ test("a cart line without choices (pre-D1) prices as before", () => {
   const plain = priceLines([item(["large", "pearl"], 140)], catalog());
   assert.ok(!("error" in plain));
   assert.deepEqual(plain.lines[0]!.stock, []);
-  assert.deepEqual(plain.lines[0]!.choicesSnapshot, { slots: [], sweetness: null });
+  assert.deepEqual(plain.lines[0]!.choicesSnapshot, { slots: [], slotAddGroupIds: [], sweetness: null });
+  assert.equal(plain.lines[0]!.basePrice, 55);
 });
 
 test("as charged keeps the device total but still resolves stock", () => {
@@ -252,4 +253,14 @@ test("isValidCartChoices shape-checks the client's choices", () => {
   assert.equal(isValidCartChoices({ slots: [{ groupId: "g" }] }), false);
   assert.equal(isValidCartChoices({ slots: Array.from({ length: 9 }, () => ({ groupId: "g", memberId: "m" })) }), false);
   assert.equal(isValidCartChoices({ slots: [], sweetness: { levelId: 1 } }), false);
+});
+
+test("basePrice is the menu price, without the specialty bean, in both pricing paths", () => {
+  const priced = priceLines([beanItem("m_kenya", 75)], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in priced));
+  assert.equal(priced.lines[0]!.unitPrice, 75);
+  assert.equal(priced.lines[0]!.basePrice, 55);
+  const charged = priceLinesAsCharged([beanItem("m_kenya", 60)], catalog({ stock: beanStock() }));
+  assert.ok(!("error" in charged));
+  assert.equal(charged.lines[0]!.basePrice, 55);
 });

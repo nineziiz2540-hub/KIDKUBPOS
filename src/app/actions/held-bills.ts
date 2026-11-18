@@ -5,7 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 import { verifyManagerPin } from "@/lib/manager-pin";
 import { computeDiscount, type DiscountType } from "@/lib/discount";
-import { priceCartItems, type PricedLine } from "@/lib/order-pricing";
+import { priceCartItems } from "@/lib/order-pricing";
+import { normalizeHeldItems } from "@/lib/held-bill-items";
 import { diffReductions } from "@/lib/held-bill-diff";
 import type { CartItem } from "@/types/app";
 import type { Json } from "@/types/database";
@@ -33,32 +34,6 @@ type Validated = {
   discountReason: string | null;
   total: number;
 };
-
-/**
- * Stored items are rebuilt from the server's pricing so the snapshot (and therefore the audit log
- * that diffs it) carries real product/option names and prices, not whatever the client sent.
- */
-function normalizedItems(input: CartItem[], lines: PricedLine[]): CartItem[] {
-  return input.map((item, i) => {
-    const line = lines[i]!;
-    return {
-      cartItemKey: item.cartItemKey,
-      productId: line.productId,
-      name: line.productName,
-      basePrice: line.unitPrice - (line.modifiersSnapshot ?? []).reduce((s, m) => s + m.priceDelta, 0),
-      quantity: line.quantity,
-      selectedModifiers: item.selectedModifiers.map((m, j) => ({
-        modifierId: m.modifierId,
-        optionId: m.optionId,
-        modifierName: line.modifiersSnapshot?.[j]?.group ?? m.modifierName,
-        optionName: line.modifiersSnapshot?.[j]?.option ?? m.optionName,
-        priceDelta: line.modifiersSnapshot?.[j]?.priceDelta ?? 0,
-      })),
-      totalPrice: line.lineTotal,
-      note: line.note,
-    };
-  });
-}
 
 async function validate(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -108,7 +83,7 @@ async function validate(
   }
 
   return {
-    items: normalizedItems(input.items, priced.lines),
+    items: normalizeHeldItems(input.items, priced.lines),
     orderType: input.orderType,
     customerId: input.customerId ?? null,
     customerLabel: label === "" ? null : label,

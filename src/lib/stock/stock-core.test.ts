@@ -85,8 +85,9 @@ test("kenya, less sweet, milk mix, extra shot (spec 6.4 example)", () => {
   assert.deepEqual(r.stock, sorted([["ice", 150], ["kenya", 27], ["milk", 180], ["mix", 15]]));
   assert.equal(r.priceDeltaSatang, 4000);
   assert.deepEqual(r.snapshot.slots, [
-    { groupId: "beans", memberId: "m_kenya", materialId: "kenya", label: "kenya", tier: "special" },
+    { groupId: "beans", memberId: "m_kenya", materialId: "kenya", label: "kenya", tier: "special", priceDelta: 20 },
   ]);
+  assert.deepEqual(r.snapshot.slotAddGroupIds, ["beans"]);
   assert.deepEqual(r.snapshot.sweetness, { levelId: "less", levelName: "หวานน้อย", memberId: "m_mix", label: "mix" });
 });
 

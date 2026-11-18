@@ -24,6 +24,8 @@ export type PricedLine = {
   productName: string;
   categoryName: string | null;
   quantity: number;
+  /** the catalog menu price in baht, before options and specialty beans */
+  basePrice: number;
   unitPrice: number;
   lineTotal: number;
   modifiersSnapshot: { group: string; option: string; priceDelta: number }[] | null;
@@ -179,6 +181,7 @@ export function priceLines(
       productName: product.name,
       categoryName: categoryName(product),
       quantity: item.quantity,
+      basePrice: Number(product.price),
       unitPrice: unitSatang / 100,
       lineTotal: lineSatang / 100,
       modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
@@ -243,12 +246,13 @@ export function priceLinesAsCharged(
       productName: product.name,
       categoryName: categoryName(product),
       quantity: item.quantity,
+      basePrice: Number(product.price),
       unitPrice: Math.round(lineSatang / item.quantity) / 100,
       lineTotal: lineSatang / 100,
       modifiersSnapshot: snapshot.length > 0 ? snapshot : null,
       note: note !== "" ? note : null,
       stock: "error" in resolved ? [] : resolved.stock,
-      choicesSnapshot: "error" in resolved ? { slots: [], sweetness: null } : resolved.snapshot,
+      choicesSnapshot: "error" in resolved ? { slots: [], slotAddGroupIds: [], sweetness: null } : resolved.snapshot,
     });
   }
 

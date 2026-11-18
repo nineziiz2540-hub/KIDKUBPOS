@@ -42,7 +42,9 @@ export type LineChoices = {
 
 export type StockLine = { materialId: string; qty: number };
 export type ChoiceSnapshot = {
-  slots: { groupId: string; memberId: string; materialId: string; label: string; tier: "house" | "special" }[];
+  slots: { groupId: string; memberId: string; materialId: string; label: string; tier: "house" | "special"; priceDelta: number }[];
+  /** groups the line's options add to (slot_add effects), for the specialty price */
+  slotAddGroupIds: string[];
   sweetness: { levelId: string; levelName: string; memberId: string | null; label: string | null } | null;
 };
 export type ResolvedLine = {
@@ -117,7 +119,7 @@ export function resolveLine(
 
   const resolvedSlots: { member: GroupMember }[] = [];
   const memberByGroup = new Map<string, GroupMember>();
-  const snapshot: ChoiceSnapshot = { slots: [], sweetness: null };
+  const snapshot: ChoiceSnapshot = { slots: [], slotAddGroupIds: [], sweetness: null };
 
   for (const line of catalog.recipes.get(productId) ?? []) {
     if (line.kind === "fixed") {
@@ -137,7 +139,7 @@ export function resolveLine(
     memberByGroup.set(line.groupId, member);
     snapshot.slots.push({
       groupId: line.groupId, memberId: member.id, materialId: member.materialId,
-      label: member.label, tier: member.tier,
+      label: member.label, tier: member.tier, priceDelta: member.priceDelta,
     });
   }
 
@@ -154,6 +156,8 @@ export function resolveLine(
       }
     }
   }
+
+  snapshot.slotAddGroupIds = slotAddGroupIds;
 
   const sweetness = catalog.productSweetness.get(productId);
   if (sweetness) {
