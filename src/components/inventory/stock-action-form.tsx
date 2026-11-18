@@ -68,6 +68,7 @@ function ReceiveForm({
       const result = await receiveStock(prev, formData);
       if (result?.success) {
         const ledgerId = result.ledgerId;
+        let done = false;
         const label = `รับของเข้า: ${materialName} ${entry} ${entryUnit}`;
         const toastId = toast.add({
           title: label,
@@ -77,8 +78,10 @@ function ReceiveForm({
             ? {
                 children: "ย้อนกลับ",
                 onClick: async () => {
-                  const undo = await undoReceive(ledgerId);
+                  if (done) return;
+                  done = true;
                   toast.close(toastId);
+                  const undo = await undoReceive(ledgerId);
                   toast.add(
                     undo?.error
                       ? { title: undoErrorMessage(undo.error), type: "error" }

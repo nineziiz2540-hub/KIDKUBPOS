@@ -53,6 +53,7 @@ export function MaterialRow({
       toast.add({ title: result.error, type: "error" });
       return;
     }
+    let done = false;
     const toastId = toast.add({
       title: `ปิดใช้: ${name}`,
       type: "success",
@@ -60,10 +61,12 @@ export function MaterialRow({
       actionProps: {
         children: "ย้อนกลับ",
         onClick: async () => {
+          if (done) return;
+          done = true;
+          toast.close(toastId);
           const undoFd = new FormData();
           undoFd.set("id", id);
           const undo = await unarchiveRawMaterial(undoFd);
-          toast.close(toastId);
           toast.add(
             undo?.error
               ? { title: undo.error, type: "error" }

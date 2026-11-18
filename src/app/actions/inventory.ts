@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import { parseMaterialInput } from "@/lib/stock/material-input";
 
 export type InventoryState = { error?: string; success?: boolean; ledgerId?: string } | undefined;
 
@@ -9,61 +10,11 @@ function isManagerOrOwner(role: string): boolean {
   return role === "owner" || role === "manager";
 }
 
-type MaterialFields = {
-  name: string;
-  unit: string;
-  cost_per_unit: number;
-  min_stock_alert: number;
-  category: string;
-  purchase_unit: string | null;
-  purchase_size: number | null;
-  track_stock: boolean;
-};
-
-function parseMaterialFields(formData: FormData): { fields?: MaterialFields; error?: string } {
-  const name = formData.get("name");
-  const unit = formData.get("unit");
-  const costRaw = formData.get("cost_per_unit");
-  const minRaw = formData.get("min_stock_alert");
-  const categoryRaw = formData.get("category");
-  const purchaseUnitRaw = formData.get("purchase_unit");
-  const purchaseSizeRaw = formData.get("purchase_size");
-
-  if (typeof name !== "string" || name.trim() === "") return { error: "กรุณากรอกชื่อวัตถุดิบ" };
-  if (typeof unit !== "string" || unit.trim() === "") return { error: "กรุณากรอกหน่วย" };
-  const costPerUnit = typeof costRaw === "string" && costRaw !== "" ? parseFloat(costRaw) : 0;
-  if (!Number.isFinite(costPerUnit) || costPerUnit < 0) return { error: "กรุณากรอกต้นทุนที่ถูกต้อง" };
-  const minStock = typeof minRaw === "string" && minRaw !== "" ? parseFloat(minRaw) : 0;
-  if (!Number.isFinite(minStock) || minStock < 0) return { error: "กรุณากรอกจำนวนเตือนที่ถูกต้อง" };
-
-  const category =
-    typeof categoryRaw === "string" && categoryRaw.trim() !== ""
-      ? categoryRaw.trim().slice(0, 60)
-      : "วัตถุดิบทั่วไป";
-
-  const purchaseUnit =
-    typeof purchaseUnitRaw === "string" && purchaseUnitRaw.trim() !== "" ? purchaseUnitRaw.trim() : null;
-  let purchaseSize: number | null = null;
-  if (typeof purchaseSizeRaw === "string" && purchaseSizeRaw.trim() !== "") {
-    purchaseSize = parseFloat(purchaseSizeRaw);
-    if (!Number.isFinite(purchaseSize) || purchaseSize <= 0) return { error: "กรุณากรอกขนาดที่ซื้อให้ถูกต้อง" };
-  }
-  if ((purchaseUnit === null) !== (purchaseSize === null)) {
-    return { error: "ซื้อเป็น: กรอกทั้งชื่อหน่วยและขนาด หรือเว้นว่างทั้งคู่" };
-  }
-
-  return {
-    fields: {
-      name: name.trim(),
-      unit: unit.trim(),
-      cost_per_unit: costPerUnit,
-      min_stock_alert: minStock,
-      category,
-      purchase_unit: purchaseUnit,
-      purchase_size: purchaseSize,
-      track_stock: formData.get("track_stock") === "on",
-    },
-  };
+function parseMaterialFields(formData: FormData) {
+  return parseMaterialInput((k) => {
+    const v = formData.get(k);
+    return typeof v === "string" ? v : null;
+  });
 }
 
 export async function createRawMaterial(
@@ -101,12 +52,21 @@ export async function updateRawMaterial(
   const parsed = parseMaterialFields(formData);
   if (!parsed.fields) return { error: parsed.error };
 
-  const { error } = await createAdminClient()
+  // An absent track_stock leaves the column unchanged; archived rows stay read-only.
+  const { track_stock, ...rest } = parsed.fields;
+  const { data, error } = await createAdminClient()
     .from("raw_materials")
-    .update({ ...parsed.fields, updated_at: new Date().toISOString() })
+    .update({
+      ...rest,
+      ...(track_stock === undefined ? {} : { track_stock }),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
-    .eq("tenant_id", profile.tenant_id);
+    .eq("tenant_id", profile.tenant_id)
+    .is("archived_at", null)
+    .select("id");
   if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+  if (!data || data.length === 0) return { error: "วัตถุดิบนี้ปิดใช้แล้ว" };
 
   revalidatePath("/inventory");
   return { success: true };
