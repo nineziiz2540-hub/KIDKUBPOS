@@ -19,6 +19,8 @@ import { RestorePaidButton } from "@/components/orders/restore-paid-button";
 import { TransferCheckToggle } from "@/components/orders/transfer-check-toggle";
 import { formatDateTime, formatTime } from "@/lib/bangkok-time";
 import { formatBaht } from "@/lib/order-history";
+import { billLineDetail } from "@/lib/stock/option-window";
+import type { ChoiceSnapshot } from "@/lib/stock/stock-core";
 
 type OrderItem = {
   id: string;
@@ -27,6 +29,8 @@ type OrderItem = {
   quantity: number;
   subtotal: number;
   modifiers_snapshot: { option: string }[] | null;
+  /** bean/sweetness snapshot (round D1); null on bills from before */
+  choices: ChoiceSnapshot | null;
   note: string | null;
 };
 
@@ -78,8 +82,19 @@ const ORDER_SELECT = [
   "refunded_at, refund_reason, refund_method, refunded_by, refunded_approved_by",
   "unpaid_at, unpaid_reason, unpaid_by, unpaid_approved_by",
   "transfer_verified_at, transfer_verified_by, sold_offline",
-  "order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, note)",
+  "order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, choices, note)",
 ].join(", ");
+
+/** Choices (bean, sweetness) then options under the line's name; pre-D1 lines look as they always did. */
+function detailOf(item: OrderItem): string | null {
+  return billLineDetail(item.choices, (item.modifiers_snapshot ?? []).map((m) => m.option));
+}
+
+/** The void dialog names each cup the way the cart did: "ลาเต้ · เคนยา (+20) · หวานน้อย · นมมิกซ์". */
+function voidNameOf(item: OrderItem): string {
+  const detail = item.choices ? detailOf(item) : null;
+  return detail ? `${item.product_name} · ${detail}` : item.product_name;
+}
 
 const HELD_EVENT_LABELS: Record<HeldBillEvent["eventType"], string> = {
   held: "พักบิล",
@@ -237,11 +252,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           <div key={item.id} className="flex items-center gap-4 px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="text-base font-medium text-sidebar">{item.product_name}</p>
-              {item.modifiers_snapshot && item.modifiers_snapshot.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {item.modifiers_snapshot.map((m) => m.option).join(", ")}
-                </p>
-              )}
+              {detailOf(item) && <p className="text-sm text-muted-foreground">{detailOf(item)}</p>}
               {item.note && <p className="text-sm font-medium text-accent">📝 {item.note}</p>}
               <p className="text-sm text-muted-foreground">
                 ฿{Number(item.unit_price).toFixed(2)} × {item.quantity}
@@ -416,7 +427,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           {isTransfer && <MarkUnpaidButton orderId={order.id} />}
           <VoidOrderButton
             orderId={order.id}
-            items={order.order_items.map((i) => ({ id: i.id, name: i.product_name, quantity: i.quantity }))}
+            items={order.order_items.map((i) => ({ id: i.id, name: voidNameOf(i), quantity: i.quantity }))}
           />
           <RefundOrderButton orderId={order.id} />
         </div>

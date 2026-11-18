@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildLine,
+  billLineDetail,
   cartLineParts,
   choiceParts,
   choicesFromWindow,
@@ -18,6 +19,7 @@ import {
   priceTag,
   refreshChoices,
   shownSweetener,
+  snapshotParts,
   sweetenerHint,
   toggleOption,
   type WindowState,
@@ -431,7 +433,7 @@ test("cart text: every choice shown, non-defaults marked", () => {
     { text: "คั่วกลาง", changed: false }, { text: "หวานน้อย", changed: true }, { text: "นมมิกซ์", changed: true },
   ]);
   assert.deepEqual(choiceParts(kenyaLine.choices, d).map((p) => [p.text, p.changed]),
-    [["เคนยา", true], ["หวานน้อย", true], ["นมมิกซ์", true]]);
+    [["เคนยา (+20)", true], ["หวานน้อย", true], ["นมมิกซ์", true]]);
   const none = choicesFromWindow("latte", catalog, pickLevel(initialWindowState("latte", catalog, []), "lv_none"), []);
   assert.deepEqual(choiceParts(none, d), [{ text: "คั่วกลาง", changed: false }, { text: "ไม่หวาน", changed: true }]);
 });
@@ -446,7 +448,7 @@ test("cart text: a ไม่หวาน-default menu marks the added sweetener;
 
 test("cart text when the bean/sweetness data did not load: every word shown, none marked", () => {
   assert.deepEqual(choiceParts(kenyaLine.choices, null), [
-    { text: "เคนยา", changed: false }, { text: "หวานน้อย", changed: false }, { text: "นมมิกซ์", changed: false },
+    { text: "เคนยา (+20)", changed: false }, { text: "หวานน้อย", changed: false }, { text: "นมมิกซ์", changed: false },
   ]);
 });
 
@@ -460,7 +462,7 @@ test("R42: every chosen option shows after the bean/sweetness words, always mark
     ],
   };
   assert.deepEqual(cartLineParts(line, d), [
-    { text: "เคนยา", changed: true }, { text: "หวานน้อย", changed: true }, { text: "นมมิกซ์", changed: true },
+    { text: "เคนยา (+20)", changed: true }, { text: "หวานน้อย", changed: true }, { text: "นมมิกซ์", changed: true },
     { text: "เพิ่มช็อต", changed: true }, { text: "ไข่มุก", changed: true },
   ]);
   // defaults stay plain; options are still marked even when the stock data did not load
@@ -471,4 +473,31 @@ test("R42: every chosen option shows after the bean/sweetness words, always mark
   const legacy: CartItem = { ...plainShot };
   delete legacy.choices;
   assert.deepEqual(cartLineParts(legacy, d), [{ text: "เพิ่มช็อต", changed: true }]);
+});
+
+test("a special shows its price in the cart words; a free special and a house pick show the label only", () => {
+  const free = { ...kenyaLine.choices!, slots: [{ ...kenyaLine.choices!.slots[0]!, priceDelta: 0 }] };
+  assert.equal(choiceParts(free, null)[0]!.text, "เคนยา");
+  const house = { ...kenyaLine.choices!, slots: [{ groupId: "g_bean", memberId: "m_med", label: "คั่วกลาง", tier: "house" as const, priceDelta: 0 }] };
+  assert.equal(choiceParts(house, null)[0]!.text, "คั่วกลาง");
+});
+
+const snap = {
+  slots: [{ groupId: "g_bean", memberId: "m_kenya", materialId: "mat1", label: "เคนยา", tier: "special" as const, priceDelta: 20 }],
+  slotAddGroupIds: [],
+  sweetness: { levelId: "lv_less", levelName: "หวานน้อย", memberId: "s_mix", label: "นมมิกซ์" },
+};
+
+test("bill history words: same words and order as the cart", () => {
+  assert.deepEqual(snapshotParts(snap), ["เคนยา (+20)", "หวานน้อย", "นมมิกซ์"]);
+  assert.deepEqual(snapshotParts(snap), choiceParts(kenyaLine.choices, null).map((p) => p.text));
+  assert.equal(billLineDetail(snap, ["เพิ่มช็อต"]), "เคนยา (+20) · หวานน้อย · นมมิกซ์ · เพิ่มช็อต");
+  assert.deepEqual(snapshotParts({ ...snap, sweetness: { levelId: "n", levelName: "ไม่หวาน", memberId: null, label: null } }), ["เคนยา (+20)", "ไม่หวาน"]);
+});
+
+test("bill history: a pre-D1 line (no snapshot) renders as before; an empty snapshot shows nothing", () => {
+  assert.deepEqual(snapshotParts(null), []);
+  assert.equal(billLineDetail(null, ["ร้อน", "หวาน"]), "ร้อน, หวาน");
+  assert.equal(billLineDetail(null, []), null);
+  assert.equal(billLineDetail({ slots: [], slotAddGroupIds: [], sweetness: null }, []), null);
 });

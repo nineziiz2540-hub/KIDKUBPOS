@@ -150,3 +150,16 @@ test("reprice: stock data not loaded on this page → the line's choices are kep
   assert.deepEqual(out!.choices, k.choices);
   assert.equal(out!.totalPrice, 90);
 });
+
+test("reprice: a resumed line without choices, on a menu that has option rows now, gets the menu defaults (as the server applies)", () => {
+  const legacy: CartItem = { cartItemKey: "l", productId: "latte", name: "ลาเต้", basePrice: 65, quantity: 2, selectedModifiers: [], totalPrice: 130, note: null };
+  const [out] = repriceItems([legacy], products, modifiers, stock);
+  assert.deepEqual(out!.choices, {
+    slots: [{ groupId: "g_bean", memberId: "m_med", label: "คั่วกลาง", tier: "house", priceDelta: 0 }],
+    slotAddGroupIds: [],
+    sweetness: { levelId: "lv_normal", levelName: "หวานปกติ", memberId: "s_syrup", memberLabel: "ไซรัป" },
+  });
+  assert.equal(out!.totalPrice, 140);
+  // stock data not loaded: untouched, still no choices
+  assert.equal("choices" in repriceItems([legacy], products, modifiers, null)[0]!, false);
+});

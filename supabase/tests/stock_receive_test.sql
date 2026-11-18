@@ -16,6 +16,7 @@ declare
   m uuid;                        -- main material (tenant A)
   m2 uuid;                       -- negative-balance material
   m3 uuid;                       -- archived material
+  mz uuid;                       -- material whose cost was never entered (avg 0)
   mb uuid;                       -- tenant B material
   l1 uuid; l2 uuid; l3 uuid; l4 uuid;
   v record;
@@ -82,6 +83,13 @@ begin
     (select current_stock = 1960 and cost_per_unit = 0.03 from public.raw_materials where id = m2)
     and exists (select 1 from public.inventory_transactions
                  where raw_material_id = m2 and type = 'receive' and quantity = 980 and unit_cost = 0));
+
+  -- ── R43: an average of 0 (cost never entered) is unknown: the lot's unit cost becomes the average ──
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock)
+  values (ta, 'QA ไม่มีต้นทุน', 'g', 0, 500) returning id into mz;
+  perform public.stock_receive(ta, ua, mz, 500, 30, null);
+  r := r || jsonb_build_object('zero_avg_counts_as_unknown',
+    (select current_stock = 1000 and cost_per_unit = 0.06 from public.raw_materials where id = mz));
 
   -- ── Rejections ──────────────────────────────────────────────────────────
   ok := true;

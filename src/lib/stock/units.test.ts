@@ -25,6 +25,11 @@ test("movingAverage uses the latest cost when balance is zero or negative", () =
   assert.equal(movingAverage(0, 0.05, 1000, 0.06), 0.06);
 });
 
+test("movingAverage: an average of 0 (cost never entered) is unknown, so the lot cost becomes the average (R43)", () => {
+  assert.equal(movingAverage(1000, 0, 2000, 0.06), 0.06);
+  assert.equal(movingAverage(1000, 0, 500, 0), 0);
+});
+
 test("movingAverage throws on programmer errors", () => {
   assert.throws(() => movingAverage(10, 0.05, 0, 0.06), RangeError);
   assert.throws(() => movingAverage(10, 0.05, 5, -1), RangeError);

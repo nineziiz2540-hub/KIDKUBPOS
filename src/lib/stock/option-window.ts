@@ -6,7 +6,7 @@ import type { CartChoices, CartItem, ModifierWithOptions, PosProduct, SelectedMo
 import { formatPrice } from "../cash.ts";
 import { lineTotal } from "../cart-math.ts";
 import { defaultChoices, isDefaultChoice } from "./pos-choices.ts";
-import { defaultLevel, defaultSlotMember, type ChoiceGroup, type GroupMember, type StockCatalog } from "./stock-core.ts";
+import { defaultLevel, defaultSlotMember, type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type StockCatalog } from "./stock-core.ts";
 
 export type Chip = { id: string; label: string; priceDelta: number };
 
@@ -315,6 +315,34 @@ export function footerText(mode: "add" | "edit", line: CartItem): string {
 
 export type LinePart = { text: string; changed: boolean };
 
+/** A bean/matcha word: a special shows its price too ("เคนยา (+20)", spec §7.1); a house pick is just its label. */
+function slotText(s: { label: string; tier: "house" | "special"; priceDelta: number }): string {
+  const tag = s.tier === "special" ? priceTag(s.priceDelta) : null;
+  return tag === null ? s.label : `${s.label} (${tag})`;
+}
+
+/** The words of a saved order line's choice snapshot (bill history, void dialog): same words and order as the cart. */
+export function snapshotParts(snapshot: ChoiceSnapshot | null | undefined): string[] {
+  if (!snapshot) return [];
+  const parts = (snapshot.slots ?? []).map(slotText);
+  const sw = snapshot.sweetness;
+  if (sw) {
+    parts.push(sw.levelName);
+    if (sw.memberId !== null && sw.label !== null) parts.push(sw.label);
+  }
+  return parts;
+}
+
+/**
+ * A saved order line's detail under its name: choices (bean, level, sweetener) then the chosen options.
+ * A line from before round D1 (no snapshot) keeps the old look: its options joined by ", ".
+ */
+export function billLineDetail(snapshot: ChoiceSnapshot | null | undefined, options: string[]): string | null {
+  if (!snapshot) return options.length === 0 ? null : options.join(", ");
+  const all = [...snapshotParts(snapshot), ...options];
+  return all.length === 0 ? null : all.join(" · ");
+}
+
 /**
  * A cart line's bean/sweetness words; `changed` = not the menu default (shown bold accent).
  * `defaults` null = the page has no stock data, so nothing can be told apart: no word is marked.
@@ -323,7 +351,7 @@ export function choiceParts(choices: CartChoices | undefined, defaults: CartChoi
   if (!choices) return [];
   const differs = (part: Parameters<typeof isDefaultChoice>[1]) => defaults !== null && !isDefaultChoice(defaults, part);
   const parts: LinePart[] = choices.slots.map((s) => ({
-    text: s.label,
+    text: slotText(s),
     changed: differs({ kind: "slot", groupId: s.groupId, memberId: s.memberId }),
   }));
   const sw = choices.sweetness;

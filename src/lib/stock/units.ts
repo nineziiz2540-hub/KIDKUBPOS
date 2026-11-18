@@ -21,6 +21,7 @@ export function movingAverage(balance: number, avgCost: number, qty: number, uni
   if (qty <= 0) throw new RangeError("qty must be > 0");
   if (unitCost < 0) throw new RangeError("unitCost must be >= 0");
   if (avgCost < 0) throw new RangeError("avgCost must be >= 0");
-  if (balance <= 0) return unitCost;
+  // avg 0 = a cost never entered (R43): unknown, not free; a free lot is dealt with by the caller passing unitCost 0.
+  if (balance <= 0 || avgCost === 0) return unitCost;
   return (balance * avgCost + qty * unitCost) / (balance + qty);
 }

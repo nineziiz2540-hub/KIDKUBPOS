@@ -535,7 +535,9 @@ export async function getLowStockAlerts(
   const { data } = await supabase
     .from("raw_materials")
     .select("id, name, unit, current_stock, min_stock_alert")
-    .eq("tenant_id", tenantId);
+    .eq("tenant_id", tenantId)
+    .is("archived_at", null)
+    .eq("track_stock", true);
 
   return ((data ?? []) as Array<{
     id: string;

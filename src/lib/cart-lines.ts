@@ -5,6 +5,7 @@ import type { CartItem, ModifierWithOptions } from "../types/app.ts";
 import { lineTotal } from "./cart-math.ts";
 import { lineIdentity } from "./held-bill-diff.ts";
 import { refreshChoices } from "./stock/option-window.ts";
+import { defaultChoices } from "./stock/pos-choices.ts";
 import type { StockCatalog } from "./stock/stock-core.ts";
 
 /** The line at another quantity, its total re-priced (specialty price per cup included). */
@@ -36,7 +37,7 @@ export function replaceLine(cart: CartItem[], key: string, edited: CartItem): Ca
  * refreshed from today's catalog (labels, tiers, specialty prices; a pick no longer offered → the menu
  * default). A menu no longer on sale is left untouched for the server to refuse with a clear message.
  * `catalog` null = this page could not load its stock data: the choices are kept as stored (the server
- * re-checks them). A line without choices (pre-D1) stays without.
+ * re-checks them). A line without choices (pre-D1) gets the menu defaults when the menu has option rows now, else stays without.
  */
 export function repriceItems(
   items: CartItem[],
@@ -51,10 +52,17 @@ export function repriceItems(
       const option = modifiers.find((mod) => mod.id === m.modifierId)?.options.find((o) => o.id === m.optionId);
       return option ? { ...m, priceDelta: option.priceDelta } : m;
     });
-    const choices =
-      item.choices && catalog
-        ? refreshChoices(item.productId, catalog, item.choices, selectedModifiers.map((m) => m.optionId))
-        : item.choices;
+    let choices = item.choices;
+    if (catalog) {
+      // A line with no choices (pre-D1, or the menu had none then) gets today's menu defaults when the
+      // menu has option rows now — what the server applies — so a later special default is not STALE.
+      // A menu without option rows stays without choices.
+      if (choices) choices = refreshChoices(item.productId, catalog, choices, selectedModifiers.map((m) => m.optionId));
+      else {
+        const d = defaultChoices(item.productId, catalog);
+        if (d.slots.length > 0 || d.sweetness !== null) choices = d;
+      }
+    }
     const out: CartItem = {
       ...item,
       basePrice: product.price,
