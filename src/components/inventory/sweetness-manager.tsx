@@ -184,7 +184,7 @@ export function SweetnessGridTable({
                         aria-label={`${s.label} · ${l.name}`}
                         inputMode="decimal"
                         value={grid[k] ?? ""}
-                        placeholder="0"
+                        placeholder="—"
                         onChange={(e) => onChange(k, e.target.value)}
                         className="h-14 w-full min-w-24 rounded-lg border bg-white px-2 text-center text-lg text-sidebar"
                       />

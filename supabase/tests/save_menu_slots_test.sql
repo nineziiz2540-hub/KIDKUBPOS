@@ -1,5 +1,6 @@
 -- Menu editor saves (round D1, Task 12) — DB test for save_menu / replace_product_recipes with
--- bean/matcha slot lines and the menu's sweetness. EXPECTS 20261118170000_save_menu_slots.sql TO BE APPLIED.
+-- bean/matcha slot lines and the menu's sweetness, and save_option_effects ("ผลต่อสต๊อก").
+-- EXPECTS 20261118170000_save_menu_slots.sql TO BE APPLIED.
 -- (Dry run: send the migration text + this file in ONE execute_sql call; alone, before the migration,
 --  the slot / sweetness keys come back false.)
 -- It never commits: it ends with raise exception 'RESULT <json>', so every row it creates is rolled back.
@@ -15,7 +16,9 @@ declare
   gBean uuid; gMatcha uuid; gSweet uuid; gB uuid; gSweetB uuid;
   memHouse uuid; memSpec uuid; memMatcha uuid; sSyrup uuid; sCond uuid; sMix uuid; memB uuid; sB uuid;
   lNone uuid; lLow uuid; lNormal uuid; lHigh uuid; lB uuid;
-  p1 uuid; p2 uuid; p3 uuid; p4 uuid;
+  p1 uuid; p2 uuid; p3 uuid; p4 uuid; p5 uuid;
+  mArch uuid;
+  modA uuid; optA uuid; modB uuid; optB uuid;
   err text;
   ok boolean;
   menu jsonb;
@@ -45,6 +48,11 @@ begin
   insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock) values (ta, 'นมข้น', 'ml', 0.08, 0) returning id into mCond;
   insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock) values (ta, 'นมมิกซ์', 'ml', 0.07, 0) returning id into mMix;
   insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock) values (tb, 'เมล็ด ร้านอื่น', 'g', 0.9, 0) returning id into mB;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, archived_at) values (ta, 'วิปเก่า', 'g', 0.3, 0, now()) returning id into mArch;
+  insert into public.modifiers (tenant_id, name) values (ta, 'เพิ่ม') returning id into modA;
+  insert into public.modifier_options (modifier_id, name) values (modA, 'เพิ่มช็อต') returning id into optA;
+  insert into public.modifiers (tenant_id, name) values (tb, 'เพิ่ม B') returning id into modB;
+  insert into public.modifier_options (modifier_id, name) values (modB, 'ช็อต B') returning id into optB;
 
   insert into public.choice_groups (tenant_id, name, kind) values (ta, 'เมล็ด', 'bean') returning id into gBean;
   insert into public.choice_groups (tenant_id, name, kind) values (ta, 'มัทฉะ', 'matcha') returning id into gMatcha;
@@ -422,7 +430,192 @@ begin
   r := r || jsonb_build_object('other_shop_menu_not_found',
     err = 'product_not_found' and (select count(*) = 3 from public.product_recipes where product_id = p2));
 
-  -- ── grants unchanged: anon cannot call either function ──────────────────
+  -- ── a sweetener group is never a recipe line; a special default needs specials allowed ──
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  err := null;
+  begin
+    perform public.save_menu(p2, jsonb_build_object('name', 'x', 'price', 75, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('line_kind', 'slot', 'group_id', gSweet, 'quantity_used', 20)), '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := err = 'invalid_group';
+  err := null;
+  begin
+    perform public.replace_product_recipes(p2,
+      jsonb_build_array(jsonb_build_object('line_kind', 'slot', 'group_id', gSweet, 'quantity_used', 20)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_group';
+  reset role;
+  r := r || jsonb_build_object('sweetener_group_slot_rejected',
+    ok and (select count(*) = 3 from public.product_recipes where product_id = p2));
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  err := null;
+  begin
+    perform public.save_menu(p2, jsonb_build_object('name', 'x', 'price', 75, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('line_kind', 'slot', 'group_id', gBean, 'quantity_used', 18,
+        'default_member_id', memSpec, 'allow_special', false)), '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := err = 'special_default_not_allowed';
+  -- the same special default with specials allowed, and a house default with specials off, are fine
+  err := null;
+  begin
+    p5 := public.save_menu(null, jsonb_build_object('name', 'Espresso เคนยา', 'price', 80, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('line_kind', 'slot', 'group_id', gBean, 'quantity_used', 18,
+        'default_member_id', memSpec, 'allow_special', true)), '{}'::uuid[]);
+    perform public.replace_product_recipes(p5,
+      jsonb_build_array(jsonb_build_object('line_kind', 'slot', 'group_id', gBean, 'quantity_used', 18,
+        'default_member_id', memHouse, 'allow_special', false)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null;
+  reset role;
+  r := r || jsonb_build_object('special_default_not_allowed_rejected',
+    ok and (select count(*) = 3 from public.product_recipes where product_id = p2)
+    and (select count(*) = 1 from public.product_recipes
+          where product_id = p5 and default_member_id = memHouse and not allow_special));
+
+  -- ── save_option_effects: the option's set is replaced in one transaction ──
+  -- tenant B's own effect on its own option (as the default role) — must stay untouched throughout
+  insert into public.modifier_option_effects (tenant_id, option_id, kind, group_id, amount) values (tb, optB, 'slot_add', gB, 7);
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(
+      jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 9),
+      jsonb_build_object('kind', 'material_add', 'raw_material_id', mMilk, 'amount', 15)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null
+    and (select count(*) = 2 from public.modifier_option_effects where option_id = optA and tenant_id = ta);
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(
+      jsonb_build_object('kind', 'slot_add', 'group_id', gMatcha, 'amount', 3)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null
+    and (select count(*) = 1 from public.modifier_option_effects
+          where option_id = optA and tenant_id = ta and kind = 'slot_add' and group_id = gMatcha
+            and raw_material_id is null and amount = 3);
+  -- a set with one bad entry changes nothing (its first, valid entry is not written either)
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(
+      jsonb_build_object('kind', 'material_add', 'raw_material_id', mIce, 'amount', 5),
+      jsonb_build_object('kind', 'slot_add', 'group_id', gB, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_group'
+    and (select count(*) = 1 from public.modifier_option_effects where option_id = optA)
+    and (select count(*) = 1 from public.modifier_option_effects where option_id = optA and group_id = gMatcha);
+  reset role;
+  r := r || jsonb_build_object('effects_replaced_atomically', ok);
+
+  -- another shop's option / group / material are refused; that shop's own effect is untouched
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_option_effects(optB, '[]'::jsonb);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'option_not_found';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'slot_add', 'group_id', gB, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_group';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'material_add', 'raw_material_id', mB, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_material';
+  reset role;
+  r := r || jsonb_build_object('foreign_option_rejected',
+    ok and (select count(*) = 1 from public.modifier_option_effects where option_id = optB and tenant_id = tb and amount = 7)
+    and (select count(*) = 1 from public.modifier_option_effects where option_id = optA));
+
+  -- sweetener groups, archived materials, bad amounts, repeats, unknown kinds and bad shapes are refused
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'slot_add', 'group_id', gSweet, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_group';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'material_add', 'raw_material_id', mArch, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_material';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 0)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect_amount';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 1.2345)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect_amount';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 100001)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect_amount';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(
+      jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 9),
+      jsonb_build_object('kind', 'slot_add', 'group_id', gBean, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'duplicate_effect';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_array(jsonb_build_object('kind', 'drop', 'group_id', gBean, 'amount', 9)));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect';
+  err := null;
+  begin
+    perform public.save_option_effects(optA, jsonb_build_object('kind', 'slot_add'));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect';
+  err := null;
+  begin
+    perform public.save_option_effects(optA,
+      (select jsonb_agg(jsonb_build_object('kind', 'material_add', 'raw_material_id', mMilk, 'amount', i)) from generate_series(1, 21) i));
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'invalid_effect';
+  reset role;
+  r := r || jsonb_build_object('effect_rules_checked',
+    ok and (select count(*) = 1 from public.modifier_option_effects where option_id = optA and group_id = gMatcha));
+
+  -- staff cannot save effects; nothing changes
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', us, 'role', 'authenticated')::text, true);
+  err := null;
+  begin
+    perform public.save_option_effects(optA, '[]'::jsonb);
+  exception when others then err := sqlerrm; end;
+  reset role;
+  r := r || jsonb_build_object('staff_forbidden_effects',
+    err = 'forbidden' and (select count(*) = 1 from public.modifier_option_effects where option_id = optA));
+
+  -- an empty set clears the option's effects (and nobody else's)
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  err := null;
+  begin
+    perform public.save_option_effects(optA, '[]'::jsonb);
+  exception when others then err := sqlerrm; end;
+  reset role;
+  r := r || jsonb_build_object('effects_empty_set_clears',
+    err is null and (select count(*) = 0 from public.modifier_option_effects where option_id = optA)
+    and (select count(*) = 1 from public.modifier_option_effects where option_id = optB));
+
+  -- ── grants: anon cannot call any of the three functions ─────────────────
   r := r || jsonb_build_object('grants_kept',
     not has_function_privilege('anon', 'public.save_menu(uuid, jsonb, jsonb, uuid[])', 'execute')
     and not has_function_privilege('anon', 'public.replace_product_recipes(uuid, jsonb)', 'execute')
@@ -433,7 +626,12 @@ begin
     and (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'public' and p.proname = 'save_menu')
     and (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public' and p.proname = 'replace_product_recipes'));
+          where n.nspname = 'public' and p.proname = 'replace_product_recipes')
+    and not has_function_privilege('anon', 'public.save_option_effects(uuid, jsonb)', 'execute')
+    and has_function_privilege('authenticated', 'public.save_option_effects(uuid, jsonb)', 'execute')
+    and (select not prosecdef from pg_proc where oid = 'public.save_option_effects(uuid, jsonb)'::regprocedure)
+    and (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'save_option_effects'));
 
   raise exception 'RESULT %', r;
 end $$;

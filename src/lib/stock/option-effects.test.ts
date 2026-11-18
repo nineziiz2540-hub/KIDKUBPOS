@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkEffectInputs, effectDraftsFromRows, effectRows, parseEffectDrafts } from "./option-effects.ts";
+import { checkEffectInputs, effectDraftsFromRows, effectPayload, parseEffectDrafts } from "./option-effects.ts";
 
 test("parseEffectDrafts: เพิ่มช็อต +9 g in the bean group, วิปครีม +15 g of a material", () => {
   const r = parseEffectDrafts([
@@ -50,7 +50,7 @@ test("checkEffectInputs never trusts the client's shape", () => {
   });
 });
 
-test("rows ↔ drafts, and insert rows take the tenant from the caller", () => {
+test("rows ↔ drafts, and the RPC payload carries no tenant", () => {
   const drafts = effectDraftsFromRows([
     { kind: "slot_add", group_id: "g", raw_material_id: null, amount: "9.000" },
     { kind: "material_add", group_id: null, raw_material_id: "m", amount: 15 },
@@ -62,8 +62,8 @@ test("rows ↔ drafts, and insert rows take the tenant from the caller", () => {
   ]);
   const parsed = parseEffectDrafts(drafts);
   assert.ok("value" in parsed);
-  assert.deepEqual(effectRows("t1", "o1", parsed.value), [
-    { tenant_id: "t1", option_id: "o1", kind: "slot_add", group_id: "g", raw_material_id: null, amount: 9 },
-    { tenant_id: "t1", option_id: "o1", kind: "material_add", group_id: null, raw_material_id: "m", amount: 15 },
+  assert.deepEqual(effectPayload(parsed.value), [
+    { kind: "slot_add", group_id: "g", raw_material_id: null, amount: 9 },
+    { kind: "material_add", group_id: null, raw_material_id: "m", amount: 15 },
   ]);
 });

@@ -7,7 +7,7 @@ import type { MenuDraft } from "../menu-draft.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
 import { defaultChoices } from "./pos-choices.ts";
 import { buildProductCost, type MaterialCost } from "./product-cost.ts";
-import { resolveLine } from "./stock-core.ts";
+import { defaultSlotMember, resolveLine, type StockCatalog } from "./stock-core.ts";
 
 export type PreviewGroup = {
   id: string;
@@ -33,7 +33,14 @@ export type CostPreview = {
   cups: { levelId: string | null; levelName: string | null; costSatang: number }[];
   /** materials in the cup with no usable cost: the numbers above are then too low */
   missingMaterials: string[];
+  /**
+   * Something the till would silently count as nothing: a sweetener of the menu with no amount at a level,
+   * or a bean/matcha line whose group has no member it can use. The numbers may then be too low.
+   */
+  incomplete: boolean;
 };
+
+export const PREVIEW_INCOMPLETE = "บางรายการยังไม่มีปริมาณ/ตัวเลือก — ต้นทุนอาจต่ำกว่าจริง";
 
 const DRAFT_ID = "__draft__";
 
@@ -85,6 +92,25 @@ export function draftCatalogRows(input: CostPreviewInput): StockCatalogRows {
   return rows;
 }
 
+/** See CostPreview.incomplete. Only lines the till would actually use are looked at (unfinished ones drop out). */
+export function previewIsIncomplete(catalog: StockCatalog, productId: string): boolean {
+  for (const line of catalog.recipes.get(productId) ?? []) {
+    if (line.kind !== "slot") continue;
+    const group = catalog.groups.get(line.groupId);
+    if (!group || !defaultSlotMember(group, line)) return true;
+  }
+  const ps = catalog.productSweetness.get(productId);
+  if (!ps) return false;
+  const levels = catalog.levels.filter((l) => !l.isNone);
+  if (catalog.levels.length === 0) return true;
+  const group = catalog.groups.get(ps.groupId);
+  if (!group?.members.some((m) => m.id === ps.defaultMemberId)) return true;
+  const table = ps.custom ?? catalog.standardSweetness;
+  // the default plus every allowed sweetener the till can still offer
+  const offered = [ps.defaultMemberId, ...ps.allowedMemberIds.filter((id) => group.members.some((m) => m.id === id))];
+  return offered.some((m) => levels.some((l) => !table.has(`${m}:${l.id}`)));
+}
+
 export function menuCostPreview(input: CostPreviewInput): CostPreview {
   const catalog = buildStockCatalog(draftCatalogRows(input));
   const materials = new Map<string, MaterialCost>(
@@ -113,7 +139,7 @@ export function menuCostPreview(input: CostPreviewInput): CostPreview {
     const satang = priceCup(null);
     if (satang !== null) cups.push({ levelId: null, levelName: null, costSatang: satang });
   }
-  return { cups, missingMaterials: [...missing] };
+  return { cups, missingMaterials: [...missing], incomplete: previewIsIncomplete(catalog, DRAFT_ID) };
 }
 
 /** "ต้นทุนต่อแก้ว: ไม่หวาน ฿21.30 · หวานน้อย ฿22.30 · …" (or "ต้นทุนต่อแก้ว: ฿21.30" without sweetness). */

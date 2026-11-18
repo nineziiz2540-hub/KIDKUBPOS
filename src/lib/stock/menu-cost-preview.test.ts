@@ -1,9 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { costPreviewText, draftCatalogRows, menuCostPreview, type CostPreviewInput } from "./menu-cost-preview.ts";
+import {
+  PREVIEW_INCOMPLETE,
+  costPreviewText,
+  draftCatalogRows,
+  menuCostPreview,
+  type CostPreviewInput,
+} from "./menu-cost-preview.ts";
 import { buildStockCatalog } from "./catalog-build.ts";
 import { resolveLine } from "./stock-core.ts";
-import { effectRows, parseEffectDrafts } from "./option-effects.ts";
+import { effectPayload, parseEffectDrafts } from "./option-effects.ts";
 import type { MenuDraft } from "../menu-draft.ts";
 
 // The brief's ลาเต้: beans 18 g (bean group, house default), milk 180 ml, ice 150 g, sweetness syrup by
@@ -47,6 +53,13 @@ const standardAmounts = [
   { member_id: "s-syrup", level_id: "l1", amount: 10 },
   { member_id: "s-syrup", level_id: "l2", amount: 20 },
   { member_id: "s-syrup", level_id: "l3", amount: 35 },
+  // condensed milk and milk mix (allowed on the latte) have their own standard amounts
+  ...["s-cond", "s-mix"].flatMap((m) => [
+    { member_id: m, level_id: "l0", amount: 0 },
+    { member_id: m, level_id: "l1", amount: 15 },
+    { member_id: m, level_id: "l2", amount: 25 },
+    { member_id: m, level_id: "l3", amount: 40 },
+  ]),
 ];
 const latte = (): Pick<MenuDraft, "recipes" | "sweetness"> => ({
   recipes: [
@@ -71,7 +84,66 @@ test("ลาเต้: one cost per sweetness level, in level order, with the le
     { levelId: "l3", levelName: "หวานมาก", costSatang: 2480 },
   ]);
   assert.deepEqual(p.missingMaterials, []);
+  assert.equal(p.incomplete, false);
   assert.equal(costPreviewText(p), "ต้นทุนต่อแก้ว: ไม่หวาน ฿21.30 · หวานน้อย ฿22.30 · หวานปกติ ฿23.30 · หวานมาก ฿24.80");
+});
+
+test("incomplete: a sweetener of the menu with no amount at a level", () => {
+  assert.equal(PREVIEW_INCOMPLETE, "บางรายการยังไม่มีปริมาณ/ตัวเลือก — ต้นทุนอาจต่ำกว่าจริง");
+  // the default sweetener misses หวานมาก in the shop table
+  const noHigh = standardAmounts.filter((a) => !(a.member_id === "s-syrup" && a.level_id === "l3"));
+  assert.equal(menuCostPreview({ ...input(), standardAmounts: noHigh }).incomplete, true);
+  // an allowed sweetener (milk mix) has no amounts at all
+  const noMix = standardAmounts.filter((a) => a.member_id !== "s-mix");
+  assert.equal(menuCostPreview({ ...input(), standardAmounts: noMix }).incomplete, true);
+  // a missing ไม่หวาน cell is not a gap (ไม่หวาน never deducts)
+  const noNone = standardAmounts.filter((a) => a.level_id !== "l0");
+  assert.equal(menuCostPreview({ ...input(), standardAmounts: noNone }).incomplete, false);
+  // the menu's own table replaces the shop's: a blank / unreadable cell there is a gap
+  const d = latte();
+  d.sweetness = {
+    ...d.sweetness!, allowedMemberIds: [], useCustom: true,
+    custom: { "s-syrup:l0": "0", "s-syrup:l1": "12", "s-syrup:l2": "", "s-syrup:l3": "32.5" },
+  };
+  assert.equal(menuCostPreview(input(d)).incomplete, true);
+  d.sweetness.custom["s-syrup:l2"] = "22";
+  assert.equal(menuCostPreview(input(d)).incomplete, false);
+  // an explicit 0 is the owner's choice, not a gap
+  d.sweetness.custom["s-syrup:l2"] = "0";
+  assert.equal(menuCostPreview(input(d)).incomplete, false);
+});
+
+test("incomplete: sweetness with no levels, or a default sweetener the till cannot use", () => {
+  assert.equal(menuCostPreview({ ...input(), levels: [] }).incomplete, true);
+  const syrupGone = materials.map((m) => (m.id === "syrup" ? { ...m, archived: true } : m));
+  assert.equal(menuCostPreview({ ...input(), materials: syrupGone }).incomplete, true);
+  // an allowed sweetener whose material is archived is never offered: not a gap
+  const mixGone = materials.map((m) => (m.id === "mix" ? { ...m, archived: true } : m));
+  const noMix = standardAmounts.filter((a) => a.member_id !== "s-mix");
+  assert.equal(menuCostPreview({ ...input(), materials: mixGone, standardAmounts: noMix }).incomplete, false);
+});
+
+test("incomplete: a bean/matcha line whose group has no member it can use", () => {
+  // every member of the bean group archived
+  const beansGone = materials.map((m) => (m.id.startsWith("bean-") ? { ...m, archived: true } : m));
+  assert.equal(menuCostPreview({ ...input(), materials: beansGone }).incomplete, true);
+  // only specials left and the line does not allow them
+  const houseGone = materials.map((m) => (m.id === "bean-house" ? { ...m, archived: true } : m));
+  const d = latte();
+  d.recipes[0] = { kind: "slot", groupId: "g-bean", quantityUsed: "18", defaultMemberId: null, allowSpecial: false };
+  assert.equal(menuCostPreview({ ...input(d), materials: houseGone }).incomplete, true);
+  // specials allowed but nothing to default to (no house member, no flagged default): the till skips it too
+  d.recipes[0] = { ...d.recipes[0], allowSpecial: true };
+  assert.equal(menuCostPreview({ ...input(d), materials: houseGone }).incomplete, true);
+  // the menu's own default (a special, allowed) gives the till a member again
+  d.recipes[0] = { kind: "slot", groupId: "g-bean", quantityUsed: "18", defaultMemberId: "m-kenya", allowSpecial: true };
+  assert.equal(menuCostPreview({ ...input(d), materials: houseGone }).incomplete, false);
+  // a group the editor does not know (e.g. it failed to load)
+  d.recipes[0] = { kind: "slot", groupId: "g-unknown", quantityUsed: "18", defaultMemberId: null, allowSpecial: true };
+  assert.equal(menuCostPreview(input(d)).incomplete, true);
+  // an unfinished line (no group yet) is not counted at all
+  d.recipes[0] = { kind: "slot", groupId: "", quantityUsed: "18", defaultMemberId: null, allowSpecial: true };
+  assert.equal(menuCostPreview(input(d)).incomplete, false);
 });
 
 test("ใช้ปริมาณเฉพาะเมนูนี้ replaces the shop table for this menu", () => {
@@ -131,9 +203,7 @@ test("เพิ่มช็อต (+9 g in the bean group) adds to whichever bea
   const parsed = parseEffectDrafts([{ kind: "slot_add", targetId: "g-bean", amount: "9" }]);
   assert.ok("value" in parsed);
   const rows = draftCatalogRows(input());
-  rows.optionEffects = effectRows("t1", "opt-shot", parsed.value).map((e) => ({
-    option_id: e.option_id, kind: e.kind, group_id: e.group_id, raw_material_id: e.raw_material_id, amount: e.amount,
-  }));
+  rows.optionEffects = effectPayload(parsed.value).map((e) => ({ option_id: "opt-shot", ...e }));
   const catalog = buildStockCatalog(rows);
   const house = resolveLine("__draft__", 1, undefined, ["opt-shot"], catalog);
   assert.ok(!("error" in house));

@@ -31,6 +31,7 @@ const RPC_ERRORS: Record<string, string> = {
   invalid_group: "กลุ่มเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_group_member: "ค่าเริ่มต้นของเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า",
   duplicate_slot_group: DUPLICATE_SLOT_GROUP,
+  special_default_not_allowed: "ค่าเริ่มต้นเป็นตัวพิเศษ — เปิด “ให้เลือกเมล็ดพิเศษได้” หรือเลือกค่าเริ่มต้นอื่น",
   invalid_recipe_line: "สูตรเมนูไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_sweetness: "การตั้งค่าความหวานไม่ถูกต้อง กรุณารีเฟรชหน้า",
   sweetness_table_incomplete: "ปริมาณเฉพาะเมนูนี้ยังไม่ครบทุกระดับความหวาน กรุณารีเฟรชหน้าแล้วกรอกให้ครบ",

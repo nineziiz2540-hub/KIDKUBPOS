@@ -83,11 +83,9 @@ export function effectDraftsFromRows(
   });
 }
 
-/** Rows to insert for one option (tenant from the caller's profile, never from the client). */
-export function effectRows(tenantId: string, optionId: string, effects: EffectInput[]) {
+/** save_option_effects' p_effects (the tenant is never sent: the database takes it from the session). */
+export function effectPayload(effects: EffectInput[]) {
   return effects.map((e) => ({
-    tenant_id: tenantId,
-    option_id: optionId,
     kind: e.kind,
     group_id: e.kind === "slot_add" ? e.groupId : null,
     raw_material_id: e.kind === "material_add" ? e.materialId : null,

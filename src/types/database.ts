@@ -1869,6 +1869,10 @@ export type Database = {
         }
         Returns: string
       }
+      save_option_effects: {
+        Args: { p_effects: Json; p_option_id: string }
+        Returns: undefined
+      }
       restock_for_voided_order: {
         Args: { p_order_id: string }
         Returns: undefined

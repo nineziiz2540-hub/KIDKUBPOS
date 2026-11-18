@@ -9,7 +9,7 @@ import { useToastManager } from "@/components/ui/toast";
 import { saveMenu, uploadProductImage, removeProductImage } from "@/app/actions/products";
 import { formatPrice } from "@/lib/cash";
 import { comparableDraft, type MenuDraft } from "@/lib/menu-draft";
-import { costPreviewText, menuCostPreview } from "@/lib/stock/menu-cost-preview";
+import { PREVIEW_INCOMPLETE, costPreviewText, menuCostPreview } from "@/lib/stock/menu-cost-preview";
 import { resizeImageForUpload } from "@/lib/resize-image";
 import { MAX_PRODUCT_IMAGE_BYTES, PRODUCT_IMAGE_TYPES } from "@/lib/product-images";
 import {
@@ -463,6 +463,14 @@ export function MenuEditor({
                     ยังไม่มีราคาทุน
                   </span>
                   {preview.missingMaterials.join(", ")} — ต้นทุนจริงสูงกว่านี้ ใส่ราคาที่หน้าวัตถุดิบ
+                </p>
+              )}
+              {preview.incomplete && (
+                <p className="text-[15px] font-medium text-sidebar">
+                  <span className="mr-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-[13px] font-semibold">
+                    ยังไม่ครบ
+                  </span>
+                  {PREVIEW_INCOMPLETE}
                 </p>
               )}
               <p className="text-[13px] text-muted-foreground">คิดจากค่าเริ่มต้นของเมนู ราคาวัตถุดิบล่าสุด ไม่รวมตัวเลือกเพิ่มเติม</p>

@@ -67,6 +67,9 @@ export function RecipeLinesEditor({
   }
 
   function fixedRow(line: FixedLineDraft, index: number) {
+    const usedByOthers = new Set(
+      lines.flatMap((l, i) => (i !== index && l.kind === "fixed" && l.rawMaterialId !== "" ? [l.rawMaterialId] : []))
+    );
     const mat = materialById.get(line.rawMaterialId);
     const archived = mat?.archived === true;
     const unknown = line.rawMaterialId !== "" && !mat;
@@ -91,8 +94,9 @@ export function RecipeLinesEditor({
               </option>
             )}
             {active.map((m) => (
-              <option key={m.id} value={m.id}>
+              <option key={m.id} value={m.id} disabled={usedByOthers.has(m.id)}>
                 {m.name}
+                {usedByOthers.has(m.id) ? " (มีในสูตรแล้ว)" : ""}
               </option>
             ))}
           </select>

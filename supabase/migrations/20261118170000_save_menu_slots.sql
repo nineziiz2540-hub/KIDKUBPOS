@@ -2,6 +2,7 @@
 -- Same signatures (no overloads): create or replace replace_product_recipes(uuid, jsonb) and
 -- save_menu(uuid, jsonb, jsonb, uuid[]); grants re-issued exactly as in 20261019120000 / 20261020120000.
 -- Both stay SECURITY INVOKER (called with the user client), so RLS still applies on top.
+-- New: save_option_effects(uuid, jsonb), same pattern (INVOKER, authenticated only), for "ผลต่อสต๊อก".
 --
 -- p_recipes[] rows:
 --   { "line_kind": "fixed", "raw_material_id", "quantity_used" }
@@ -62,8 +63,10 @@ begin
       end if;
     elsif v_kind = 'slot' then
       v_group := (v_row->>'group_id')::uuid;
-      if v_group is null
-         or not exists (select 1 from choice_groups where id = v_group and tenant_id = v_tenant) then
+      -- A bean / matcha (or other) group of this shop; sweeteners belong to the menu's sweetness, not a line.
+      if v_group is null or not exists (
+        select 1 from choice_groups where id = v_group and tenant_id = v_tenant and kind <> 'sweetener'
+      ) then
         raise exception 'invalid_group';
       end if;
       -- A menu has one line per choice group (also guarded by product_recipes_one_slot_per_group).
@@ -80,6 +83,12 @@ begin
       end if;
       if coalesce(jsonb_typeof(v_row->'allow_special'), 'null') not in ('boolean', 'null') then
         raise exception 'invalid_recipe_line';
+      end if;
+      -- A special default on a line that does not allow specials would never be used at the till.
+      if v_member is not null and not coalesce((v_row->>'allow_special')::boolean, true) and exists (
+        select 1 from choice_group_members where id = v_member and tier = 'special'
+      ) then
+        raise exception 'special_default_not_allowed';
       end if;
     else
       raise exception 'invalid_recipe_line';
@@ -291,7 +300,92 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- save_option_effects: "ผลต่อสต๊อก" of one modifier option, replaced as a set in one transaction
+-- ---------------------------------------------------------------------------
+-- p_effects[]: { "kind": "slot_add", "group_id", "amount" } | { "kind": "material_add", "raw_material_id", "amount" }
+-- The option's modifier, every group (never the sweetener group) and every material (not archived) must
+-- belong to the caller's shop. Amounts > 0, <= 100000, up to 3 decimals; one effect per target; <= 20.
+create or replace function public.save_option_effects(p_option_id uuid, p_effects jsonb)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tenant uuid := public.auth_tenant_id();
+  v_e jsonb;
+  v_kind text;
+  v_group uuid;
+  v_material uuid;
+  v_amount numeric;
+  v_key text;
+  v_seen text[] := '{}';
+begin
+  if public.auth_role() is null or public.auth_role() not in ('owner', 'manager') then
+    raise exception 'forbidden';
+  end if;
+
+  if p_option_id is null or not exists (
+    select 1 from modifier_options mo
+      join modifiers m on m.id = mo.modifier_id
+     where mo.id = p_option_id and m.tenant_id = v_tenant
+  ) then
+    raise exception 'option_not_found';
+  end if;
+
+  if jsonb_typeof(p_effects) is distinct from 'array' then
+    raise exception 'invalid_effect';
+  end if;
+  if jsonb_array_length(p_effects) > 20 then
+    raise exception 'invalid_effect';
+  end if;
+
+  for v_e in select * from jsonb_array_elements(p_effects) loop
+    v_kind := v_e->>'kind';
+    v_amount := (v_e->>'amount')::numeric;
+    if v_amount is null or v_amount <= 0 or v_amount > 100000 or v_amount <> round(v_amount, 3) then
+      raise exception 'invalid_effect_amount';
+    end if;
+    if v_kind = 'slot_add' then
+      v_group := nullif(v_e->>'group_id', '')::uuid;
+      if v_group is null or not exists (
+        select 1 from choice_groups where id = v_group and tenant_id = v_tenant and kind <> 'sweetener'
+      ) then
+        raise exception 'invalid_group';
+      end if;
+      v_key := 'g:' || v_group::text;
+    elsif v_kind = 'material_add' then
+      v_material := nullif(v_e->>'raw_material_id', '')::uuid;
+      if v_material is null or not exists (
+        select 1 from raw_materials where id = v_material and tenant_id = v_tenant and archived_at is null
+      ) then
+        raise exception 'invalid_material';
+      end if;
+      v_key := 'm:' || v_material::text;
+    else
+      raise exception 'invalid_effect';
+    end if;
+    if v_key = any(v_seen) then
+      raise exception 'duplicate_effect';
+    end if;
+    v_seen := v_seen || v_key;
+  end loop;
+
+  delete from modifier_option_effects where option_id = p_option_id and tenant_id = v_tenant;
+
+  insert into modifier_option_effects (tenant_id, option_id, kind, group_id, raw_material_id, amount)
+  select v_tenant, p_option_id, e.value->>'kind',
+         case when e.value->>'kind' = 'slot_add' then (e.value->>'group_id')::uuid end,
+         case when e.value->>'kind' = 'material_add' then (e.value->>'raw_material_id')::uuid end,
+         (e.value->>'amount')::numeric
+    from jsonb_array_elements(p_effects) as e(value);
+end;
+$$;
+
 revoke execute on function public.replace_product_recipes(uuid, jsonb) from public, anon;
 grant execute on function public.replace_product_recipes(uuid, jsonb) to authenticated;
 revoke execute on function public.save_menu(uuid, jsonb, jsonb, uuid[]) from public, anon;
 grant execute on function public.save_menu(uuid, jsonb, jsonb, uuid[]) to authenticated;
+revoke execute on function public.save_option_effects(uuid, jsonb) from public, anon;
+grant execute on function public.save_option_effects(uuid, jsonb) to authenticated;

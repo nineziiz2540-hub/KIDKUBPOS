@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
-import { checkEffectInputs, effectRows, type EffectInput } from "@/lib/stock/option-effects";
+import { checkEffectInputs, effectPayload, type EffectInput } from "@/lib/stock/option-effects";
+import type { Json } from "@/types/database";
 
 export type ModifierState = { error?: string; success?: boolean } | undefined;
 
@@ -179,10 +180,10 @@ export async function deleteModifierOption(formData: FormData): Promise<void> {
 }
 
 /**
- * "ผลต่อสต๊อก" of one option (round D1): replaces the option's stock effects as a set. Writes go through
- * the user client (RLS: owner/manager of the row's shop); on top of that the option's modifier and every
- * group / material id are checked against the caller's shop here, because RLS alone does not check
- * where a referenced id belongs. The tenant always comes from the profile, never from the caller.
+ * "ผลต่อสต๊อก" of one option (round D1): replaces the option's stock effects as a set through
+ * save_option_effects (user client, one transaction). The option's modifier and every group / material id
+ * are checked against the caller's shop here first (friendly messages) and again in SQL. The tenant always
+ * comes from the profile, never from the caller.
  */
 export async function saveOptionEffects(optionId: string, effects: EffectInput[]): Promise<ModifierState> {
   const profile = await getProfile();
@@ -234,41 +235,26 @@ export async function saveOptionEffects(optionId: string, effects: EffectInput[]
     if ((mats ?? []).length !== materialIds.length) return { error: "ไม่พบวัตถุดิบนี้ หรือปิดใช้แล้ว — เลือกวัตถุดิบอื่น" };
   }
 
-  // Replace as a set. New rows first, then the old ones go, so a failed write never leaves the option with
-  // its effects gone; if removing the old ones fails, the new ones are taken back. (Two writes, not one
-  // transaction: a sale landing between them would count both sets once.)
-  const { data: old, error: oldError } = await supabase
-    .from("modifier_option_effects")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("option_id", optionId);
-  if (oldError) return { error: SAVE_FAIL };
-
-  let newIds: string[] = [];
-  if (checked.value.length > 0) {
-    const { data: inserted, error } = await supabase
-      .from("modifier_option_effects")
-      .insert(effectRows(tenantId, optionId, checked.value))
-      .select("id");
-    if (error || !inserted) return { error: SAVE_FAIL };
-    newIds = inserted.map((r) => r.id);
-  }
-  const oldIds = (old ?? []).map((r) => r.id);
-  if (oldIds.length > 0) {
-    const { error } = await supabase
-      .from("modifier_option_effects")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("id", oldIds);
-    if (error) {
-      if (newIds.length > 0) {
-        await supabase.from("modifier_option_effects").delete().eq("tenant_id", tenantId).in("id", newIds);
-      }
-      return { error: SAVE_FAIL };
-    }
-  }
+  // Replace as a set in one transaction (save_option_effects deletes the old set and inserts the new one,
+  // re-checking the role and every id against the caller's shop in SQL).
+  const { error } = await supabase.rpc("save_option_effects", {
+    p_option_id: optionId,
+    p_effects: effectPayload(checked.value) as unknown as Json,
+  });
+  if (error) return { error: EFFECT_RPC_ERRORS[error.message] ?? SAVE_FAIL };
 
   revalidatePath("/modifiers");
   revalidatePath("/pos");
   return { success: true };
 }
+
+// Messages raised by save_option_effects.
+const EFFECT_RPC_ERRORS: Record<string, string> = {
+  forbidden: "ไม่มีสิทธิ์ดำเนินการนี้",
+  option_not_found: "ไม่พบตัวเลือกนี้ กรุณารีเฟรชหน้า",
+  invalid_group: "กลุ่มเมล็ด/มัทฉะไม่ถูกต้อง กรุณารีเฟรชหน้า",
+  invalid_material: "ไม่พบวัตถุดิบนี้ หรือปิดใช้แล้ว — เลือกวัตถุดิบอื่น",
+  invalid_effect_amount: "ปริมาณต้องมากกว่า 0 ไม่เกิน 100,000 และทศนิยมไม่เกิน 3 ตำแหน่ง",
+  duplicate_effect: "ผลต่อสต๊อกซ้ำกัน — รวมเป็นบรรทัดเดียว",
+  invalid_effect: "ข้อมูลไม่ถูกต้อง",
+};
