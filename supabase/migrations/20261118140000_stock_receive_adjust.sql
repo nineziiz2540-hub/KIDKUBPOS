@@ -6,7 +6,7 @@
 -- would otherwise be truncated to 4 places on every receive. Widening never loses data and no
 -- view depends on the column; the deployed app reads it as a plain number.
 
-set lock_timeout = '5s';
+set local lock_timeout = '5s';
 
 alter table public.raw_materials alter column cost_per_unit type numeric(14,6);
 
