@@ -443,3 +443,10 @@ test("adoptableRef: a restored cart with the same bean adopts the ref, another r
   const medium = { ...kenyaChoices, slots: [{ ...kenyaChoices.slots[0]!, memberId: "m-medium" }] };
   assert.equal(adoptableRef(REF_A, list, "t1", "u1", saleKey(cartWith(medium))), null);
 });
+
+test("saleKey with choices: undefined as an own key is the pre-D1 string", () => {
+  assert.equal(
+    saleKey({ ...cartInput, items: [{ ...latte, choices: undefined }] }),
+    JSON.stringify([[["p1", 2, 110, null, []]], "cash", "dine_in", null, null, null, null, null]),
+  );
+});

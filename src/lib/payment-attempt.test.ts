@@ -131,3 +131,10 @@ test("the same choices with different labels give the same fingerprint", () => {
   };
   assert.equal(attemptFingerprint(withChoices(kenyaChoices)), attemptFingerprint(withChoices(relabeled)));
 });
+
+test("choices: undefined as an own key fingerprints exactly as before round D1", () => {
+  assert.equal(
+    attemptFingerprint({ ...base, items: [{ ...latte, choices: undefined }, { ...tea, choices: undefined }] }),
+    attemptFingerprint(base),
+  );
+});

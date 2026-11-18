@@ -18,8 +18,11 @@ export function lineIdentity(
 ): string {
   const options = item.selectedModifiers.map((m) => m.optionId).sort().join(",");
   const base = `${item.productId}|${options}|${item.note ?? ""}`;
-  // Only when present: an item without choices keeps exactly its pre-D1 identity.
-  return item.choices ? `${base}|${JSON.stringify(choiceKey(item.choices))}` : base;
+  // Only when present: an item without choices keeps exactly its pre-D1 identity. With choices the
+  // identity is a JSON array, so free text in the note can never imitate the choice segment.
+  return item.choices
+    ? JSON.stringify([item.productId, options, item.note ?? "", choiceKey(item.choices)])
+    : base;
 }
 
 /** The names the owner reads for a line: option names, then (if any) bean/matcha and sweetness. */

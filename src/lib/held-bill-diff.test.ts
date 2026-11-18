@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { diffReductions, lineIdentity } from "./held-bill-diff.ts";
+import { choiceKey } from "./choice-key.ts";
 import type { CartChoices, CartItem } from "../types/app.ts";
 
 const shot = { modifierId: "m1", modifierName: "ช็อต", optionId: "o-shot", optionName: "เพิ่มช็อต", priceDelta: 10 };
@@ -36,8 +37,24 @@ test("an item without choices keeps exactly the old identity string", () => {
 test("an item with choices gets the serialised choice key appended", () => {
   assert.equal(
     lineIdentity({ ...latte, choices: kenya }),
-    'p1|o-shot|ร้อน|[[["g-bean","m-kenya"]],["lv-normal","sw-milk"]]',
+    '["p1","o-shot","ร้อน",[[["g-bean","m-kenya"]],["lv-normal","sw-milk"]]]',
   );
+});
+
+test("a crafted note cannot imitate the choice segment", () => {
+  const forged = { ...latte, note: "x|" + JSON.stringify(choiceKey(kenya)) };
+  const real = { ...latte, note: "x", choices: kenya };
+  assert.notEqual(lineIdentity(forged), lineIdentity(real));
+  const house = choices("m-house", "House", "lv-normal", "หวานปกติ", "sw-milk", "นมมิกซ์");
+  // Kenya line swapped for a no-choices line carrying the forged note: still a reduction.
+  const r = diffReductions([real], [{ ...forged, choices: undefined }]);
+  assert.equal(r.length, 1);
+  assert.ok(r[0]!.options.includes("Kenya"));
+  assert.equal(diffReductions([real], [{ ...real, choices: house }]).length, 1);
+});
+
+test("choices: undefined as an own key keeps the old identity string", () => {
+  assert.equal(lineIdentity({ ...latte, choices: undefined }), "p1|o-shot|ร้อน");
 });
 
 test("2 Kenya lattes becoming 2 house lattes records a reduction with the choice names", () => {
