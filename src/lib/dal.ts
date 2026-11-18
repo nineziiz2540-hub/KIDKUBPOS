@@ -1755,3 +1755,94 @@ export async function getHeldBillHistory(tenantId: string, heldBillId: string): 
     };
   });
 }
+
+// ── Stock setup pages (round D1, Task 11): choice groups + shop sweetness table ────────────────────
+// Owner/manager pages only (the pages gate the role). Plain serialisable shapes, safe to hand to client components.
+
+export type ChoiceGroupMemberView = {
+  id: string;
+  materialId: string;
+  materialName: string;
+  unit: string;
+  label: string;
+  tier: "house" | "special";
+  priceDelta: number;
+  isDefault: boolean;
+  archived: boolean;
+};
+export type ChoiceGroupView = {
+  id: string;
+  kind: "bean" | "matcha" | "sweetener" | "other";
+  name: string;
+  members: ChoiceGroupMemberView[];
+};
+export type SweetnessLevelView = { id: string; name: string; isNone: boolean; isDefault: boolean };
+export type SweetnessAmountView = { member_id: string; level_id: string; amount: number };
+
+export async function getChoiceGroups(tenantId: string): Promise<ChoiceGroupView[]> {
+  const supabase = await createClient();
+  const [{ data: groups }, { data: members }, active, archived] = await Promise.all([
+    supabase
+      .from("choice_groups")
+      .select("id, kind, name, sort_order")
+      .eq("tenant_id", tenantId)
+      .order("sort_order")
+      .order("id"),
+    supabase
+      .from("choice_group_members")
+      .select("id, group_id, raw_material_id, label, tier, price_delta, is_default, sort_order")
+      .eq("tenant_id", tenantId)
+      .order("sort_order")
+      .order("id"),
+    getRawMaterials(tenantId),
+    getArchivedRawMaterials(tenantId),
+  ]);
+  const materialById = new Map<string, { name: string; unit: string; archived: boolean }>();
+  for (const m of active) materialById.set(m.id, { name: m.name, unit: m.unit, archived: false });
+  for (const m of archived) materialById.set(m.id, { name: m.name, unit: m.unit, archived: true });
+
+  return (groups ?? []).map((g) => ({
+    id: g.id,
+    kind: g.kind as ChoiceGroupView["kind"],
+    name: g.name,
+    members: (members ?? [])
+      .filter((m) => m.group_id === g.id)
+      .map((m) => {
+        const mat = materialById.get(m.raw_material_id);
+        return {
+          id: m.id,
+          materialId: m.raw_material_id,
+          materialName: mat?.name ?? "(วัตถุดิบถูกลบ)",
+          unit: mat?.unit ?? "",
+          label: m.label,
+          tier: m.tier === "special" ? ("special" as const) : ("house" as const),
+          priceDelta: Number(m.price_delta),
+          isDefault: m.is_default,
+          archived: mat?.archived ?? false,
+        };
+      }),
+  }));
+}
+
+export async function getSweetnessConfig(
+  tenantId: string
+): Promise<{ levels: SweetnessLevelView[]; amounts: SweetnessAmountView[] }> {
+  const supabase = await createClient();
+  const [{ data: levels }, { data: amounts }] = await Promise.all([
+    supabase
+      .from("sweetness_levels")
+      .select("id, name, is_none, is_default, sort_order")
+      .eq("tenant_id", tenantId)
+      .order("sort_order")
+      .order("id"),
+    supabase
+      .from("sweetness_amounts")
+      .select("member_id, level_id, amount")
+      .eq("tenant_id", tenantId)
+      .is("product_id", null),
+  ]);
+  return {
+    levels: (levels ?? []).map((l) => ({ id: l.id, name: l.name, isNone: l.is_none, isDefault: l.is_default })),
+    amounts: (amounts ?? []).map((a) => ({ member_id: a.member_id, level_id: a.level_id, amount: Number(a.amount) })),
+  };
+}

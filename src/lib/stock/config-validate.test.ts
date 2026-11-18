@@ -54,3 +54,8 @@ test("validateSweetnessAmount", () => {
   for (const a of [0, 10, 20, 35, 10000]) assert.equal(validateSweetnessAmount(a), null);
   for (const a of [-1, 10000.01, NaN]) assert.notEqual(validateSweetnessAmount(a), null);
 });
+
+test("validateSweetnessAmount: at most 3 decimals", () => {
+  assert.equal(validateSweetnessAmount(12.125), null);
+  assert.notEqual(validateSweetnessAmount(1.2345), null);
+});

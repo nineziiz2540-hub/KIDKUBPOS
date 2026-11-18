@@ -71,14 +71,28 @@ export default async function InventoryPage({
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">จัดการวัตถุดิบและสต๊อก</p>
         </div>
-        {action !== "new" && (
+        <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/inventory?action=new"
-            className="inline-flex h-14 items-center gap-1.5 rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent/90"
+            href="/inventory/groups"
+            className="inline-flex h-14 items-center rounded-lg border bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted"
           >
-            + เพิ่มวัตถุดิบ
+            กลุ่มตัวเลือก
           </Link>
-        )}
+          <Link
+            href="/inventory/sweetness"
+            className="inline-flex h-14 items-center rounded-lg border bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted"
+          >
+            ตารางความหวาน
+          </Link>
+          {action !== "new" && (
+            <Link
+              href="/inventory?action=new"
+              className="inline-flex h-14 items-center gap-1.5 rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent/90"
+            >
+              + เพิ่มวัตถุดิบ
+            </Link>
+          )}
+        </div>
       </div>
 
       {action === "new" && (

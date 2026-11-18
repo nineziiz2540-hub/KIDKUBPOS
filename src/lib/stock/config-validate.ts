@@ -48,5 +48,6 @@ export function validateSweetnessAmount(amount: number): string | null {
   if (!Number.isFinite(amount) || amount < 0 || amount > MAX_SWEETNESS_AMOUNT) {
     return `ปริมาณต้องอยู่ระหว่าง 0 ถึง ${MAX_SWEETNESS_AMOUNT.toLocaleString("en-US")}`;
   }
+  if (Math.round(amount * 1000) / 1000 !== amount) return "ปริมาณใส่ทศนิยมได้ไม่เกิน 3 ตำแหน่ง";
   return null;
 }
