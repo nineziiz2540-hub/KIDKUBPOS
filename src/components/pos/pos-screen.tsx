@@ -1,6 +1,11 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
-import { cartSubtotal, lineTotal } from "@/lib/cart-math";
+import { cartSubtotal } from "@/lib/cart-math";
+import { addLine, replaceLine, repriceItems, withQuantity } from "@/lib/cart-lines";
+import { buildStockCatalog, type StockCatalogRows } from "@/lib/stock/catalog-build";
+import { emptyStockCatalog, type StockCatalog } from "@/lib/stock/stock-core";
+import { defaultChoices } from "@/lib/stock/pos-choices";
+import { choiceParts, hasOptionRows, optionRows } from "@/lib/stock/option-window";
 import { useEffect, useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { checkOrderSaved, createOrder } from "@/app/actions/orders";
@@ -43,7 +48,7 @@ import {
 } from "./outbox-sale";
 import { PosHeader } from "./pos-header";
 import { ProductGrid } from "./product-grid";
-import { ModifierModal } from "./modifier-modal";
+import { OptionWindow } from "./modifier-modal";
 import { SmartCart } from "./smart-cart";
 import { QrPaymentModal } from "./qr-payment-modal";
 import { NoShiftDialog } from "./no-shift-dialog";
@@ -90,6 +95,8 @@ type Props = {
   categories: PosCategory[];
   productModifierRecord: Record<string, string[]>;
   allModifiers: ModifierWithOptions[];
+  /** Bean/matcha and sweetness config for the option window (round D1); null = it could not be loaded. */
+  stockRows: StockCatalogRows | null;
   userName: string;
   todayOrderCount: number;
   activeShiftId: string | null;
@@ -114,6 +121,7 @@ export function PosScreen({
   categories,
   productModifierRecord,
   allModifiers,
+  stockRows,
   userName,
   todayOrderCount,
   activeShiftId,
@@ -128,7 +136,10 @@ export function PosScreen({
 }: Props) {
   const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [pendingProduct, setPendingProduct] = useState<PosProduct | null>(null);
+  // The option window: a menu just tapped (editing null) or a cart line being edited.
+  const [optionWindow, setOptionWindow] = useState<
+    { product: PosProduct; editing: CartItem | null } | null
+  >(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -282,10 +293,31 @@ export function PosScreen({
     if (outbox.justFinished === null && queueChanges.length > 0) setQueueChanges([]);
   }
 
-  const productsWithModifiers = useMemo(
-    () => new Set(Object.keys(productModifierRecord)),
-    [productModifierRecord]
-  );
+  // The client builds the catalog from the page's rows with the server's own builder. Rows that
+  // could not be loaded (or built) -> an empty catalog: menus sell with no bean/sweetness rows and
+  // the server applies each menu's defaults.
+  const stockCatalog = useMemo((): StockCatalog => {
+    if (stockRows === null) return emptyStockCatalog();
+    try {
+      return buildStockCatalog(stockRows);
+    } catch (e) {
+      console.error("[pos] stock catalog could not be built:", e);
+      return emptyStockCatalog();
+    }
+  }, [stockRows]);
+  /** Null when this page has no stock data: saved lines then keep their choices as stored. */
+  const refreshCatalog = stockRows === null ? null : stockCatalog;
+
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  // Menus that open the option window: linked options, or bean/sweetness rows.
+  const productsWithOptions = useMemo(() => {
+    const set = new Set(Object.keys(productModifierRecord));
+    for (const p of products) {
+      if (hasOptionRows(optionRows(p.id, stockCatalog))) set.add(p.id);
+    }
+    return set;
+  }, [productModifierRecord, products, stockCatalog]);
 
   const productModifierMap = useMemo(
     () => new Map(Object.entries(productModifierRecord)),
@@ -347,45 +379,33 @@ export function PosScreen({
   }
 
   function handleProductClick(product: PosProduct) {
-    if (productsWithModifiers.has(product.id)) {
-      setPendingProduct(product);
+    if (productsWithOptions.has(product.id)) {
+      setOptionWindow({ product, editing: null });
     } else {
       addDirectToCart(product);
     }
   }
 
+  // A plain tap adds to the identical plain line if there is one (same rule as the option window).
   function addDirectToCart(product: PosProduct) {
-    setCartItems((prev) => {
-      const existing = prev.find((i) => i.cartItemKey === product.id);
-      if (existing) {
-        return prev.map((i) => {
-          if (i.cartItemKey !== product.id) return i;
-          return {
-            ...i,
-            quantity: i.quantity + 1,
-            totalPrice: lineTotal(i.basePrice, i.selectedModifiers, i.quantity + 1, i.choices),
-          };
-        });
-      }
-      return [
-        ...prev,
-        {
-          cartItemKey: product.id,
-          productId: product.id,
-          name: product.name,
-          basePrice: product.price,
-          quantity: 1,
-          selectedModifiers: [],
-          note: null,
-          totalPrice: product.price,
-        },
-      ];
-    });
+    setCartItems((prev) =>
+      addLine(prev, {
+        cartItemKey: prev.some((i) => i.cartItemKey === product.id)
+          ? `${product.id}-${Date.now()}`
+          : product.id,
+        productId: product.id,
+        name: product.name,
+        basePrice: product.price,
+        quantity: 1,
+        selectedModifiers: [],
+        note: null,
+        totalPrice: product.price,
+      })
+    );
   }
 
-  // A direct-tap line is keyed by product.id so repeat taps merge into it. Once it carries a note
-  // it gets its own key, so the next plain tap starts a fresh, note-less line instead of silently
-  // adding un-noted cups to a noted one.
+  // Repeat plain taps merge by what the cup is (addLine), never into a noted line. A direct-tap
+  // line that gets a note also gets its own key, so product.id stays free for the next plain line.
   function setItemNote(key: string, rawNote: string) {
     const trimmed = rawNote.trim();
     const note = trimmed === "" ? null : trimmed;
@@ -401,9 +421,32 @@ export function PosScreen({
     );
   }
 
-  function handleAddFromModal(item: CartItem) {
-    setCartItems((prev) => [...prev, item]);
-    setPendingProduct(null);
+  // Adding merges only into an identical cup (product, options, note, bean/sweetness); saving an
+  // edited line replaces it, keeping its quantity.
+  function handleSaveFromWindow(item: CartItem) {
+    const editing = optionWindow?.editing ?? null;
+    const key = `${item.productId}-${eventTime()}`;
+    setCartItems((prev) =>
+      editing ? replaceLine(prev, editing.cartItemKey, item) : addLine(prev, { ...item, cartItemKey: key })
+    );
+    setOptionWindow(null);
+  }
+
+  /** Menus with options reopen the option window from the cart; others edit the note there. */
+  function canEditOptions(item: CartItem): boolean {
+    return productById.has(item.productId) && productsWithOptions.has(item.productId);
+  }
+
+  function editLineOptions(key: string) {
+    const item = cartItems.find((i) => i.cartItemKey === key);
+    const product = item ? productById.get(item.productId) : undefined;
+    if (!item || !product) return;
+    setShowMobileCart(false); // the phone's cart sheet would sit above the window
+    setOptionWindow({ product, editing: item });
+  }
+
+  function lineDetail(item: CartItem) {
+    return choiceParts(item.choices, defaultChoices(item.productId, stockCatalog));
   }
 
   // The last item taken out by hand ends this cart as a sale, just like ล้าง: its payment attempt
@@ -421,10 +464,7 @@ export function PosScreen({
       setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
     } else {
       setCartItems((prev) =>
-        prev.map((i) => {
-          if (i.cartItemKey !== key) return i;
-          return { ...i, quantity: qty, totalPrice: lineTotal(i.basePrice, i.selectedModifiers, qty, i.choices) };
-        })
+        prev.map((i) => (i.cartItemKey === key ? withQuantity(i, qty) : i))
       );
     }
   }
@@ -1206,25 +1246,11 @@ export function PosScreen({
 
   // A held bill stores prices as of when it was parked. If the menu price changed since, paying it
   // as-is would be rejected by the server's re-pricing — and a refresh wouldn't help, because the
-  // old price lives in the held bill itself. So lines are re-priced from the current menu on load;
-  // anything no longer on sale is left untouched for the server to reject with a clear message.
+  // old price lives in the held bill itself. So lines are re-priced from the current menu on load,
+  // bean/sweetness choices included (cart-lines.ts repriceItems); anything no longer on sale is left
+  // untouched for the server to reject with a clear message.
   function repriceFromMenu(items: CartItem[]): CartItem[] {
-    return items.map((item) => {
-      const product = products.find((p) => p.id === item.productId);
-      if (!product) return item;
-      const selectedModifiers = item.selectedModifiers.map((m) => {
-        const option = allModifiers
-          .find((mod) => mod.id === m.modifierId)
-          ?.options.find((o) => o.id === m.optionId);
-        return option ? { ...m, priceDelta: option.priceDelta } : m;
-      });
-      return {
-        ...item,
-        basePrice: product.price,
-        selectedModifiers,
-        totalPrice: lineTotal(product.price, selectedModifiers, item.quantity, item.choices),
-      };
-    });
+    return repriceItems(items, products, allModifiers, refreshCatalog);
   }
 
   function resumeHeld(bill: HeldBillSummary) {
@@ -1270,8 +1296,8 @@ export function PosScreen({
     router.refresh();
   }
 
-  const pendingProductModifiers: ModifierWithOptions[] = pendingProduct
-    ? (productModifierMap.get(pendingProduct.id) ?? [])
+  const optionWindowModifiers: ModifierWithOptions[] = optionWindow
+    ? (productModifierMap.get(optionWindow.product.id) ?? [])
         .map((modId) => allModifiers.find((m) => m.id === modId))
         .filter((m): m is ModifierWithOptions => m !== undefined)
     : [];
@@ -1287,7 +1313,7 @@ export function PosScreen({
     showNoShift ||
     showMobileCart ||
     showReview ||
-    pendingProduct !== null;
+    optionWindow !== null;
   const paymentUnresolved = uncertain || checkoutPending || unresolvedRef !== null;
   const cartGates = { pinDiscount: pinDiscountGate, hold: holdGate, member: memberGate };
   // บันทึกไว้ในเครื่อง: only after a try got no answer, and never for a PIN discount (spec 6b).
@@ -1378,7 +1404,7 @@ export function PosScreen({
           <ProductGrid
             products={products}
             categories={categories}
-            productsWithModifiers={productsWithModifiers}
+            productsWithModifiers={productsWithOptions}
             onProductClick={handleProductClick}
           />
         </div>
@@ -1425,6 +1451,9 @@ export function PosScreen({
             gates={cartGates}
             paymentReady={outbox.loaded && unsettledSaves === 0}
             payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
+            lineDetail={lineDetail}
+            canEditOptions={canEditOptions}
+            onEditOptions={editLineOptions}
           />
         </div>
       </div>
@@ -1497,18 +1526,24 @@ export function PosScreen({
                 lastOffline={lastOffline}
                 gates={cartGates}
                 paymentReady={outbox.loaded && unsettledSaves === 0}
-            payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
+                payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
+                lineDetail={lineDetail}
+                canEditOptions={canEditOptions}
+                onEditOptions={editLineOptions}
               />
             </div>
           </div>
         </div>
       )}
-      {pendingProduct !== null && (
-        <ModifierModal
-          product={pendingProduct}
-          modifiers={pendingProductModifiers}
-          onAddToCart={handleAddFromModal}
-          onClose={() => setPendingProduct(null)}
+      {optionWindow !== null && (
+        <OptionWindow
+          key={optionWindow.editing?.cartItemKey ?? optionWindow.product.id}
+          product={optionWindow.product}
+          modifiers={optionWindowModifiers}
+          catalog={stockCatalog}
+          editing={optionWindow.editing}
+          onSave={handleSaveFromWindow}
+          onClose={() => setOptionWindow(null)}
         />
       )}
       {showQrModal && (

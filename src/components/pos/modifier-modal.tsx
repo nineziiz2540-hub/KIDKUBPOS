@@ -1,83 +1,70 @@
 "use client";
-import { formatPrice } from "@/lib/cash";
-import { unitPrice } from "@/lib/cart-math";
-import { useState } from "react";
+// The POS option window (round D1, spec §8.1): rows in the order the customer says them — bean or
+// matcha (house row + special row, one pick), ความหวาน, หวานด้วย, the menu's other options, then a
+// folded "+ หมายเหตุ". Every row starts on its default, so a plain cup is menu → เพิ่มลงตะกร้า.
+// Opened on a cart line it starts on that line's picks and saving replaces the line.
+// The rules live in src/lib/stock/option-window.ts (pure, tested); this file only draws them.
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
-import type { CartItem, ModifierWithOptions, PosProduct, SelectedModifier } from "@/types/app";
+import { formatPrice } from "@/lib/cash";
+import type { StockCatalog } from "@/lib/stock/stock-core";
+import {
+  buildLine,
+  footerText,
+  initialWindowState,
+  missingHint,
+  missingRequired,
+  modifierHint,
+  optionRows,
+  pickLevel,
+  pickSlot,
+  pickSweetener,
+  priceTag,
+  shownSweetener,
+  sweetenerHint,
+  sweetenerLocked,
+  toggleOption,
+  type WindowState,
+} from "@/lib/stock/option-window";
+import type { CartItem, ModifierWithOptions, PosProduct } from "@/types/app";
 import { NoteEditor } from "./note-editor";
 
 type Props = {
   product: PosProduct;
   modifiers: ModifierWithOptions[];
-  onAddToCart: (item: CartItem) => void;
+  catalog: StockCatalog;
+  /** The cart line being edited: the window opens on its picks and saving replaces it. */
+  editing?: CartItem | null;
+  /** The line to add (its cartItemKey is "" — the cart gives it one) or the edited line (its own key). */
+  onSave: (item: CartItem) => void;
   onClose: () => void;
 };
 
-export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Props) {
-  const [selections, setSelections] = useState<Map<string, Set<string>>>(
-    () => new Map()
+export function OptionWindow({ product, modifiers, catalog, editing = null, onSave, onClose }: Props) {
+  const rows = useMemo(() => optionRows(product.id, catalog), [product.id, catalog]);
+  const [state, setState] = useState<WindowState>(() =>
+    initialWindowState(product.id, catalog, modifiers, editing ?? undefined)
   );
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(editing?.note ?? "");
+  const [noteOpen, setNoteOpen] = useState(false);
 
-  const isValid = modifiers
-    .filter((m) => m.isRequired)
-    .every((m) => {
-      const sel = selections.get(m.id);
-      return sel !== undefined && sel.size > 0;
-    });
+  const mode = editing ? "edit" : "add";
+  const line = buildLine({
+    product,
+    modifiers,
+    catalog,
+    state,
+    note,
+    quantity: editing?.quantity ?? 1,
+    key: editing?.cartItemKey ?? "",
+  });
+  const missing = missingRequired(state, modifiers);
+  const locked = sweetenerLocked(state, rows);
+  const sweetener = shownSweetener(state, rows);
 
-  const totalDelta = modifiers.flatMap((m) => m.options).reduce((sum, opt) => {
-    const modSel = modifiers.find((m) => m.options.some((o) => o.id === opt.id));
-    if (!modSel) return sum;
-    const sel = selections.get(modSel.id);
-    return sel?.has(opt.id) ? sum + opt.priceDelta : sum;
-  }, 0);
-
-  const displayPrice = product.price + totalDelta;
-
-  function toggle(modifierId: string, optionId: string, isMultiSelect: boolean) {
-    setSelections((prev) => {
-      const next = new Map(prev);
-      const current = new Set(next.get(modifierId) ?? []);
-      if (isMultiSelect) {
-        if (current.has(optionId)) current.delete(optionId);
-        else current.add(optionId);
-      } else {
-        current.clear();
-        current.add(optionId);
-      }
-      next.set(modifierId, current);
-      return next;
-    });
-  }
-
-  function handleAdd() {
-    const selectedModifiers: SelectedModifier[] = [];
-    for (const modifier of modifiers) {
-      const sel = selections.get(modifier.id) ?? new Set<string>();
-      for (const optionId of sel) {
-        const option = modifier.options.find((o) => o.id === optionId);
-        if (option) {
-          selectedModifiers.push({
-            modifierId: modifier.id,
-            modifierName: modifier.name,
-            optionId: option.id,
-            optionName: option.name,
-            priceDelta: option.priceDelta,
-          });
-        }
-      }
-    }
-    onAddToCart({
-      cartItemKey: `${product.id}-${Date.now()}`,
-      productId: product.id,
-      name: product.name,
-      basePrice: product.price,
-      quantity: 1,
-      selectedModifiers,
-      totalPrice: unitPrice(product.price, selectedModifiers),
-      note: note.trim() === "" ? null : note.trim(),
-    });
+  function handleSave() {
+    if (missing.length > 0) return;
+    onSave(line);
   }
 
   return (
@@ -95,115 +82,197 @@ export function ModifierModal({ product, modifiers, onAddToCart, onClose }: Prop
             if (e.target === e.currentTarget) onClose();
           }}
         >
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-lg max-h-[90dvh] flex flex-col">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-[720px] max-h-[92dvh] flex flex-col">
             {/* Header */}
-            <div className="px-5 pt-5 pb-3 border-b shrink-0">
-              <Dialog.Title className="font-bold text-sidebar text-lg leading-tight">
+            <div className="flex items-baseline justify-between gap-3 px-4 sm:px-5 pt-4 pb-3 border-b shrink-0">
+              <Dialog.Title className="min-w-0 font-bold text-sidebar text-xl leading-tight">
                 {product.name}
               </Dialog.Title>
-              <p className="text-base text-muted-foreground mt-0.5">
+              <p className="shrink-0 text-base text-muted-foreground tabular-nums">
                 ฿{formatPrice(product.price)}
+                {editing ? ` · ${editing.quantity} ชิ้น` : ""}
               </p>
             </div>
 
-            {/* Modifier groups */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-              {modifiers.map((modifier) => (
-                <div key={modifier.id}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="font-semibold text-base text-sidebar">
-                      {modifier.name}
-                    </span>
-                    {modifier.isRequired && (
-                      <span className="text-sm bg-destructive/10 text-destructive border border-destructive/20 px-2 py-0.5 rounded-full">
-                        จำเป็น
-                      </span>
-                    )}
-                    {modifier.isMultiSelect && (
-                      <span className="text-sm text-muted-foreground">
-                        (เลือกได้หลายอย่าง)
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {modifier.options.map((option) => {
-                      const isSelected =
-                        selections.get(modifier.id)?.has(option.id) ?? false;
-                      return (
-                        <label
-                          key={option.id}
-                          className={`flex items-center gap-3 min-h-12 px-3 py-2.5 rounded-lg cursor-pointer transition-colors border ${
-                            isSelected
-                              ? "border-accent bg-accent/5"
-                              : "border-border hover:bg-muted/50"
-                          }`}
-                        >
-                          <input
-                            type={modifier.isMultiSelect ? "checkbox" : "radio"}
-                            name={`mod-${modifier.id}`}
-                            checked={isSelected}
-                            onChange={() =>
-                              toggle(modifier.id, option.id, modifier.isMultiSelect)
-                            }
-                            className="sr-only"
-                          />
-                          {/* Custom indicator */}
-                          <span
-                            className={`w-5 h-5 shrink-0 border-2 flex items-center justify-center transition-colors ${
-                              modifier.isMultiSelect ? "rounded" : "rounded-full"
-                            } ${
-                              isSelected
-                                ? "border-accent bg-accent"
-                                : "border-border"
-                            }`}
-                          >
-                            {isSelected && (
-                              <span className="w-2.5 h-2.5 bg-white rounded-sm" />
-                            )}
-                          </span>
-                          <span className="flex-1 text-base leading-snug">{option.name}</span>
-                          {option.priceDelta !== 0 && (
-                            <span className="text-base text-muted-foreground tabular-nums">
-                              {option.priceDelta > 0 ? "+" : ""}฿
-                              {formatPrice(option.priceDelta)}
-                            </span>
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
+            {/* Rows */}
+            <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-3 space-y-2.5">
+              {rows.slots.map((slot) => (
+                <Fragment key={slot.groupId}>
+                  {slot.house.length > 0 && (
+                    <ChipRow title={slot.houseTitle}>
+                      {slot.house.map((c) => (
+                        <ChoiceChip
+                          key={c.id}
+                          label={c.label}
+                          price={priceTag(c.priceDelta)}
+                          selected={state.slots[slot.groupId] === c.id}
+                          onClick={() => setState((s) => pickSlot(s, slot.groupId, c.id))}
+                        />
+                      ))}
+                    </ChipRow>
+                  )}
+                  {slot.special.length > 0 && (
+                    <ChipRow title={slot.specialTitle}>
+                      {slot.special.map((c) => (
+                        <ChoiceChip
+                          key={c.id}
+                          label={c.label}
+                          price={priceTag(c.priceDelta)}
+                          special
+                          selected={state.slots[slot.groupId] === c.id}
+                          onClick={() => setState((s) => pickSlot(s, slot.groupId, c.id))}
+                        />
+                      ))}
+                    </ChipRow>
+                  )}
+                </Fragment>
               ))}
 
-              <div>
-                <p className="font-semibold text-base text-sidebar mb-2">
-                  หมายเหตุ <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
-                </p>
-                <NoteEditor value={note} onChange={setNote} />
-              </div>
+              {rows.sweetness && (
+                <ChipRow title="ความหวาน">
+                  {rows.sweetness.levels.map((l) => (
+                    <ChoiceChip
+                      key={l.id}
+                      label={l.name}
+                      price={null}
+                      selected={state.levelId === l.id}
+                      onClick={() => setState((s) => pickLevel(s, l.id))}
+                    />
+                  ))}
+                </ChipRow>
+              )}
+              {rows.sweetness && rows.sweetness.sweeteners.length > 0 && (
+                <ChipRow title="หวานด้วย" hint={sweetenerHint(state, rows)}>
+                  {rows.sweetness.sweeteners.map((c) => (
+                    <ChoiceChip
+                      key={c.id}
+                      label={c.label}
+                      price={null}
+                      selected={sweetener === c.id}
+                      disabled={locked}
+                      onClick={() => setState((s) => pickSweetener(s, rows, c.id))}
+                    />
+                  ))}
+                </ChipRow>
+              )}
+
+              {modifiers.map((modifier) => (
+                <ChipRow key={modifier.id} title={modifier.name} hint={modifierHint(modifier)}>
+                  {modifier.options.map((option) => (
+                    <ChoiceChip
+                      key={option.id}
+                      label={option.name}
+                      price={priceTag(option.priceDelta)}
+                      selected={(state.options[modifier.id] ?? []).includes(option.id)}
+                      onClick={() => setState((s) => toggleOption(s, modifier, option.id))}
+                    />
+                  ))}
+                </ChipRow>
+              ))}
+
+              {noteOpen ? (
+                <div className="space-y-2 pt-1">
+                  <p className="font-semibold text-base text-sidebar">
+                    หมายเหตุ <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
+                  </p>
+                  <NoteEditor value={note} onChange={setNote} />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setNoteOpen(true)}
+                  aria-expanded={false}
+                  className="inline-flex max-w-full items-center h-12 px-4 rounded-lg border border-input bg-white text-base font-semibold text-sidebar hover:border-accent hover:text-accent transition-colors"
+                >
+                  <span className="truncate">{note.trim() === "" ? "+ หมายเหตุ" : `หมายเหตุ: ${note.trim()}`}</span>
+                </button>
+              )}
             </div>
 
-            {/* Footer */}
-            <div className="px-5 py-4 border-t flex gap-3 shrink-0">
-              <Dialog.Close className="flex-1 inline-flex items-center justify-center h-12 rounded-lg border border-border bg-background px-3 text-base font-medium hover:bg-muted transition-colors">
-                ยกเลิก
-              </Dialog.Close>
-              <button
-                type="button"
-                onClick={handleAdd}
-                disabled={!isValid}
-                className={`flex-1 h-12 rounded-lg px-3 text-base font-semibold text-white transition-colors ${
-                  isValid
-                    ? "bg-accent hover:bg-accent/90 active:scale-95"
-                    : "bg-accent/40 cursor-not-allowed"
-                }`}
-              >
-                เพิ่มในตะกร้า • ฿{formatPrice(displayPrice)}
-              </button>
+            {/* Footer — always visible */}
+            <div className="px-4 sm:px-5 py-3 border-t shrink-0 space-y-2">
+              {missing.length > 0 && (
+                <p className="text-base font-medium text-sidebar">{missingHint(missing)}</p>
+              )}
+              <div className="flex gap-3">
+                <Dialog.Close className="w-28 sm:w-32 shrink-0 inline-flex items-center justify-center h-14 rounded-lg border border-input bg-white px-3 text-base font-semibold text-sidebar hover:bg-muted transition-colors">
+                  ยกเลิก
+                </Dialog.Close>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={missing.length > 0}
+                  className={`flex-1 h-14 rounded-lg px-3 text-lg font-bold text-white tabular-nums transition-colors ${
+                    missing.length > 0
+                      ? "bg-accent/40 cursor-not-allowed"
+                      : "bg-accent hover:bg-accent/90 active:scale-[0.98]"
+                  }`}
+                >
+                  {footerText(mode, line)}
+                </button>
+              </div>
             </div>
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** A row: its words on the left (above on a phone), chips 4 across (one column on a phone). */
+function ChipRow({ title, hint = null, children }: { title: string; hint?: string | null; children: ReactNode }) {
+  return (
+    <div className="sm:grid sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-3">
+      <div className="mb-1.5 sm:mb-0 sm:min-h-14 flex flex-col justify-center">
+        <p className="text-base font-semibold text-sidebar leading-tight">{title}</p>
+        {hint && <p className="text-sm text-muted-foreground leading-tight mt-0.5">{hint}</p>}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 56 px tall, 18 px text. Selected = solid accent, white text and ✓ (seen from arm's length). A special
+ * bean/matcha has an accent frame and an accent "+20". Disabled = faded and untappable, never hidden.
+ */
+function ChoiceChip({
+  label,
+  price,
+  selected,
+  disabled = false,
+  special = false,
+  onClick,
+}: {
+  label: string;
+  price: string | null;
+  selected: boolean;
+  disabled?: boolean;
+  special?: boolean;
+  onClick: () => void;
+}) {
+  const look = selected
+    ? "border-accent bg-accent text-white"
+    : disabled
+      ? "border-input bg-white text-sidebar opacity-40 cursor-not-allowed"
+      : special
+        ? "border-accent bg-white text-sidebar hover:bg-accent/5"
+        : "border-input bg-white text-sidebar hover:border-accent";
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={`min-h-14 w-full rounded-lg border-2 px-2 py-1 flex items-center justify-center gap-1.5 text-center text-lg font-semibold leading-tight transition-colors ${
+        disabled ? "" : "active:scale-[0.98]"
+      } ${look}`}
+    >
+      {selected && <span aria-hidden="true">✓</span>}
+      <span className="min-w-0 break-words">{label}</span>
+      {price && (
+        <span className={`shrink-0 tabular-nums ${selected ? "text-white" : "text-accent"}`}>{price}</span>
+      )}
+    </button>
   );
 }

@@ -14,13 +14,15 @@ export function NoteEditor({ value, onChange }: Props) {
             <button
               key={chip}
               type="button"
+              aria-pressed={active}
               onClick={() => onChange(toggleQuickNote(value, chip).slice(0, MAX_NOTE_LENGTH))}
-              className={`h-10 px-4 rounded-full border text-base font-medium transition-colors ${
+              className={`min-h-14 px-4 rounded-lg border-2 text-lg font-semibold transition-colors ${
                 active
                   ? "border-accent bg-accent text-white"
                   : "border-input bg-white text-sidebar hover:border-accent hover:text-accent"
               }`}
             >
+              {active && <span aria-hidden="true">✓ </span>}
               {chip}
             </button>
           );

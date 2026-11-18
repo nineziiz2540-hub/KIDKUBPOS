@@ -10,6 +10,7 @@ import {
 } from "@/lib/dal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bangkokToday } from "@/lib/bangkok-time";
+import { loadPosStockRows } from "@/lib/stock/pos-catalog";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -85,10 +86,22 @@ export default async function PosPage() {
     productModifierRecord[r.product_id]!.push(r.modifier_id);
   }
 
-  // All tenant modifiers (for ModifierModal to render options)
+  // All tenant modifiers (for the option window to render options)
   const allModifiers: ModifierWithOptions[] = await getModifiers(
     profile.tenant_id
   );
+
+  // Bean/matcha and sweetness rows for the option window (round D1): the menus on sale and the
+  // options linked to them. Cost-free, read as the signed-in user; null = not loaded (sell without).
+  const onSaleIds = new Set(products.map((p) => p.id));
+  const linkedModifierIds = new Set(
+    Object.entries(productModifierRecord)
+      .filter(([productId]) => onSaleIds.has(productId))
+      .flatMap(([, modifierIds]) => modifierIds)
+  );
+  const linkedOptionIds = allModifiers
+    .filter((m) => linkedModifierIds.has(m.id))
+    .flatMap((m) => m.options.map((o) => o.id));
 
   // Today's order count (Bangkok UTC+7)
   const offsetMs = 7 * 60 * 60 * 1000;
@@ -111,7 +124,7 @@ export default async function PosPage() {
   // Today's queue counter, for the device snapshot. tenant_queue_counters has no member RLS policy,
   // so it is read with the admin client, scoped to this shop. No row yet means 0.
   const todayQueueDate = bangkokToday(new Date());
-  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId] = await Promise.all([
+  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId, stockRows] = await Promise.all([
     createAdminClient()
       .from("tenant_queue_counters")
       .select("last_number")
@@ -122,6 +135,7 @@ export default async function PosPage() {
     getOpenHeldBills(profile.tenant_id),
     getCancelledHeldBillsToday(profile.tenant_id),
     getTenantPromptPayId(profile.tenant_id),
+    loadPosStockRows(supabase, profile.tenant_id, [...onSaleIds], linkedOptionIds),
   ]);
 
   return (
@@ -130,6 +144,7 @@ export default async function PosPage() {
       categories={categories}
       productModifierRecord={productModifierRecord}
       allModifiers={allModifiers}
+      stockRows={stockRows}
       userName={profile.full_name ?? "ผู้ใช้"}
       todayOrderCount={todayOrderCount ?? 0}
       activeShiftId={activeShift?.id ?? null}
