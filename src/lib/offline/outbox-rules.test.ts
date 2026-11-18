@@ -24,6 +24,7 @@ import {
   type OutboxState,
 } from "./outbox-rules.ts";
 import { restorable, toDraft, type DraftState } from "./cart-draft.ts";
+import type { CartChoices } from "../../types/app.ts";
 
 function entry(over: Partial<OutboxEntry> & { clientRef: string }): OutboxEntry {
   return {
@@ -401,4 +402,44 @@ test("the draft's attempt ref must be a UUID; a malformed one is dropped, the ca
   assert.ok(bad);
   assert.equal(bad.attemptRef, undefined);
   assert.equal(restorable({ ...d, attemptRef: "not-a-uuid" }, ids)?.attemptRef, undefined);
+});
+
+// ── choices (round D1) ──────────────────────────────────────────────────────
+const kenyaChoices: CartChoices = {
+  slots: [{ groupId: "g-bean", memberId: "m-kenya", label: "Kenya", tier: "special", priceDelta: 20 }],
+  slotAddGroupIds: [],
+  sweetness: { levelId: "lv-normal", levelName: "หวานปกติ", memberId: "sw-milk", memberLabel: "นมมิกซ์" },
+};
+const cartWith = (c: CartChoices) => ({ ...cartInput, items: [{ ...latte, choices: c }] });
+
+test("saleKey for an item without choices is exactly the pre-D1 string", () => {
+  assert.equal(
+    saleKey(cartInput),
+    JSON.stringify([[["p1", 2, 110, null, []]], "cash", "dine_in", null, null, null, null, null]),
+  );
+});
+
+test("saleKey follows roast, sweetness level and sweetener, not labels", () => {
+  const key = saleKey(cartWith(kenyaChoices));
+  const s = kenyaChoices.sweetness!;
+  const medium = { ...kenyaChoices, slots: [{ ...kenyaChoices.slots[0]!, memberId: "m-medium" }] };
+  assert.notEqual(saleKey(cartWith(medium)), key);
+  assert.notEqual(saleKey(cartWith({ ...kenyaChoices, sweetness: { ...s, levelId: "lv-less" } })), key);
+  assert.notEqual(saleKey(cartWith({ ...kenyaChoices, sweetness: { ...s, memberId: "sw-oat" } })), key);
+  const relabeled = {
+    ...kenyaChoices,
+    slots: [{ ...kenyaChoices.slots[0]!, label: "เคนย่า", priceDelta: 99 }],
+    sweetness: { ...s, levelName: "x", memberLabel: "y" },
+  };
+  assert.equal(saleKey(cartWith(relabeled)), key);
+});
+
+test("adoptableRef: a restored cart with the same bean adopts the ref, another roast does not", () => {
+  const input = cartWith(kenyaChoices) as unknown as OutboxEntry["input"];
+  const list = [st(REF_A, "check-only", { input })];
+  const back = reloaded(draftState({ items: [{ ...latte, choices: kenyaChoices }] }));
+  assert.ok(back);
+  assert.equal(adoptableRef(REF_A, list, "t1", "u1", saleKey({ ...cartInput, items: back.items })), REF_A);
+  const medium = { ...kenyaChoices, slots: [{ ...kenyaChoices.slots[0]!, memberId: "m-medium" }] };
+  assert.equal(adoptableRef(REF_A, list, "t1", "u1", saleKey(cartWith(medium))), null);
 });

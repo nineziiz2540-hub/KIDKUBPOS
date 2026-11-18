@@ -3,6 +3,7 @@
 // that was already saved instead of recording the sale twice. The ref is reused only while the
 // fingerprint below is unchanged: anything that would make it a different sale starts a new one.
 import type { CartItem } from "../types/app.ts";
+import { choiceKey } from "./choice-key.ts";
 
 /** Shown in the payment window when a try got no answer; retrying the same attempt is safe. */
 export const CONNECTION_RETRY_MESSAGE =
@@ -72,6 +73,8 @@ export function attemptFingerprint(input: AttemptInput): string {
       i.totalPrice,
       i.note,
       i.selectedModifiers.map((m) => m.optionId),
+      // Only when present: a cart without choices keeps its pre-D1 key byte for byte.
+      ...(i.choices ? [choiceKey(i.choices)] : []),
     ]),
     input.paymentMethod,
     input.orderType,

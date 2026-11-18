@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { CartChoices } from "../../types/app.ts";
 import { DRAFT_MAX_AGE_MS, draftKey, restorable, toDraft, type DraftState } from "./cart-draft.ts";
 
 const ids = { tenantId: "t1", sellerId: "u1" };
@@ -119,4 +120,63 @@ test("a draft older than 12 hours is ignored", () => {
   const d = toDraft(state({ savedAt: 1000 }), ids);
   assert.ok(restorable(d, ids, 1000 + DRAFT_MAX_AGE_MS));
   assert.equal(restorable(d, ids, 1000 + DRAFT_MAX_AGE_MS + 1), null);
+});
+
+// ── choices (round D1) ──────────────────────────────────────────────────────
+const choices: CartChoices = {
+  slots: [{ groupId: "g-bean", memberId: "m-kenya", label: "Kenya", tier: "special", priceDelta: 20 }],
+  slotAddGroupIds: ["g-bean"],
+  sweetness: { levelId: "lv-normal", levelName: "หวานปกติ", memberId: "sw-milk", memberLabel: "นมมิกซ์" },
+};
+const roundTrip = (it: unknown) =>
+  restorable(JSON.parse(JSON.stringify(toDraft(state({ items: [it as DraftState["items"][0]] }), ids))), ids);
+
+test("choices survive a save and reload unchanged", () => {
+  const back = roundTrip({ ...item, choices });
+  assert.deepEqual(back?.items[0]!.choices, choices);
+  const noSweet = roundTrip({ ...item, choices: { ...choices, sweetness: null } });
+  assert.equal(noSweet?.items[0]!.choices?.sweetness, null);
+});
+
+test("an item without choices comes back with no choices key", () => {
+  const back = roundTrip(item);
+  assert.ok(back);
+  assert.equal("choices" in back.items[0]!, false);
+});
+
+test("unknown keys inside choices, slots and sweetness are stripped", () => {
+  const dirty = {
+    ...item,
+    choices: {
+      ...choices,
+      extra: 1,
+      slots: [{ ...choices.slots[0]!, extra: 2 }],
+      sweetness: { ...choices.sweetness, extra: 3 },
+    },
+  };
+  assert.deepEqual(
+    toDraft(state({ items: [dirty] as unknown as DraftState["items"] }), ids)?.items[0]!.choices,
+    choices,
+  );
+  const raw = JSON.parse(JSON.stringify(toDraft(state({ items: [{ ...item, choices }] }), ids)));
+  raw.items[0]!.choices = dirty.choices;
+  assert.deepEqual(restorable(raw, ids)?.items[0]!.choices, choices);
+});
+
+test("malformed choices make the draft not restorable", () => {
+  const bad = [
+    { ...choices, slots: [{ ...choices.slots[0]!, tier: "gold" }] },
+    { ...choices, slots: [{ ...choices.slots[0]!, priceDelta: "20" }] },
+    { slots: choices.slots, sweetness: choices.sweetness },
+    { ...choices, sweetness: { levelId: 1 } },
+    { ...choices, slots: "x" },
+    { ...choices, slotAddGroupIds: [1] },
+    "kenya",
+    null,
+  ];
+  for (const c of bad) {
+    const raw = JSON.parse(JSON.stringify(toDraft(state(), ids)));
+    raw.items[0]!.choices = c;
+    assert.equal(restorable(raw, ids), null, JSON.stringify(c));
+  }
 });

@@ -37,6 +37,7 @@ export const DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 /** Only CartItem's known fields: unknown keys inside an item are dropped too. */
 function cleanItem(i: CartItem): CartItem {
+  const c = i.choices;
   return {
     cartItemKey: i.cartItemKey,
     productId: i.productId,
@@ -52,6 +53,28 @@ function cleanItem(i: CartItem): CartItem {
     })),
     totalPrice: i.totalPrice,
     note: i.note,
+    ...(c
+      ? {
+          choices: {
+            slots: c.slots.map((s) => ({
+              groupId: s.groupId,
+              memberId: s.memberId,
+              label: s.label,
+              tier: s.tier,
+              priceDelta: s.priceDelta,
+            })),
+            slotAddGroupIds: [...c.slotAddGroupIds],
+            sweetness: c.sweetness
+              ? {
+                  levelId: c.sweetness.levelId,
+                  levelName: c.sweetness.levelName,
+                  memberId: c.sweetness.memberId,
+                  memberLabel: c.sweetness.memberLabel,
+                }
+              : null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -98,12 +121,41 @@ function isObj(x: unknown): x is Record<string, unknown> {
 const isStr = (x: unknown): x is string => typeof x === "string";
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 
+function validChoices(c: unknown): boolean {
+  if (!isObj(c)) return false;
+  if (
+    !Array.isArray(c.slots) ||
+    !c.slots.every(
+      (s) =>
+        isObj(s) &&
+        isStr(s.groupId) &&
+        isStr(s.memberId) &&
+        isStr(s.label) &&
+        (s.tier === "house" || s.tier === "special") &&
+        isNum(s.priceDelta),
+    )
+  ) {
+    return false;
+  }
+  if (!Array.isArray(c.slotAddGroupIds) || !c.slotAddGroupIds.every(isStr)) return false;
+  if (c.sweetness === null) return true;
+  const w = c.sweetness;
+  return (
+    isObj(w) &&
+    isStr(w.levelId) &&
+    isStr(w.levelName) &&
+    (w.memberId === null || isStr(w.memberId)) &&
+    (w.memberLabel === null || isStr(w.memberLabel))
+  );
+}
+
 function validItem(x: unknown): x is CartItem {
   if (!isObj(x)) return false;
   if (!isStr(x.cartItemKey) || !isStr(x.productId) || !isStr(x.name)) return false;
   if (!isNum(x.basePrice) || !isNum(x.quantity) || !isNum(x.totalPrice)) return false;
   if (!(x.note === null || isStr(x.note))) return false;
   if (!Array.isArray(x.selectedModifiers)) return false;
+  if ("choices" in x && x.choices !== undefined && !validChoices(x.choices)) return false;
   return x.selectedModifiers.every(
     (m) =>
       isObj(m) &&

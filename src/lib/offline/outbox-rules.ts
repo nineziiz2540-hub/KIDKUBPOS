@@ -3,6 +3,7 @@ import type { CreateOrderInput, OfflineSale } from "../../types/app.ts";
 import type { ReviewCode } from "./sync-outcome.ts";
 import { bangkokToday } from "../bangkok-time.ts";
 import { PAYMENT_DEADLINE_MS } from "../payment-attempt.ts";
+import { choiceKey } from "../choice-key.ts";
 
 export type OutboxState = "attempt" | "check-only" | "pending" | "review";
 
@@ -147,6 +148,8 @@ export function saleKey(i: SaleKeyInput): string {
       it.totalPrice,
       it.note ?? null,
       it.selectedModifiers.map((m) => m.optionId),
+      // Only when present: an entry without choices keeps its pre-D1 key byte for byte.
+      ...(it.choices ? [choiceKey(it.choices)] : []),
     ]),
     i.paymentMethod,
     i.orderType,

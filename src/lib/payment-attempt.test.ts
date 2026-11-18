@@ -8,7 +8,7 @@ import {
   withDeadline,
   type AttemptInput,
 } from "./payment-attempt.ts";
-import type { CartItem } from "../types/app.ts";
+import type { CartChoices, CartItem } from "../types/app.ts";
 
 const latte: CartItem = {
   cartItemKey: "latte",
@@ -83,4 +83,51 @@ test("an unresolved payment keeps its warning whatever else the cart shows", () 
   assert.equal(cartWarning("PIN ไม่ถูกต้อง", null), "PIN ไม่ถูกต้อง");
   assert.equal(cartWarning(UNRESOLVED_PAYMENT_MESSAGE, "ref-1"), UNRESOLVED_PAYMENT_MESSAGE);
   assert.equal(cartWarning(null, null), null);
+});
+
+// ── choices (round D1): bean / sweetness are part of what makes one sale ─────
+const kenyaChoices: CartChoices = {
+  slots: [{ groupId: "g-bean", memberId: "m-kenya", label: "Kenya", tier: "special", priceDelta: 20 }],
+  slotAddGroupIds: [],
+  sweetness: { levelId: "lv-normal", levelName: "หวานปกติ", memberId: "sw-milk", memberLabel: "นมมิกซ์" },
+};
+const withChoices = (c: CartChoices): AttemptInput => ({ ...base, items: [{ ...latte, choices: c }, tea] });
+
+test("an item without choices fingerprints exactly as before round D1", () => {
+  const old = JSON.stringify([
+    [
+      ["latte", 1, 55, null, []],
+      ["tea", 1, 50, null, []],
+    ],
+    "cash",
+    "dine_in",
+    null,
+    null,
+    "",
+    null,
+    null,
+  ]);
+  assert.equal(attemptFingerprint(base), old);
+});
+
+test("changing only the roast changes the fingerprint", () => {
+  const house = { ...kenyaChoices, slots: [{ ...kenyaChoices.slots[0]!, memberId: "m-medium" }] };
+  assert.notEqual(attemptFingerprint(withChoices(kenyaChoices)), attemptFingerprint(withChoices(house)));
+});
+
+test("changing only the sweetness level or the sweetener changes the fingerprint", () => {
+  const s = kenyaChoices.sweetness!;
+  const fp = attemptFingerprint(withChoices(kenyaChoices));
+  assert.notEqual(fp, attemptFingerprint(withChoices({ ...kenyaChoices, sweetness: { ...s, levelId: "lv-less" } })));
+  assert.notEqual(fp, attemptFingerprint(withChoices({ ...kenyaChoices, sweetness: { ...s, memberId: "sw-oat" } })));
+});
+
+test("the same choices with different labels give the same fingerprint", () => {
+  const s = kenyaChoices.sweetness!;
+  const relabeled: CartChoices = {
+    ...kenyaChoices,
+    slots: [{ ...kenyaChoices.slots[0]!, label: "เคนย่า", priceDelta: 25 }],
+    sweetness: { ...s, levelName: "x", memberLabel: "y" },
+  };
+  assert.equal(attemptFingerprint(withChoices(kenyaChoices)), attemptFingerprint(withChoices(relabeled)));
 });

@@ -1,4 +1,5 @@
 import type { CartItem } from "@/types/app";
+import { choiceKey } from "./choice-key.ts";
 
 export type Reduction = {
   name: string;
@@ -12,9 +13,26 @@ export type Reduction = {
  * What a cup *is*, independent of cart line keys (which change when lines merge/split or a note
  * is added): same product + same options + same note = same thing.
  */
-export function lineIdentity(item: Pick<CartItem, "productId" | "selectedModifiers" | "note">): string {
+export function lineIdentity(
+  item: Pick<CartItem, "productId" | "selectedModifiers" | "note" | "choices">,
+): string {
   const options = item.selectedModifiers.map((m) => m.optionId).sort().join(",");
-  return `${item.productId}|${options}|${item.note ?? ""}`;
+  const base = `${item.productId}|${options}|${item.note ?? ""}`;
+  // Only when present: an item without choices keeps exactly its pre-D1 identity.
+  return item.choices ? `${base}|${JSON.stringify(choiceKey(item.choices))}` : base;
+}
+
+/** The names the owner reads for a line: option names, then (if any) bean/matcha and sweetness. */
+function optionNames(item: CartItem): string[] {
+  const names = item.selectedModifiers.map((m) => m.optionName);
+  const c = item.choices;
+  if (!c) return names;
+  for (const s of c.slots) names.push(s.label);
+  if (c.sweetness) {
+    names.push(c.sweetness.levelName);
+    if (c.sweetness.memberLabel !== null) names.push(c.sweetness.memberLabel);
+  }
+  return names;
 }
 
 /**
@@ -43,7 +61,7 @@ export function diffReductions(before: CartItem[], after: CartItem[]): Reduction
     if (toQty < qty) {
       reductions.push({
         name: item.name,
-        options: item.selectedModifiers.map((m) => m.optionName),
+        options: optionNames(item),
         note: item.note ?? null,
         fromQty: qty,
         toQty,
