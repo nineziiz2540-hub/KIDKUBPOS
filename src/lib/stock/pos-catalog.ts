@@ -7,10 +7,12 @@
 //
 // A display subset of catalog.ts: slot lines only (no fixed lines), slot_add effects only, no
 // sweetness amounts. Nothing on the POS deducts stock; the server re-resolves every line from its own
-// full catalog. Filtered to the menus on sale / their options here rather than with long `in` lists.
+// full catalog. Filtered to the menus on sale / their options by posStockRows (pure, tested against
+// the server's full catalog) rather than with long `in` lists.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { StockCatalogRows } from "@/lib/stock/catalog-build";
+import { posStockRows } from "@/lib/stock/pos-stock";
 
 /**
  * null = a query failed (logged): the POS then sells with no bean/sweetness rows and the server
@@ -63,18 +65,17 @@ export async function loadPosStockRows(
       return null;
     }
 
-    const onSale = new Set(productIds);
-    const offered = new Set(optionIds);
-    return {
+    const rows = {
       materials: materials.data ?? [],
-      recipes: (recipes.data ?? []).filter((r) => onSale.has(r.product_id)),
+      recipes: recipes.data ?? [],
       groups: groups.data ?? [],
       members: members.data ?? [],
       levels: levels.data ?? [],
       amounts: [],
-      productSweetness: (productSweetness.data ?? []).filter((p) => onSale.has(p.product_id)),
-      optionEffects: (effects.data ?? []).filter((e) => offered.has(e.option_id)),
+      productSweetness: productSweetness.data ?? [],
+      optionEffects: effects.data ?? [],
     } as StockCatalogRows; // line_kind / kind / tier are text columns whose check constraints narrow them
+    return posStockRows(rows, productIds, optionIds);
   } catch (e) {
     console.error("[loadPosStockRows] failed:", e instanceof Error ? e.message : e);
     return null;

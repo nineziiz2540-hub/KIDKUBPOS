@@ -2,10 +2,10 @@
 import { formatPrice } from "@/lib/cash";
 import { cartSubtotal } from "@/lib/cart-math";
 import { addLine, replaceLine, repriceItems, withQuantity } from "@/lib/cart-lines";
-import { buildStockCatalog, type StockCatalogRows } from "@/lib/stock/catalog-build";
-import { emptyStockCatalog, type StockCatalog } from "@/lib/stock/stock-core";
+import type { StockCatalogRows } from "@/lib/stock/catalog-build";
+import { posStock, refreshCatalogOf } from "@/lib/stock/pos-stock";
 import { defaultChoices } from "@/lib/stock/pos-choices";
-import { choiceParts, hasOptionRows, optionRows } from "@/lib/stock/option-window";
+import { cartLineParts, hasOptionRows, optionRows } from "@/lib/stock/option-window";
 import { useEffect, useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { checkOrderSaved, createOrder } from "@/app/actions/orders";
@@ -294,19 +294,15 @@ export function PosScreen({
   }
 
   // The client builds the catalog from the page's rows with the server's own builder. Rows that
-  // could not be loaded (or built) -> an empty catalog: menus sell with no bean/sweetness rows and
-  // the server applies each menu's defaults.
-  const stockCatalog = useMemo((): StockCatalog => {
-    if (stockRows === null) return emptyStockCatalog();
-    try {
-      return buildStockCatalog(stockRows);
-    } catch (e) {
-      console.error("[pos] stock catalog could not be built:", e);
-      return emptyStockCatalog();
-    }
-  }, [stockRows]);
-  /** Null when this page has no stock data: saved lines then keep their choices as stored. */
-  const refreshCatalog = stockRows === null ? null : stockCatalog;
+  // could not be loaded or built -> not loaded: an empty catalog (menus sell with no bean/sweetness
+  // rows, the server applies each menu's defaults), a warning line on the POS, no cart word marked,
+  // and saved lines keep their choices exactly as stored (refreshCatalog null).
+  const stock = useMemo(
+    () => posStock(stockRows, (e) => console.error("[pos] stock catalog could not be built:", e)),
+    [stockRows]
+  );
+  const stockCatalog = stock.catalog;
+  const refreshCatalog = refreshCatalogOf(stock);
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
@@ -446,7 +442,7 @@ export function PosScreen({
   }
 
   function lineDetail(item: CartItem) {
-    return choiceParts(item.choices, defaultChoices(item.productId, stockCatalog));
+    return cartLineParts(item, stock.loaded ? defaultChoices(item.productId, stockCatalog) : null);
   }
 
   // The last item taken out by hand ends this cart as a sale, just like ล้าง: its payment attempt
@@ -1399,6 +1395,15 @@ export function PosScreen({
         }}
         shiftDisabledReason={reasonOf(shiftGate)}
       />
+      {!stock.loaded && (
+        <p
+          role="status"
+          className="mt-2 shrink-0 rounded-lg border-2 border-warning bg-warning/10 px-4 py-2 text-base font-semibold text-sidebar"
+        >
+          <span aria-hidden="true" className="text-warning">⚠ </span>
+          โหลดตัวเลือกเมล็ด/ความหวานไม่สำเร็จ · รีเฟรชหน้า
+        </p>
+      )}
       <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0 mt-2">
         <div className="flex-1 min-w-0 pb-20 md:pb-0">
           <ProductGrid

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildLine,
+  cartLineParts,
   choiceParts,
   choicesFromWindow,
   footerText,
@@ -441,4 +442,33 @@ test("cart text: a ไม่หวาน-default menu marks the added sweetener;
   const sweet = choicesFromWindow("unsweet", catalog, pickLevel(initialWindowState("unsweet", catalog, []), "lv_less"), []);
   assert.deepEqual(choiceParts(sweet, d), [{ text: "หวานน้อย", changed: true }, { text: "ไซรัป", changed: true }]);
   assert.deepEqual(choiceParts(undefined, d), []);
+});
+
+test("cart text when the bean/sweetness data did not load: every word shown, none marked", () => {
+  assert.deepEqual(choiceParts(kenyaLine.choices, null), [
+    { text: "เคนยา", changed: false }, { text: "หวานน้อย", changed: false }, { text: "นมมิกซ์", changed: false },
+  ]);
+});
+
+test("R42: every chosen option shows after the bean/sweetness words, always marked (options are never defaults)", () => {
+  const d = defaultChoices("latte", catalog);
+  const line: CartItem = {
+    ...kenyaLine,
+    selectedModifiers: [
+      ...kenyaLine.selectedModifiers,
+      { modifierId: "mod_top", modifierName: "ท็อปปิ้ง", optionId: "o_pearl", optionName: "ไข่มุก", priceDelta: 10 },
+    ],
+  };
+  assert.deepEqual(cartLineParts(line, d), [
+    { text: "เคนยา", changed: true }, { text: "หวานน้อย", changed: true }, { text: "นมมิกซ์", changed: true },
+    { text: "เพิ่มช็อต", changed: true }, { text: "ไข่มุก", changed: true },
+  ]);
+  // defaults stay plain; options are still marked even when the stock data did not load
+  const plainShot: CartItem = { ...line, choices: d, selectedModifiers: [line.selectedModifiers[0]!] };
+  assert.deepEqual(cartLineParts(plainShot, d).map((p) => p.changed), [false, false, false, true]);
+  assert.deepEqual(cartLineParts(plainShot, null).map((p) => p.changed), [false, false, false, true]);
+  // a pre-D1 line: only its options
+  const legacy: CartItem = { ...plainShot };
+  delete legacy.choices;
+  assert.deepEqual(cartLineParts(legacy, d), [{ text: "เพิ่มช็อต", changed: true }]);
 });

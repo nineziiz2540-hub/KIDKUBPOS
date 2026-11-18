@@ -4,7 +4,7 @@
 // folded "+ หมายเหตุ". Every row starts on its default, so a plain cup is menu → เพิ่มลงตะกร้า.
 // Opened on a cart line it starts on that line's picks and saving replaces the line.
 // The rules live in src/lib/stock/option-window.ts (pure, tested); this file only draws them.
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useId, useMemo, useState, type ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { formatPrice } from "@/lib/cash";
 import type { StockCatalog } from "@/lib/stock/stock-core";
@@ -47,6 +47,7 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
   );
   const [note, setNote] = useState(editing?.note ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
+  const noteId = useId();
 
   const mode = editing ? "edit" : "add";
   const line = buildLine({
@@ -142,7 +143,7 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                 </ChipRow>
               )}
               {rows.sweetness && rows.sweetness.sweeteners.length > 0 && (
-                <ChipRow title="หวานด้วย" hint={sweetenerHint(state, rows)}>
+                <ChipRow title="หวานด้วย" hint={sweetenerHint(state, rows)} reserveHint>
                   {rows.sweetness.sweeteners.map((c) => (
                     <ChoiceChip
                       key={c.id}
@@ -170,23 +171,26 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                 </ChipRow>
               ))}
 
-              {noteOpen ? (
-                <div className="space-y-2 pt-1">
-                  <p className="font-semibold text-base text-sidebar">
-                    หมายเหตุ <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
-                  </p>
-                  <NoteEditor value={note} onChange={setNote} />
-                </div>
-              ) : (
+              <div>
                 <button
                   type="button"
-                  onClick={() => setNoteOpen(true)}
-                  aria-expanded={false}
+                  onClick={() => setNoteOpen((open) => !open)}
+                  aria-expanded={noteOpen}
+                  aria-controls={noteId}
                   className="inline-flex max-w-full items-center h-12 px-4 rounded-lg border border-input bg-white text-base font-semibold text-sidebar hover:border-accent hover:text-accent transition-colors"
                 >
-                  <span className="truncate">{note.trim() === "" ? "+ หมายเหตุ" : `หมายเหตุ: ${note.trim()}`}</span>
+                  <span className="truncate">
+                    {noteOpen
+                      ? "− หมายเหตุ (ไม่บังคับ)"
+                      : note.trim() === ""
+                        ? "+ หมายเหตุ"
+                        : `หมายเหตุ: ${note.trim()}`}
+                  </span>
                 </button>
-              )}
+                <div id={noteId} hidden={!noteOpen} className="mt-2">
+                  <NoteEditor value={note} onChange={setNote} />
+                </div>
+              </div>
             </div>
 
             {/* Footer — always visible */}
@@ -219,13 +223,31 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
   );
 }
 
-/** A row: its words on the left (above on a phone), chips 4 across (one column on a phone). */
-function ChipRow({ title, hint = null, children }: { title: string; hint?: string | null; children: ReactNode }) {
+/**
+ * A row: its words on the left (above on a phone), chips 4 across (one column on a phone).
+ * `reserveHint` keeps the hint's line even when it is empty, so the chips never move when it comes
+ * and goes (on a phone the words sit above the chips).
+ */
+function ChipRow({
+  title,
+  hint = null,
+  reserveHint = false,
+  children,
+}: {
+  title: string;
+  hint?: string | null;
+  reserveHint?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="sm:grid sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-3">
       <div className="mb-1.5 sm:mb-0 sm:min-h-14 flex flex-col justify-center">
         <p className="text-base font-semibold text-sidebar leading-tight">{title}</p>
-        {hint && <p className="text-sm text-muted-foreground leading-tight mt-0.5">{hint}</p>}
+        {(hint !== null || reserveHint) && (
+          <p className="text-sm text-muted-foreground leading-tight mt-0.5" aria-hidden={hint === null ? true : undefined}>
+            {hint ?? "\u00a0"}
+          </p>
+        )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">{children}</div>
     </div>

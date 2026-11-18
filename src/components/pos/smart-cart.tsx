@@ -14,7 +14,7 @@ import { DisabledReason } from "./disabled-reason";
 import { OfflineSaleResult } from "./offline-sale-result";
 import type { OfflineResult } from "./outbox-sale";
 import type { Gate } from "@/lib/offline/feature-gates";
-import type { LinePart } from "@/lib/stock/option-window";
+import { cartLineParts, type LinePart } from "@/lib/stock/option-window";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -82,7 +82,7 @@ type Props = {
   paymentReady: boolean;
   /** Why ชำระ is off right now (e.g. an earlier device save is still settling); null = none. */
   payBlockedReason?: string | null;
-  /** A line's bean/sweetness words, non-defaults marked (round D1); none for other lines. */
+  /** A line's bean/sweetness words then its options, non-defaults marked (round D1). */
   lineDetail?: (item: CartItem) => LinePart[];
   /** True when tapping the line reopens the option window; otherwise the tap edits its note. */
   canEditOptions?: (item: CartItem) => boolean;
@@ -273,9 +273,10 @@ export function SmartCart({
             // Menus with options reopen the option window (pre-filled; saving replaces the line);
             // the rest open the note editor. The whole text block is the target, not a tiny icon.
             const editsOptions = canEditOptions?.(item) === true && onEditOptions !== undefined;
-            const parts = lineDetail?.(item) ?? [];
+            // Without the catalog (no lineDetail) the words still show, just none marked as a choice.
+            const parts = lineDetail?.(item) ?? cartLineParts(item, null);
             return (
-              <div key={item.cartItemKey} className="flex items-center gap-3 px-4 py-3">
+              <div key={item.cartItemKey} className="flex items-center gap-2 px-4 py-3">
                 <button
                   type="button"
                   onClick={() => (editsOptions ? onEditOptions(item.cartItemKey) : setNoteKey(item.cartItemKey))}
@@ -285,20 +286,16 @@ export function SmartCart({
                     {item.name}
                   </p>
                   {parts.length > 0 && (
-                    // Every bean/sweetness choice; the ones that are not the menu default bold accent,
-                    // so the barista sees at a glance which cup is different.
-                    <p className="text-base text-sidebar leading-snug mt-0.5 line-clamp-2">
+                    // Every brew choice — bean, sweetness, then each chosen option — with the ones that
+                    // are not the menu default (every option, R42) bold accent, so the barista sees at a
+                    // glance which cup is different. Never clamped: a hidden choice is a wrong cup.
+                    <p className="text-base text-sidebar leading-snug mt-0.5">
                       {parts.map((part, i) => (
                         <Fragment key={i}>
                           {i > 0 && " · "}
                           <span className={part.changed ? "font-bold text-accent" : undefined}>{part.text}</span>
                         </Fragment>
                       ))}
-                    </p>
-                  )}
-                  {item.selectedModifiers.length > 0 && (
-                    <p className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">
-                      {item.selectedModifiers.map((m) => m.optionName).join(", ")}
                     </p>
                   )}
                   {item.note && (
@@ -320,22 +317,22 @@ export function SmartCart({
                     ฿{formatPrice(item.totalPrice)}
                   </p>
                   {/* Qty controls */}
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => onUpdateQty(item.cartItemKey, item.quantity - 1)}
-                      className="w-10 h-10 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
+                      className="w-12 h-12 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
                       aria-label="ลดจำนวน"
                     >
                       −
                     </button>
-                    <span className="w-8 text-center text-lg font-semibold tabular-nums">
+                    <span className="w-7 text-center text-lg font-semibold tabular-nums">
                       {item.quantity}
                     </span>
                     <button
                       type="button"
                       onClick={() => onUpdateQty(item.cartItemKey, item.quantity + 1)}
-                      className="w-10 h-10 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
+                      className="w-12 h-12 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted transition-colors"
                       aria-label="เพิ่มจำนวน"
                     >
                       +
@@ -345,7 +342,7 @@ export function SmartCart({
                 <button
                   type="button"
                   onClick={() => onRemove(item.cartItemKey)}
-                  className="w-10 h-10 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
+                  className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
                   aria-label="ลบสินค้า"
                 >
                   <Trash2 size={18} />

@@ -315,19 +315,34 @@ export function footerText(mode: "add" | "edit", line: CartItem): string {
 
 export type LinePart = { text: string; changed: boolean };
 
-/** A cart line's bean/sweetness words; `changed` = not the menu default (shown bold accent). */
-export function choiceParts(choices: CartChoices | undefined, defaults: CartChoices): LinePart[] {
+/**
+ * A cart line's bean/sweetness words; `changed` = not the menu default (shown bold accent).
+ * `defaults` null = the page has no stock data, so nothing can be told apart: no word is marked.
+ */
+export function choiceParts(choices: CartChoices | undefined, defaults: CartChoices | null): LinePart[] {
   if (!choices) return [];
+  const differs = (part: Parameters<typeof isDefaultChoice>[1]) => defaults !== null && !isDefaultChoice(defaults, part);
   const parts: LinePart[] = choices.slots.map((s) => ({
     text: s.label,
-    changed: !isDefaultChoice(defaults, { kind: "slot", groupId: s.groupId, memberId: s.memberId }),
+    changed: differs({ kind: "slot", groupId: s.groupId, memberId: s.memberId }),
   }));
   const sw = choices.sweetness;
   if (sw) {
-    parts.push({ text: sw.levelName, changed: !isDefaultChoice(defaults, { kind: "level", levelId: sw.levelId }) });
+    parts.push({ text: sw.levelName, changed: differs({ kind: "level", levelId: sw.levelId }) });
     if (sw.memberId !== null && sw.memberLabel !== null) {
-      parts.push({ text: sw.memberLabel, changed: !isDefaultChoice(defaults, { kind: "sweetener", memberId: sw.memberId }) });
+      parts.push({ text: sw.memberLabel, changed: differs({ kind: "sweetener", memberId: sw.memberId }) });
     }
   }
   return parts;
+}
+
+/**
+ * Everything the barista makes differently for this line, in the order they make it: bean/sweetness
+ * words, then every chosen option. Options have no default, so a chosen one is always marked (R42).
+ */
+export function cartLineParts(item: Pick<CartItem, "choices" | "selectedModifiers">, defaults: CartChoices | null): LinePart[] {
+  return [
+    ...choiceParts(item.choices, defaults),
+    ...item.selectedModifiers.map((m) => ({ text: m.optionName, changed: true })),
+  ];
 }
