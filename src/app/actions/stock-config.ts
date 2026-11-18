@@ -165,7 +165,16 @@ export async function addGroupMember(groupId: string, materialId: string): Promi
     is_default: isDefault,
     sort_order: existing.reduce((mx, m) => Math.max(mx, m.sort_order), -1) + 1,
   });
-  if (error) return { error: error.code === "23505" ? "วัตถุดิบเดียวกันใส่ซ้ำไม่ได้" : SAVE_FAIL };
+  if (error) {
+    if (error.code === "23505") {
+      // Two first members added at once trip the one-default index; a repeated material trips (group, material).
+      if ((error.message ?? "").includes("choice_group_members_one_default")) {
+        return { error: "มีค่าเริ่มต้นของกลุ่มนี้แล้ว — ลองอีกครั้ง" };
+      }
+      return { error: "วัตถุดิบเดียวกันใส่ซ้ำไม่ได้" };
+    }
+    return { error: SAVE_FAIL };
+  }
   revalidateConfig();
   return { success: true };
 }

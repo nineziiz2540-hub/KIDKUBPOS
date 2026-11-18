@@ -79,7 +79,7 @@ function LevelRow({ level, index, count }: { level: LevelProps; index: number; c
           onClick={() =>
             run(
               "none",
-              () => updateSweetnessLevel(level.id, { name, isNone: !level.isNone }),
+              () => updateSweetnessLevel(level.id, { name: level.name, isNone: !level.isNone }),
               level.isNone ? "เอาเครื่องหมาย “ไม่หวาน” ออกแล้ว" : "ตั้งเป็นระดับ “ไม่หวาน” แล้ว"
             )
           }
