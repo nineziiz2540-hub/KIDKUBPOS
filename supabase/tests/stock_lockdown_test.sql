@@ -29,7 +29,7 @@ declare
   ok boolean;
   cnt_write int; cnt_ledger int; cnt_read int; cnt_forge int; cnt_mat int;
   cost numeric; ucost numeric; ctotal numeric;
-  sm_id uuid; sm_err text; sm_slot_err text;
+  sm_id uuid; sm_err text; sm_slot_id uuid; sm_slot_err text;
 begin
   -- ── fixtures (as the default role) ──────────────────────────────────────
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
@@ -278,7 +278,7 @@ begin
     and public.row_in_tenant('raw_materials', mA, ta));   -- own shop still answers true
   reset role;
 
-  -- ── save_menu as the OWNER through the user client still works (fixed line; slot line recorded) ──
+  -- ── save_menu as the OWNER through the user client still works (fixed line; fixed + bean slot line) ──
   set local role authenticated;
   perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
   begin
@@ -289,18 +289,31 @@ begin
   exception when others then sm_err := sqlerrm; end;
   ok := sm_id is not null and sm_err is null
     and (select count(*) = 1 from public.product_recipes where product_id = sm_id and raw_material_id = mA and quantity_used = 5);
-  -- fixed line + slot line (null raw_material_id): recorded in _save_menu_slot, see report
+  -- a fixed line AND a bean slot line (save_menu_slots contract) through the user client, with the
+  -- lockdown's reference check on product_recipes in force
+  sm_slot_id := null;
   begin
-    perform public.save_menu(null,
+    sm_slot_id := public.save_menu(null,
       jsonb_build_object('name', 'เมนูสล็อต', 'price', 60, 'is_active', true),
-      jsonb_build_array(jsonb_build_object('raw_material_id', mA, 'quantity_used', 5),
-                        jsonb_build_object('raw_material_id', null, 'quantity_used', 1, 'group_id', gA)),
+      jsonb_build_array(jsonb_build_object('line_kind', 'fixed', 'raw_material_id', mA, 'quantity_used', 5),
+                        jsonb_build_object('line_kind', 'slot', 'group_id', gA, 'quantity_used', 18,
+                                           'default_member_id', memA, 'allow_special', true)),
       '{}'::uuid[]);
-    sm_slot_err := 'ok';
   exception when others then sm_slot_err := sqlerrm; end;
   reset role;
   r := r || jsonb_build_object('owner_save_menu_still_works', ok);
-  r := r || jsonb_build_object('_save_menu_slot', sm_slot_err);
+  r := r || jsonb_build_object('owner_save_menu_slot_works',
+    sm_slot_id is not null and sm_slot_err is null
+    and (select count(*) = 2 from public.product_recipes where product_id = sm_slot_id)
+    and (select count(*) = 1 from public.product_recipes
+          where product_id = sm_slot_id and tenant_id = ta and line_kind = 'fixed' and raw_material_id = mA
+            and group_id is null and quantity_used = 5)
+    and (select count(*) = 1 from public.product_recipes
+          where product_id = sm_slot_id and tenant_id = ta and line_kind = 'slot' and group_id = gA
+            and raw_material_id is null and default_member_id = memA and allow_special and quantity_used = 18));
+  if sm_slot_err is not null then
+    r := r || jsonb_build_object('_save_menu_slot_err', sm_slot_err);
+  end if;
 
   -- ── service role (the admin client) still reads and writes costs and stock ──
   set local role service_role;
