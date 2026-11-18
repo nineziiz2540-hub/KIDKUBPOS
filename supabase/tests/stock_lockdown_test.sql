@@ -29,6 +29,7 @@ declare
   ok boolean;
   cnt_write int; cnt_ledger int; cnt_read int; cnt_forge int; cnt_mat int;
   cost numeric; ucost numeric; ctotal numeric;
+  sm_id uuid; sm_err text; sm_slot_err text;
 begin
   -- ── fixtures (as the default role) ──────────────────────────────────────
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
@@ -146,6 +147,25 @@ begin
     and not has_table_privilege('authenticated', 'public.order_items', 'insert')
     and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'order_items' and cmd = 'INSERT'));
 
+  r := r || jsonb_build_object('table_privileges_closed',
+    not has_table_privilege('authenticated', 'public.order_items', 'update')
+    and not has_table_privilege('authenticated', 'public.order_items', 'delete')
+    and not has_table_privilege('authenticated', 'public.raw_materials', 'delete')
+    and not has_table_privilege('authenticated', 'public.raw_materials', 'insert')
+    and not has_table_privilege('authenticated', 'public.raw_materials', 'update')
+    and not has_table_privilege('authenticated', 'public.inventory_transactions', 'update')
+    and not has_table_privilege('authenticated', 'public.inventory_transactions', 'delete')
+    and not has_table_privilege('authenticated', 'public.inventory_transactions', 'insert')
+    and not has_table_privilege('anon', 'public.raw_materials', 'select')
+    and not has_table_privilege('anon', 'public.inventory_transactions', 'select')
+    and not has_table_privilege('anon', 'public.order_items', 'select')
+    and not has_table_privilege('anon', 'public.choice_groups', 'select')
+    and not has_table_privilege('anon', 'public.choice_group_members', 'select')
+    and not has_table_privilege('anon', 'public.sweetness_levels', 'select')
+    and not has_table_privilege('anon', 'public.sweetness_amounts', 'select')
+    and not has_table_privilege('anon', 'public.product_sweetness', 'select')
+    and not has_table_privilege('anon', 'public.modifier_option_effects', 'select'));
+
   -- ── Staff still reads everything the POS and the catalog loader need ────
   set local role authenticated;
   perform set_config('request.jwt.claims', json_build_object('sub', us, 'role', 'authenticated')::text, true);
@@ -245,6 +265,42 @@ begin
   reset role;
   r := r || jsonb_build_object('no_cross_tenant_config_refs', not exists (select 1 from unnest(hit) h where h like 'xtenant:%'));
   r := r || jsonb_build_object('owner_still_writes_own_config', ok);
+
+  -- ── the helper functions are not an oracle: Staff of A asking about B's rows with B's tenant id ──
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', us, 'role', 'authenticated')::text, true);
+  r := r || jsonb_build_object('helpers_not_an_oracle',
+    not public.row_in_tenant('raw_materials', mB, tb)
+    and not public.row_in_tenant('choice_groups', gB, tb)
+    and not public.row_in_tenant('products', pb, tb)
+    and not public.config_refs_ok('choice_group_members',
+          jsonb_build_object('tenant_id', tb, 'group_id', gB, 'raw_material_id', mB))
+    and public.row_in_tenant('raw_materials', mA, ta));   -- own shop still answers true
+  reset role;
+
+  -- ── save_menu as the OWNER through the user client still works (fixed line; slot line recorded) ──
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  begin
+    sm_id := public.save_menu(null,
+      jsonb_build_object('name', 'เมนูทดสอบ', 'price', 60, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('raw_material_id', mA, 'quantity_used', 5)),
+      '{}'::uuid[]);
+  exception when others then sm_err := sqlerrm; end;
+  ok := sm_id is not null and sm_err is null
+    and (select count(*) = 1 from public.product_recipes where product_id = sm_id and raw_material_id = mA and quantity_used = 5);
+  -- fixed line + slot line (null raw_material_id): recorded in _save_menu_slot, see report
+  begin
+    perform public.save_menu(null,
+      jsonb_build_object('name', 'เมนูสล็อต', 'price', 60, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('raw_material_id', mA, 'quantity_used', 5),
+                        jsonb_build_object('raw_material_id', null, 'quantity_used', 1, 'group_id', gA)),
+      '{}'::uuid[]);
+    sm_slot_err := 'ok';
+  exception when others then sm_slot_err := sqlerrm; end;
+  reset role;
+  r := r || jsonb_build_object('owner_save_menu_still_works', ok);
+  r := r || jsonb_build_object('_save_menu_slot', sm_slot_err);
 
   -- ── service role (the admin client) still reads and writes costs and stock ──
   set local role service_role;

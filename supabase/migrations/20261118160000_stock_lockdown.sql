@@ -7,6 +7,8 @@
 --   * order_items: policy order_items_insert lets any tenant member forge items (cost_total, choices).
 --   * anon holds full table grants on all of these (RLS is the only wall).
 --   * the six round-D config tables accept ids of OTHER tenants (WITH CHECK only looks at the row's tenant_id).
+-- Column-level SELECT grants: a column added later to raw_materials / inventory_transactions / order_items is NOT
+-- selectable by authenticated until it is added to the grant list here (PostgREST returns 42501).
 -- After this: writes to stock go through service-role functions / the admin client behind an owner/manager
 -- check; cost columns are not selectable by authenticated or anon.
 
@@ -51,7 +53,9 @@ stable
 security definer
 set search_path = public
 as $$
-  select case p_table
+  -- Only ever confirms the CALLER's own tenant: asking about another shop's row answers false, never true
+  -- (so it cannot be used to probe which ids exist in other shops). service_role bypasses RLS and never needs it.
+  select coalesce(p_tenant = public.auth_tenant_id(), false) and case p_table
     when 'choice_groups'        then exists (select 1 from public.choice_groups        where id = p_id and tenant_id = p_tenant)
     when 'choice_group_members' then exists (select 1 from public.choice_group_members where id = p_id and tenant_id = p_tenant)
     when 'raw_materials'        then exists (select 1 from public.raw_materials        where id = p_id and tenant_id = p_tenant)
@@ -75,7 +79,7 @@ security definer
 set search_path = public
 as $$
   select
-    (p_row->>'tenant_id') is not null
+    coalesce((p_row->>'tenant_id')::uuid = public.auth_tenant_id(), false)
     and (
       case p_table
         when 'choice_group_members' then
@@ -109,7 +113,9 @@ as $$
             or public.row_in_tenant('choice_groups', (p_row->>'group_id')::uuid, (p_row->>'tenant_id')::uuid))
           and ((p_row->>'default_member_id') is null
             or public.row_in_tenant('choice_group_members', (p_row->>'default_member_id')::uuid, (p_row->>'tenant_id')::uuid))
-        else true  -- choice_groups, sweetness_levels: no references besides the tenant
+        when 'choice_groups'    then true  -- no references besides the tenant
+        when 'sweetness_levels' then true
+        else false  -- fail closed: an unknown table is never allowed
       end);
 $$;
 revoke all on function public.config_refs_ok(text, jsonb) from public, anon;
