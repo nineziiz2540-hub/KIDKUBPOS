@@ -83,6 +83,43 @@ test("without choices the reduction options are just the modifier names", () => 
   assert.deepEqual(r, [{ name: "ลาเต้", options: ["เพิ่มช็อต"], note: "ร้อน", fromQty: 2, toQty: 1 }]);
 });
 
+// ── ×2 and the extra shot's house bean are part of the cup, so the audit names them ──
+
+const kenyaSlot = kenya.slots[0]!;
+const doubled: CartChoices = { ...kenya, slots: [{ ...kenyaSlot, count: 2 }] };
+const shotOn = (memberId: string, label: string): CartChoices => ({
+  ...kenya, slots: [{ ...kenyaSlot, shot: { memberId, label, optionIds: ["o-shot"] } }],
+});
+
+test("Kenya ×2 → ×1 records the ×2 cup as reduced, and it reads differently from the ×1 cup", () => {
+  const down = diffReductions([{ ...latte, choices: doubled }], [{ ...latte, choices: kenya }]);
+  assert.equal(down.length, 1);
+  assert.deepEqual(down[0]!.options, ["เพิ่มช็อต", "Kenya ×2", "หวานปกติ", "นมมิกซ์"]);
+  const up = diffReductions([{ ...latte, choices: kenya }], [{ ...latte, choices: doubled }]);
+  assert.deepEqual(up[0]!.options, ["เพิ่มช็อต", "Kenya", "หวานปกติ", "นมมิกซ์"]);
+  assert.notDeepEqual(down[0]!.options, up[0]!.options);
+});
+
+test("a shot-bean swap names the bean the removed cup's shot used", () => {
+  const r = diffReductions([{ ...latte, choices: shotOn("m-med", "คั่วกลาง") }], [{ ...latte, choices: shotOn("m-dark", "คั่วเข้ม") }]);
+  assert.equal(r.length, 1);
+  assert.deepEqual(r[0]!.options, ["เพิ่มช็อต คั่วกลาง", "Kenya", "หวานปกติ", "นมมิกซ์"]);
+});
+
+test("an option adding to two special slots names both shot beans in slot order", () => {
+  const two: CartChoices = {
+    slots: [
+      { ...kenyaSlot, shot: { memberId: "m-med", label: "คั่วกลาง", optionIds: ["o-both"] } },
+      { groupId: "g-matcha", memberId: "t-cer", label: "Ceremonial", tier: "special", priceDelta: 40, count: 2, shot: { memberId: "t-uji", label: "อุจิ", optionIds: ["o-both"] } },
+    ],
+    slotAddGroupIds: ["g-bean", "g-matcha"],
+    sweetness: null,
+  };
+  const both = { modifierId: "m1", modifierName: "เพิ่ม", optionId: "o-both", optionName: "เพิ่มทั้งคู่", priceDelta: 60 };
+  const r = diffReductions([{ ...latte, selectedModifiers: [both], choices: two }], []);
+  assert.deepEqual(r[0]!.options, ["เพิ่มทั้งคู่ คั่วกลาง/อุจิ", "Kenya", "Ceremonial ×2"]);
+});
+
 test("a sweetness with no sweetener lists only the level name", () => {
   const plain = choices("m-kenya", "Kenya", "lv-0", "ไม่หวาน", null, null);
   const r = diffReductions([{ ...latte, choices: plain }], []);

@@ -9,8 +9,11 @@ export type SelectedModifier = {
 };
 
 /**
- * What the cashier chose for a line's bean/sweetness (round D1). Labels, tier, priceDelta and
- * slotAddGroupIds are display/cart-maths only: the server re-resolves everything from the catalog.
+ * What the cashier chose for a line's bean/sweetness (round D1). The ids are picks the server honours
+ * after checking them against its catalog (toLineChoices → resolveLine): each slot's memberId, a
+ * special's count 2 (only on that same chosen special) and shot.memberId (only when it is a house
+ * member of that group); sweetness levelId/memberId. Labels, tier and priceDelta are display and
+ * cart maths only: the server re-reads them from the catalog. slotAddGroupIds is a record only.
  */
 export type CartChoices = {
   slots: {

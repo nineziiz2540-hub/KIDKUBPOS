@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cupPriceDeltaSatang, defaultLevel, defaultSlotMember, resolveLine, STOCK_STALE,
+  cupPriceDeltaSatang, defaultLevel, defaultSlotMember, resolveLine, slotCount, STOCK_STALE,
   type ChoiceGroup, type GroupMember, type ResolvedLine, type StockCatalog,
 } from "./stock-core.ts";
 
@@ -310,6 +310,33 @@ test("Kenya ×2: two doses and the specialty twice; with a shot 36 + 18 house; a
   const one = ok(resolveLine("latte", 1, kenyaPick({ count: 1 }), [], shotCat()));
   assert.equal(one.priceDeltaSatang, 2000);
   assert.equal("count" in one.snapshot.slots[0]!, false);
+});
+
+test("×2 stays only on the member that was chosen: a fallback special is a different chip, so ×1", () => {
+  const c = shotCat();
+  c.recipes.set("latte", [{ kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_kenya", allowSpecial: true }]);
+  // a parked Ethiopia ×2 whose member left the catalog falls back to the menu's Kenya at ×1
+  const r = ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_gone", count: 2 }] }, [], c));
+  assert.equal(r.snapshot.slots[0]!.memberId, "m_kenya");
+  assert.equal("count" in r.snapshot.slots[0]!, false);
+  assert.deepEqual(beanStock(r), sorted([["kenya", 18]]));
+  assert.equal(r.priceDeltaSatang, 2000);
+  // no chosen slot at all, only a stray count: still ×1
+  assert.equal(ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "", count: 2 }] }, [], c)).priceDeltaSatang, 2000);
+  // the chosen member itself keeps ×2
+  assert.equal(ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_kenya", count: 2 }] }, [], c)).priceDeltaSatang, 4000);
+});
+
+test("slotCount: 2 only for the chosen special asked to be doubled", () => {
+  const g = shotCat().groups.get("beans")!;
+  const kenya = g.members.find((m) => m.id === "m_kenya")!;
+  const dark = g.members.find((m) => m.id === "m_dark")!;
+  assert.equal(slotCount(kenya, "m_kenya", 2), 2);
+  assert.equal(slotCount(kenya, "m_kenya", 1), 1);
+  assert.equal(slotCount(kenya, "m_kenya", undefined), 1);
+  assert.equal(slotCount(kenya, "m_eth", 2), 1);
+  assert.equal(slotCount(kenya, undefined, 2), 1);
+  assert.equal(slotCount(dark, "m_dark", 2), 1);
 });
 
 test("a house cup + shot uses the same member, no shot key (today's behaviour)", () => {

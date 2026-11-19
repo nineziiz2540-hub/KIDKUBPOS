@@ -7,8 +7,8 @@ import { formatPrice } from "../cash.ts";
 import { lineTotal } from "../cart-math.ts";
 import { defaultChoices, isDefaultChoice } from "./pos-choices.ts";
 import {
-  defaultLevel, defaultSlotMember, shotMember,
-  type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type StockCatalog,
+  defaultLevel, defaultSlotMember, slotAdds, slotCount,
+  type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type SlotForAdds, type StockCatalog,
 } from "./stock-core.ts";
 
 export type Chip = { id: string; label: string; priceDelta: number };
@@ -123,37 +123,27 @@ type CartSlot = CartChoices["slots"][number];
 /**
  * Picks → CartChoices: each pick is kept when the catalog still offers it on this menu, otherwise
  * that part is the menu default (resolveLine's chain). A special on a line that forbids specials is
- * dropped here, so the server never has to refuse the line as stale. Rule for rule what resolveLine
- * records: ×2 only on a special; an extra shot on a special cup uses a house member (shotMember) and
- * is written on the slot; a house cup's shot is the same member and writes nothing.
+ * dropped here, so the server never has to refuse the line as stale. It uses resolveLine's own
+ * helpers, so it records the same thing: ×2 only on the chosen special (slotCount), and an extra shot
+ * on a special cup uses a house member written on the slot (slotAdds); a house cup's shot writes nothing.
  */
 function settle(productId: string, catalog: StockCatalog, picks: Picks, optionIds: string[]): CartChoices {
   const slots: CartChoices["slots"] = [];
-  const byGroup = new Map<string, { slot: CartSlot; group: ChoiceGroup; line: SlotLine; member: GroupMember }>();
+  const byGroup = new Map<string, SlotForAdds & { slot: CartSlot }>();
   for (const { line, group, fallback } of slotLines(productId, catalog)) {
     const picked = group.members.find((m) => m.id === picks.slots[line.groupId]);
     const member = picked && (picked.tier === "house" || line.allowSpecial) ? picked : fallback;
     const slot: CartSlot = { groupId: line.groupId, memberId: member.id, label: member.label, tier: member.tier, priceDelta: member.priceDelta };
-    if (member.tier === "special" && picks.counts[line.groupId] === 2) slot.count = 2;
+    // the server's own rule: ×2 only on the chosen special itself, never on a fallback
+    if (slotCount(member, picks.slots[line.groupId], picks.counts[line.groupId]) === 2) slot.count = 2;
     slots.push(slot);
-    byGroup.set(line.groupId, { slot, group, line, member });
+    byGroup.set(line.groupId, { slot, group, line, member, shotPick: picks.shots[line.groupId] });
   }
 
-  // Same counting as resolveLine: once per slot_add effect whose group has a chosen member.
-  const slotAddGroupIds: string[] = [];
-  for (const optionId of optionIds) {
-    for (const effect of catalog.optionEffects.get(optionId) ?? []) {
-      if (effect.kind !== "slot_add") continue;
-      const s = byGroup.get(effect.groupId);
-      if (!s) continue;
-      slotAddGroupIds.push(effect.groupId);
-      if (s.member.tier !== "special") continue;
-      if (!s.slot.shot) {
-        const m = shotMember(s.group, s.line, s.member, picks.shots[effect.groupId]);
-        s.slot.shot = { memberId: m.id, label: m.label, optionIds: [] };
-      }
-      if (!s.slot.shot.optionIds.includes(optionId)) s.slot.shot.optionIds.push(optionId);
-    }
+  // The server's own slot_add pass: same slotAddGroupIds, same shot member and option ids.
+  const { slotAddGroupIds, shots } = slotAdds(optionIds, catalog.optionEffects, byGroup);
+  for (const [groupId, shot] of shots) {
+    byGroup.get(groupId)!.slot.shot = { memberId: shot.member.id, label: shot.member.label, optionIds: shot.optionIds };
   }
 
   let sweetness: CartChoices["sweetness"] = null;
@@ -390,10 +380,21 @@ export type LinePart = { text: string; changed: boolean };
  * A bean/matcha word: a special shows its price too ("เคนยา (+20)", spec §7.1), and "×2" when doubled
  * ("เคนยา (+20) ×2"); a house pick is just its label.
  */
-function slotText(s: { label: string; tier: "house" | "special"; priceDelta: number; count?: number }): string {
-  const tag = s.tier === "special" ? priceTag(s.priceDelta) : null;
-  const word = tag === null ? s.label : `${s.label} (${tag})`;
+type WordSlot = { label: string; tier: "house" | "special"; count?: number };
+
+/** " ×2" after a doubled special's word. */
+function withCount(word: string, s: WordSlot): string {
   return s.tier === "special" && s.count === 2 ? `${word} ×2` : word;
+}
+
+function slotText(s: WordSlot & { priceDelta: number }): string {
+  const tag = s.tier === "special" ? priceTag(s.priceDelta) : null;
+  return withCount(tag === null ? s.label : `${s.label} (${tag})`, s);
+}
+
+/** A bean/matcha name without its price, as the held-bill audit lists it: "เคนยา", "เคนยา ×2". */
+export function slotName(s: WordSlot): string {
+  return withCount(s.label, s);
 }
 
 /** An option's words: "เพิ่มช็อต (+15)"; a free option is its name alone. */
@@ -402,16 +403,19 @@ export function optionText(name: string, priceDelta: number): string {
   return tag === null ? name : `${name} (${tag})`;
 }
 
-/** The house member an extra-shot option uses on a special cup: the first slot (slot order) whose shot lists it. */
-function shotLabelOf(slots: readonly { shot?: { label: string; optionIds: string[] } }[] | undefined, optionId: string | undefined): string | null {
-  if (optionId === undefined) return null;
-  for (const s of slots ?? []) if (s.shot?.optionIds.includes(optionId)) return s.shot.label;
-  return null;
-}
-
-/** A chosen option's words; the extra shot on a special cup names its house bean: "เพิ่มช็อต คั่วกลาง (+15)". */
-function chosenOptionText(name: string, priceDelta: number, shotLabel: string | null): string {
-  return optionText(shotLabel === null ? name : `${name} ${shotLabel}`, priceDelta);
+/**
+ * An option's name as the cart, bill and held-bill audit read it (no price): an extra shot on a
+ * special cup names the house member(s) it uses — every slot whose shot lists the option, in slot
+ * order, joined by "/": "เพิ่มช็อต คั่วกลาง", "เพิ่มทั้งคู่ คั่วกลาง/อุจิ". Any other option is its name.
+ */
+export function optionName(
+  name: string,
+  optionId: string | undefined,
+  slots: readonly { shot?: { label: string; optionIds: string[] } }[] | undefined
+): string {
+  if (optionId === undefined) return name;
+  const labels = (slots ?? []).flatMap((s) => (s.shot?.optionIds.includes(optionId) ? [s.shot.label] : []));
+  return labels.length === 0 ? name : `${name} ${labels.join("/")}`;
 }
 
 /** The "ช็อตเพิ่มใช้…" sub-row the window shows right after the modifier row `afterModifierId`. */
@@ -461,7 +465,7 @@ export function billLineDetail(
 ): string | null {
   const slots = snapshot?.slots;
   const words = options.map((o) =>
-    typeof o === "string" ? o : chosenOptionText(o.option, o.priceDelta ?? 0, shotLabelOf(slots, o.optionId))
+    typeof o === "string" ? o : optionText(optionName(o.option, o.optionId, slots), o.priceDelta ?? 0)
   );
   if (!snapshot) return words.length === 0 ? null : words.join(", ");
   const all = [...snapshotParts(snapshot), ...words];
@@ -500,7 +504,7 @@ export function cartLineParts(item: Pick<CartItem, "choices" | "selectedModifier
   return [
     ...choiceParts(item.choices, defaults),
     ...item.selectedModifiers.map((m) => ({
-      text: chosenOptionText(m.optionName, m.priceDelta, shotLabelOf(slots, m.optionId)),
+      text: optionText(optionName(m.optionName, m.optionId, slots), m.priceDelta),
       changed: true,
     })),
   ];

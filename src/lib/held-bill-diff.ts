@@ -1,5 +1,6 @@
 import type { CartItem } from "@/types/app";
 import { choiceKey } from "./choice-key.ts";
+import { optionName, slotName } from "./stock/option-window.ts";
 
 export type Reduction = {
   name: string;
@@ -25,12 +26,16 @@ export function lineIdentity(
     : base;
 }
 
-/** The names the owner reads for a line: option names, then (if any) bean/matcha and sweetness. */
+/**
+ * The names the owner reads for a line: option names, then (if any) bean/matcha and sweetness. Every
+ * part of the line's identity shows, in the cart's own words without prices: a doubled special is
+ * "เคนยา ×2" and an extra shot on a special cup names its house bean, "เพิ่มช็อต คั่วกลาง".
+ */
 function optionNames(item: CartItem): string[] {
-  const names = item.selectedModifiers.map((m) => m.optionName);
   const c = item.choices;
+  const names = item.selectedModifiers.map((m) => optionName(m.optionName, m.optionId, c?.slots));
   if (!c) return names;
-  for (const s of c.slots) names.push(s.label);
+  for (const s of c.slots) names.push(slotName(s));
   if (c.sweetness) {
     names.push(c.sweetness.levelName);
     if (c.sweetness.memberLabel !== null) names.push(c.sweetness.memberLabel);

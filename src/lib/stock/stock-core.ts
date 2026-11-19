@@ -115,6 +115,16 @@ export function cupPriceDeltaSatang(
 }
 
 /**
+ * How many recipe doses of a slot's member one cup takes: 2 only when the member is special AND it is
+ * the member that was chosen AND that pick asked for ×2. A house member never doubles, and a fallback
+ * that replaced the chosen member (gone, unknown, not allowed) is a different chip, so ×1.
+ * Shared by resolveLine and the POS option window (settle).
+ */
+export function slotCount(member: GroupMember, chosenMemberId: string | undefined, chosenCount: number | undefined): 1 | 2 {
+  return member.tier === "special" && member.id === chosenMemberId && chosenCount === 2 ? 2 : 1;
+}
+
+/**
  * The member an extra shot on group `group` uses when the cup's member is special: the cashier's pick
  * when it is a house member of the group → the menu's house default → (no house member at all) the
  * cup's own member. Shared by resolveLine and the POS option window so both pick the same.
@@ -127,6 +137,54 @@ export function shotMember(
 ): GroupMember {
   const picked = group.members.find((m) => m.id === pickedId && m.tier === "house");
   return picked ?? defaultSlotMember(group, { defaultMemberId: line.defaultMemberId, allowSpecial: false }) ?? cupMember;
+}
+
+/** One resolved slot as the slot_add pass sees it; `shotPick` is the cashier's house pick for the shot. */
+export type SlotForAdds = {
+  group: ChoiceGroup;
+  line: { defaultMemberId: string | null };
+  member: GroupMember;
+  shotPick: string | undefined;
+};
+
+/** The extra shot on a special slot: its member and the chosen options that added to it (once each, option order). */
+export type SlotShot = { member: GroupMember; optionIds: string[] };
+
+/**
+ * The slot_add pass, shared by resolveLine and the POS option window. For each slot_add effect, in
+ * option order, whose group has a slot: the group goes into slotAddGroupIds (a record only), and
+ * `add(member, qty)` is told which member the extra goes to. On a house cup that is the cup's own
+ * member and no shot is recorded. On a special cup it is the shot member, chosen once per group
+ * (shotMember), and the shot lists every option that added to it, once each.
+ */
+export function slotAdds(
+  optionIds: string[],
+  effects: Map<string, OptionEffect[]>,
+  slots: Map<string, SlotForAdds>,
+  add: (member: GroupMember, qty: number) => void = () => {}
+): { slotAddGroupIds: string[]; shots: Map<string, SlotShot> } {
+  const slotAddGroupIds: string[] = [];
+  const shots = new Map<string, SlotShot>();
+  for (const optionId of optionIds) {
+    for (const effect of effects.get(optionId) ?? []) {
+      if (effect.kind !== "slot_add") continue;
+      const slot = slots.get(effect.groupId);
+      if (!slot) continue;
+      slotAddGroupIds.push(effect.groupId);
+      if (slot.member.tier === "house") {
+        add(slot.member, effect.qty);
+        continue;
+      }
+      let shot = shots.get(effect.groupId);
+      if (!shot) {
+        shot = { member: shotMember(slot.group, slot.line, slot.member, slot.shotPick), optionIds: [] };
+        shots.set(effect.groupId, shot);
+      }
+      if (!shot.optionIds.includes(optionId)) shot.optionIds.push(optionId);
+      add(shot.member, effect.qty);
+    }
+  }
+  return { slotAddGroupIds, shots };
 }
 
 export function resolveLine(
@@ -144,9 +202,7 @@ export function resolveLine(
 
   const resolvedSlots: { tier: "house" | "special"; priceDelta: number; count: number }[] = [];
   type SnapSlot = ChoiceSnapshot["slots"][number];
-  const slotByGroup = new Map<string, {
-    group: ChoiceGroup; line: { defaultMemberId: string | null }; member: GroupMember; shotPick: string | undefined; snap: SnapSlot;
-  }>();
+  const slotByGroup = new Map<string, SlotForAdds & { snap: SnapSlot }>();
   const snapshot: ChoiceSnapshot = { slots: [], slotAddGroupIds: [], sweetness: null };
 
   for (const line of catalog.recipes.get(productId) ?? []) {
@@ -162,8 +218,8 @@ export function resolveLine(
     if (member && member.tier === "special" && !line.allowSpecial) return stale;
     member ??= defaultSlotMember(group, line);
     if (!member) continue;
-    // Only a special member can be doubled; a house member with count 2 is one dose.
-    const count = member.tier === "special" && chosen?.count === 2 ? 2 : 1;
+    // ×2 only on the chosen special itself (a house member or a fallback is one dose).
+    const count = slotCount(member, chosen?.memberId, chosen?.count);
     add(member.materialId, line.qty * count);
     resolvedSlots.push({ tier: member.tier, priceDelta: member.priceDelta, count });
     const snap: SnapSlot = {
@@ -175,30 +231,17 @@ export function resolveLine(
     slotByGroup.set(line.groupId, { group, line, member, shotPick: chosen?.shotMemberId, snap });
   }
 
-  const slotAddGroupIds: string[] = [];
   for (const optionId of optionIds) {
     for (const effect of catalog.optionEffects.get(optionId) ?? []) {
-      if (effect.kind === "material_add") {
-        add(effect.materialId, effect.qty);
-      } else {
-        const slot = slotByGroup.get(effect.groupId);
-        if (!slot) continue;
-        slotAddGroupIds.push(effect.groupId);
-        // A house cup's extra shot is the same member; a special cup's uses a house member and is
-        // recorded on the slot (no specialty price: cupPriceDeltaSatang never counts shots).
-        if (slot.member.tier === "house") {
-          add(slot.member.materialId, effect.qty);
-          continue;
-        }
-        if (!slot.snap.shot) {
-          const m = shotMember(slot.group, slot.line, slot.member, slot.shotPick);
-          slot.snap.shot = { memberId: m.id, materialId: m.materialId, label: m.label, optionIds: [] };
-        }
-        const shot = slot.snap.shot;
-        add(shot.materialId, effect.qty);
-        if (!shot.optionIds.includes(optionId)) shot.optionIds.push(optionId);
-      }
+      if (effect.kind === "material_add") add(effect.materialId, effect.qty);
     }
+  }
+  // Extra shots: a house cup's is the same member; a special cup's uses a house member and is recorded
+  // on the slot (no specialty price: cupPriceDeltaSatang never counts shots).
+  const { slotAddGroupIds, shots } = slotAdds(optionIds, catalog.optionEffects, slotByGroup, (m, qty) => add(m.materialId, qty));
+  for (const [groupId, shot] of shots) {
+    const snap = slotByGroup.get(groupId)!.snap;
+    snap.shot = { memberId: shot.member.id, materialId: shot.member.materialId, label: shot.member.label, optionIds: shot.optionIds };
   }
 
   snapshot.slotAddGroupIds = slotAddGroupIds;

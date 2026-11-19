@@ -322,6 +322,59 @@ test("tapSpecial: ×1 → ×2 → ×1; another special starts at ×1; a house ch
   assert.equal("count" in choicesFromWindow("latte", catalog, stray, []).slots[0]!, false);
 });
 
+test("×2 stays only on the chosen member: a parked Ethiopia ×2 whose bean is gone resumes as Kenya ×1 at ฿85", () => {
+  const noEth = buildStockCatalog({ ...rows(), members: rows().members.filter((m) => m.id !== "m_eth") });
+  const parked: CartChoices = {
+    slots: [{ groupId: "g_bean", memberId: "m_eth", label: "เอธิโอเปีย", tier: "special", priceDelta: 30, count: 2 }],
+    slotAddGroupIds: [],
+    sweetness: null,
+  };
+  const back = refreshChoices("kenya_default", noEth, parked, []);
+  assert.deepEqual(back.slots, [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20 }]);
+  assert.equal(lineTotal(65, [], 1, back), 85);
+  // the server agrees on what it receives
+  const server = resolveLine("kenya_default", 1, toLineChoices(back), [], noEth);
+  assert.ok(!("error" in server));
+  assert.equal(server.priceDeltaSatang, 2000);
+  // a state pick the menu does not know (or a special the menu forbids) keeps no ×2 on the fallback
+  const s0 = initialWindowState("kenya_default", catalog, []);
+  assert.equal("count" in choicesFromWindow("kenya_default", catalog, { ...s0, slots: { g_bean: "nope" }, counts: { g_bean: 2 } }, []).slots[0]!, false);
+  assert.equal(choicesFromWindow("kenya_default", catalog, { ...s0, counts: { g_bean: 2 } }, []).slots[0]!.count, 2);
+});
+
+test("an option adding to two special slots names every shot bean, in slot order: เพิ่มทั้งคู่ คั่วกลาง/อุจิ (+60)", () => {
+  const c = buildStockCatalog({
+    ...rows(),
+    recipes: [
+      ...rows().recipes,
+      { product_id: "dirty", line_kind: "slot", raw_material_id: null, group_id: "g_bean", quantity_used: 18, default_member_id: "m_med", allow_special: true },
+      { product_id: "dirty", line_kind: "slot", raw_material_id: null, group_id: "g_matcha", quantity_used: 4, default_member_id: "t_uji", allow_special: true },
+    ],
+    optionEffects: [
+      ...rows().optionEffects,
+      { option_id: "o_both", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 18 },
+      { option_id: "o_both", kind: "slot_add", group_id: "g_matcha", raw_material_id: null, amount: 4 },
+    ],
+  });
+  const both: ModifierWithOptions = {
+    id: "mod_both", name: "เพิ่ม", isRequired: false, isMultiSelect: false, sortOrder: 1,
+    options: [{ id: "o_both", name: "เพิ่มทั้งคู่", priceDelta: 60, sortOrder: 1 }],
+  };
+  let s = initialWindowState("dirty", c, [both]);
+  s = toggleOption(tapSpecial(tapSpecial(s, "g_bean", "m_kenya"), "g_matcha", "t_cer"), both, "o_both");
+  const line = buildLine({ product: { id: "dirty", name: "เดอร์ตี้", price: 90 }, modifiers: [both], catalog: c, state: s, note: "", quantity: 1, key: "d" });
+  const words = "เคนยา (+20) · Ceremonial (+40) · เพิ่มทั้งคู่ คั่วกลาง/อุจิ (+60)";
+  assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
+  const server = resolveLine("dirty", 1, toLineChoices(line.choices), ["o_both"], c);
+  assert.ok(!("error" in server));
+  assert.equal(billLineDetail(server.snapshot, [{ option: "เพิ่มทั้งคู่", priceDelta: 60, optionId: "o_both" }]), words);
+  assert.equal(line.totalPrice, 90 + 20 + 40 + 60);
+  // only the slots whose shot lists the option are named: a house matcha cup names the bean only
+  const houseMatcha = buildLine({ product: { id: "dirty", name: "เดอร์ตี้", price: 90 }, modifiers: [both], catalog: c,
+    state: pickSlot(s, "g_matcha", "t_uji"), note: "", quantity: 1, key: "d" });
+  assert.equal(cartLineParts(houseMatcha, null).at(-1)!.text, "เพิ่มทั้งคู่ คั่วกลาง (+60)");
+});
+
 test("pickShot: the pick is kept when the shot option is unticked and ticked again", () => {
   let s = tapSpecial(initialWindowState("latte", catalog, [extras]), "g_bean", "m_kenya");
   s = toggleOption(s, extras, "o_shot");

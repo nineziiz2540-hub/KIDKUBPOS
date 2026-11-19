@@ -1,6 +1,9 @@
 // "ผลต่อสต๊อก" of a modifier option (round D1): what choosing the option adds to the cup's stock.
 // Pure; no I/O. Two kinds (spec §6.4):
-//   slot_add     "เพิ่มในช่องเมล็ด/มัทฉะ" — +amount of whichever bean/matcha the cup uses (เพิ่มช็อต = +9 g)
+//   slot_add     "เพิ่มในช่องเมล็ด/มัทฉะ" — +amount in the cup's bean/matcha slot (เพิ่มช็อต = +9 g): the cup's
+//                own member on a house cup; on a special cup a house member of that group (the
+//                cashier's pick, else the menu's house default), never the special and never its price
+//                (stock-core shotMember / slotAdds)
 //   material_add "เพิ่มวัตถุดิบ"          — +amount of one fixed material (วิปครีม, ท็อปปิ้ง)
 export const MAX_EFFECT_AMOUNT = 100000;
 export const MAX_EFFECTS_PER_OPTION = 20;
