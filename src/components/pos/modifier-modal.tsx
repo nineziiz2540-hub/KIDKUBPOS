@@ -282,8 +282,8 @@ function ChipRow({
 }
 
 /**
- * 56 px tall, 18 px text. Selected = solid accent, white text and ✓ (seen from arm's length). A special
- * bean/matcha has an accent frame and an accent "+20"; doubled it reads "✓ เคนยา +20 ×2". Disabled =
+ * 56 px tall, 18 px text. Selected = solid accent, white text and a corner ✓ (seen from arm's length). A
+ * special bean/matcha has an accent frame and an accent "+20"; doubled it reads "เคนยา +20 ×2". Disabled =
  * faded and untappable, never hidden.
  */
 function ChoiceChip({
@@ -317,12 +317,18 @@ function ChoiceChip({
       aria-pressed={selected}
       disabled={disabled}
       onClick={onClick}
-      className={`min-h-14 w-full rounded-lg border-2 px-2 py-1 flex items-center justify-center gap-1.5 text-center text-lg font-semibold leading-tight transition-colors ${
-        // a doubled chip lets "+20 ×2" drop under the name rather than squeeze the name apart
-        count === 2 ? "flex-wrap gap-y-0.5" : ""
-      } ${disabled ? "" : "active:scale-[0.98]"} ${look}`}
+      // flex-wrap: when the name and its price don't fit on one line, the price drops under the
+      // name as a whole instead of the name being split mid-word ("เพิ่ม/ช็อต").
+      className={`relative min-h-14 w-full rounded-lg border-2 px-2 py-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-center text-lg font-semibold leading-tight transition-colors ${
+        disabled ? "" : "active:scale-[0.98]"
+      } ${look}`}
     >
-      {selected && <span aria-hidden="true">✓</span>}
+      {/* The ✓ sits in the corner so a picked chip's words take the same width as an unpicked one. */}
+      {selected && (
+        <span aria-hidden="true" className="absolute top-0.5 left-1.5 text-sm leading-none">
+          ✓
+        </span>
+      )}
       <span className="min-w-0 break-words">{label}</span>
       {(price || count === 2) && (
         <span className={`shrink-0 whitespace-nowrap tabular-nums ${selected ? "text-white" : "text-accent"}`}>
