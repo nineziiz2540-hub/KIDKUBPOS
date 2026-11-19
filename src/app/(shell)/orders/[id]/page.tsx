@@ -28,7 +28,7 @@ type OrderItem = {
   unit_price: number;
   quantity: number;
   subtotal: number;
-  modifiers_snapshot: { option: string }[] | null;
+  modifiers_snapshot: { option: string; priceDelta?: number }[] | null;
   /** bean/sweetness snapshot (round D1); null on bills from before */
   choices: ChoiceSnapshot | null;
   note: string | null;
@@ -87,7 +87,7 @@ const ORDER_SELECT = [
 
 /** Choices (bean, sweetness) then options under the line's name; pre-D1 lines look as they always did. */
 function detailOf(item: OrderItem): string | null {
-  return billLineDetail(item.choices, (item.modifiers_snapshot ?? []).map((m) => m.option));
+  return billLineDetail(item.choices, (item.modifiers_snapshot ?? []));
 }
 
 /** The void dialog names each cup the way the cart did: "ลาเต้ · เคนยา (+20) · หวานน้อย · นมมิกซ์". */

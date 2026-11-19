@@ -321,6 +321,30 @@ function slotText(s: { label: string; tier: "house" | "special"; priceDelta: num
   return tag === null ? s.label : `${s.label} (${tag})`;
 }
 
+/** An option's words: "เพิ่มช็อต (+15)"; a free option is its name alone. */
+export function optionText(name: string, priceDelta: number): string {
+  const tag = priceTag(priceDelta);
+  return tag === null ? name : `${name} (${tag})`;
+}
+
+/**
+ * The extra-shot surcharges: an option that adds to a bean group uses the chosen bean again, and the
+ * specialty price is charged once more for each such option (cupPriceDeltaSatang). One entry per
+ * occurrence, in slot order, so the words add up to what is charged. House and free beans add nothing.
+ */
+export function shotExtras(
+  slots: { groupId: string; label: string; tier: "house" | "special"; priceDelta: number }[],
+  slotAddGroupIds: string[]
+): { text: string; label: string; priceDelta: number }[] {
+  const out: { text: string; label: string; priceDelta: number }[] = [];
+  for (const s of slots) {
+    if (s.tier !== "special" || !(s.priceDelta > 0)) continue;
+    const times = slotAddGroupIds.filter((g) => g === s.groupId).length;
+    for (let i = 0; i < times; i++) out.push({ text: optionText(`ช็อต${s.label}`, s.priceDelta), label: s.label, priceDelta: s.priceDelta });
+  }
+  return out;
+}
+
 /** The words of a saved order line's choice snapshot (bill history, void dialog): same words and order as the cart. */
 export function snapshotParts(snapshot: ChoiceSnapshot | null | undefined): string[] {
   if (!snapshot) return [];
@@ -337,9 +361,13 @@ export function snapshotParts(snapshot: ChoiceSnapshot | null | undefined): stri
  * A saved order line's detail under its name: choices (bean, level, sweetener) then the chosen options.
  * A line from before round D1 (no snapshot) keeps the old look: its options joined by ", ".
  */
-export function billLineDetail(snapshot: ChoiceSnapshot | null | undefined, options: string[]): string | null {
-  if (!snapshot) return options.length === 0 ? null : options.join(", ");
-  const all = [...snapshotParts(snapshot), ...options];
+export function billLineDetail(
+  snapshot: ChoiceSnapshot | null | undefined,
+  options: (string | { option: string; priceDelta?: number })[]
+): string | null {
+  const words = options.map((o) => (typeof o === "string" ? o : optionText(o.option, o.priceDelta ?? 0)));
+  if (!snapshot) return words.length === 0 ? null : words.join(", ");
+  const all = [...snapshotParts(snapshot), ...words, ...shotExtras(snapshot.slots ?? [], snapshot.slotAddGroupIds ?? []).map((e) => e.text)];
   return all.length === 0 ? null : all.join(" · ");
 }
 
@@ -366,11 +394,12 @@ export function choiceParts(choices: CartChoices | undefined, defaults: CartChoi
 
 /**
  * Everything the barista makes differently for this line, in the order they make it: bean/sweetness
- * words, then every chosen option. Options have no default, so a chosen one is always marked (R42).
+ * words, then every chosen option (with its price), then one "ช็อต<bean>" word per extra-shot surcharge. Options have no default, so a chosen one is always marked (R42).
  */
 export function cartLineParts(item: Pick<CartItem, "choices" | "selectedModifiers">, defaults: CartChoices | null): LinePart[] {
   return [
     ...choiceParts(item.choices, defaults),
-    ...item.selectedModifiers.map((m) => ({ text: m.optionName, changed: true })),
+    ...item.selectedModifiers.map((m) => ({ text: optionText(m.optionName, m.priceDelta), changed: true })),
+    ...(item.choices ? shotExtras(item.choices.slots, item.choices.slotAddGroupIds).map((e) => ({ text: e.text, changed: true })) : []),
   ];
 }

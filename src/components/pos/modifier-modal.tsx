@@ -20,6 +20,7 @@ import {
   pickSlot,
   pickSweetener,
   priceTag,
+  shotExtras,
   shownSweetener,
   sweetenerHint,
   sweetenerLocked,
@@ -60,6 +61,14 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
     key: editing?.cartItemKey ?? "",
   });
   const missing = missingRequired(state, modifiers);
+  const extraShots = line.choices ? shotExtras(line.choices.slots, line.choices.slotAddGroupIds) : [];
+  // the "ช็อต…" lines go under the first option row that holds a shot-adding pick
+  const shotRowId =
+    extraShots.length === 0
+      ? null
+      : (modifiers.find((m) =>
+          (state.options[m.id] ?? []).some((id) => (catalog.optionEffects.get(id) ?? []).some((e) => e.kind === "slot_add"))
+        )?.id ?? null);
   const locked = sweetenerLocked(state, rows);
   const sweetener = shownSweetener(state, rows);
 
@@ -168,6 +177,12 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                       onClick={() => setState((s) => toggleOption(s, modifier, option.id))}
                     />
                   ))}
+                  {modifier.id === shotRowId &&
+                    extraShots.map((e, i) => (
+                      <p key={i} className="col-span-full text-sm text-muted-foreground leading-tight">
+                        {`ช็อต${e.label} ${priceTag(e.priceDelta)}`}
+                      </p>
+                    ))}
                 </ChipRow>
               ))}
 
