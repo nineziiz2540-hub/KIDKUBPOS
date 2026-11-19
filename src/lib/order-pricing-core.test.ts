@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isValidCartChoices, priceLines, priceLinesAsCharged, STALE, type PricingCatalog } from "./order-pricing-core.ts";
+import { isValidCartChoices, priceLines, priceLinesAsCharged, STALE, toLineChoices, type PricingCatalog } from "./order-pricing-core.ts";
 import type { CartItem } from "../types/app.ts";
 import { emptyStockCatalog, type StockCatalog } from "./stock/stock-core.ts";
 
@@ -107,7 +107,7 @@ test("as charged: a changed price keeps the device total and reports the catalog
   assert.equal(r.lines[0]!.unitPrice, 65);
   assert.equal(r.lines[0]!.productName, "ลาเต้");
   assert.equal(r.lines[0]!.categoryName, "กาแฟ");
-  assert.deepEqual(r.lines[0]!.modifiersSnapshot, [{ group: "ขนาด", option: "ใหญ่", priceDelta: 0 }]);
+  assert.deepEqual(r.lines[0]!.modifiersSnapshot, [{ group: "ขนาด", option: "ใหญ่", priceDelta: 0, optionId: "large" }]);
 });
 
 test("as charged: a product no longer in the catalog can't be recorded", () => {
@@ -212,17 +212,81 @@ test("a specialty bean is charged per cup on quantity 2", () => {
   assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 36 }]);
 });
 
-test("a slot_add option charges the specialty price twice per cup and adds the bean stock", () => {
+test("a slot_add option on a special cup uses the house bean and adds only its own price", () => {
   const stock = beanStock();
   stock.optionEffects.set("pearl", [{ kind: "slot_add", groupId: "beans", qty: 9 }]);
   const r = priceLines(
-    [beanItem("m_kenya", 100, { selectedModifiers: item(["small", "pearl"], 0).selectedModifiers })],
+    [beanItem("m_kenya", 80, { selectedModifiers: item(["small", "pearl"], 0).selectedModifiers })],
     catalog({ stock })
   );
   assert.ok(!("error" in r), JSON.stringify(r));
-  // 55 + pearl 5 + kenya 20 twice
-  assert.equal(r.lines[0]!.unitPrice, 100);
-  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 27 }]);
+  // 55 + pearl 5 + kenya 20 once
+  assert.equal(r.lines[0]!.unitPrice, 80);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_house", qty: 9 }, { materialId: "mat_m_kenya", qty: 18 }]);
+  assert.deepEqual(r.lines[0]!.choicesSnapshot.slots[0]!.shot, { memberId: "m_house", materialId: "mat_m_house", label: "m_house", optionIds: ["pearl"] });
+  // the old price (special charged again for the shot) is now stale
+  assert.deepEqual(
+    priceLines([beanItem("m_kenya", 100, { selectedModifiers: item(["small", "pearl"], 0).selectedModifiers })], catalog({ stock })),
+    { error: STALE }
+  );
+});
+
+test("a doubled special (count 2) is charged twice and deducts two doses; the shot pick reaches the server", () => {
+  const stock = beanStock();
+  stock.optionEffects.set("pearl", [{ kind: "slot_add", groupId: "beans", qty: 9 }]);
+  const doubled = (shot?: string) => ({
+    slots: [{
+      groupId: "beans", memberId: "m_kenya", label: "x", tier: "special" as const, priceDelta: 20, count: 2 as const,
+      ...(shot ? { shot: { memberId: shot, label: "x", optionIds: ["pearl"] } } : {}),
+    }],
+    slotAddGroupIds: [],
+    sweetness: null,
+  });
+  const r = priceLines([beanItem("m_kenya", 95, { choices: doubled() })], catalog({ stock }));
+  assert.ok(!("error" in r), JSON.stringify(r));
+  assert.equal(r.lines[0]!.unitPrice, 95);
+  assert.deepEqual(r.lines[0]!.stock, [{ materialId: "mat_m_kenya", qty: 36 }]);
+  assert.equal(r.lines[0]!.choicesSnapshot.slots[0]!.count, 2);
+  // a forged special shot pick is ignored: the shot still uses the house bean
+  const s = priceLines(
+    [beanItem("m_kenya", 100, { choices: doubled("m_kenya"), selectedModifiers: item(["small", "pearl"], 0).selectedModifiers })],
+    catalog({ stock })
+  );
+  assert.ok(!("error" in s), JSON.stringify(s));
+  assert.deepEqual(s.lines[0]!.stock, [{ materialId: "mat_m_house", qty: 9 }, { materialId: "mat_m_kenya", qty: 36 }]);
+});
+
+test("toLineChoices passes count 2 and the shot member id, and nothing else", () => {
+  const slot = { groupId: "g", memberId: "m", label: "x", tier: "special" as const, priceDelta: 20 };
+  assert.deepEqual(toLineChoices({ slots: [slot], slotAddGroupIds: ["g"], sweetness: null }), {
+    slots: [{ groupId: "g", memberId: "m" }], sweetness: null,
+  });
+  assert.deepEqual(
+    toLineChoices({ slots: [{ ...slot, count: 2, shot: { memberId: "h", label: "y", optionIds: ["o"] } }], slotAddGroupIds: [], sweetness: null }),
+    { slots: [{ groupId: "g", memberId: "m", count: 2, shotMemberId: "h" }], sweetness: null }
+  );
+  // a count 1 from a client is dropped (same as absent)
+  const one = toLineChoices({ slots: [{ ...slot, count: 1 as unknown as 2 }], slotAddGroupIds: [], sweetness: null });
+  assert.deepEqual(one, { slots: [{ groupId: "g", memberId: "m" }], sweetness: null });
+});
+
+test("modifiersSnapshot entries carry the option id in both pricing paths", () => {
+  const r = priceLines([item(["large", "pearl"], 140)], catalog());
+  assert.ok(!("error" in r));
+  assert.deepEqual(r.lines[0]!.modifiersSnapshot, [
+    { group: "ขนาด", option: "ใหญ่", priceDelta: 10, optionId: "large" },
+    { group: "ท็อปปิ้ง", option: "ไข่มุก", priceDelta: 5, optionId: "pearl" },
+  ]);
+  const charged = priceLinesAsCharged([item(["large", "pearl"], 140)], catalog());
+  assert.ok(!("error" in charged));
+  assert.deepEqual(charged.lines[0]!.modifiersSnapshot!.map((m) => m.optionId), ["large", "pearl"]);
+  // an option gone from the catalog keeps the device's id and words
+  const gone = priceLinesAsCharged(
+    [item(["large"], 130, { selectedModifiers: [{ modifierId: "x", modifierName: "เก่า", optionId: "old", optionName: "เดิม", priceDelta: 3 }] })],
+    catalog()
+  );
+  assert.ok(!("error" in gone));
+  assert.deepEqual(gone.lines[0]!.modifiersSnapshot, [{ group: "เก่า", option: "เดิม", priceDelta: 3, optionId: "old" }]);
 });
 
 test("as charged keeps default stock and snapshot when the special bean is no longer allowed", () => {
@@ -253,6 +317,22 @@ test("isValidCartChoices shape-checks the client's choices", () => {
   assert.equal(isValidCartChoices({ slots: [{ groupId: "g" }] }), false);
   assert.equal(isValidCartChoices({ slots: Array.from({ length: 9 }, () => ({ groupId: "g", memberId: "m" })) }), false);
   assert.equal(isValidCartChoices({ slots: [], sweetness: { levelId: 1 } }), false);
+});
+
+test("isValidCartChoices: a slot's count is absent, 1 or 2; its shot is absent or has a string memberId", () => {
+  const slot = { groupId: "g", memberId: "m" };
+  for (const ok of [
+    { ...slot }, { ...slot, count: 1 }, { ...slot, count: 2 },
+    { ...slot, shot: { memberId: "h" } }, { ...slot, count: 2, shot: { memberId: "h", label: "x", optionIds: ["o"] } },
+  ]) {
+    assert.equal(isValidCartChoices({ slots: [ok], sweetness: null }), true, JSON.stringify(ok));
+  }
+  for (const bad of [
+    { ...slot, count: 3 }, { ...slot, count: "2" }, { ...slot, count: 0 }, { ...slot, count: null }, { ...slot, count: 1.5 },
+    { ...slot, shot: {} }, { ...slot, shot: { memberId: 1 } }, { ...slot, shot: null }, { ...slot, shot: "h" },
+  ]) {
+    assert.equal(isValidCartChoices({ slots: [bad], sweetness: null }), false, JSON.stringify(bad));
+  }
 });
 
 test("basePrice is the menu price, without the specialty bean, in both pricing paths", () => {

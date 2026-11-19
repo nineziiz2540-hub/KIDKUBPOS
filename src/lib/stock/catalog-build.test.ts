@@ -173,8 +173,10 @@ test("end-to-end with resolveLine: latte", () => {
 
   const kenya = resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_kenya" }] }, ["shot"], c);
   assert.ok(!("error" in kenya));
-  assert.equal(kenya.stock.find((s) => s.materialId === "mat_kenya")?.qty, 27);
-  assert.equal(kenya.priceDeltaSatang, 4000);
+  // the extra shot on a special cup uses the menu's house bean and adds no specialty price
+  assert.equal(kenya.stock.find((s) => s.materialId === "mat_kenya")?.qty, 18);
+  assert.equal(kenya.stock.find((s) => s.materialId === "mat_med")?.qty, 9);
+  assert.equal(kenya.priceDeltaSatang, 2000);
 });
 
 test("empty input equals emptyStockCatalog()", () => {

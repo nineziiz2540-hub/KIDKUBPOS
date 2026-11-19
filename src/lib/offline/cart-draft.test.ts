@@ -163,6 +163,42 @@ test("unknown keys inside choices, slots and sweetness are stripped", () => {
   assert.deepEqual(restorable(raw, ids)?.items[0]!.choices, choices);
 });
 
+test("a doubled special and an extra shot's house pick survive a save and reload", () => {
+  const doubled: CartChoices = {
+    ...choices,
+    slots: [{ ...choices.slots[0]!, count: 2, shot: { memberId: "m-med", label: "คั่วกลาง", optionIds: ["o-shot"] } }],
+  };
+  assert.deepEqual(roundTrip({ ...item, choices: doubled })?.items[0]!.choices, doubled);
+  // unknown keys inside the shot are stripped too
+  const raw = JSON.parse(JSON.stringify(toDraft(state({ items: [{ ...item, choices: doubled }] }), ids)));
+  raw.items[0]!.choices.slots[0].shot.materialId = "mat-med";
+  assert.deepEqual(restorable(raw, ids)?.items[0]!.choices, doubled);
+  // count 1 means ×1: accepted like the server does, and not kept
+  const one = roundTrip({ ...item, choices: { ...choices, slots: [{ ...choices.slots[0]!, count: 1 }] } });
+  assert.ok(one);
+  assert.equal("count" in one.items[0]!.choices!.slots[0]!, false);
+});
+
+test("a malformed count or shot makes the draft not restorable", () => {
+  const slot = choices.slots[0]!;
+  const bad = [
+    { ...slot, count: 3 },
+    { ...slot, count: "2" },
+    { ...slot, count: null },
+    { ...slot, shot: null },
+    { ...slot, shot: { label: "x", optionIds: [] } },
+    { ...slot, shot: { memberId: 1, label: "x", optionIds: [] } },
+    { ...slot, shot: { memberId: "m", optionIds: [] } },
+    { ...slot, shot: { memberId: "m", label: "x" } },
+    { ...slot, shot: { memberId: "m", label: "x", optionIds: [1] } },
+  ];
+  for (const s of bad) {
+    const raw = JSON.parse(JSON.stringify(toDraft(state(), ids)));
+    raw.items[0]!.choices = { ...choices, slots: [s] };
+    assert.equal(restorable(raw, ids), null, JSON.stringify(s));
+  }
+});
+
 test("malformed choices make the draft not restorable", () => {
   const bad = [
     { ...choices, slots: [{ ...choices.slots[0]!, tier: "gold" }] },

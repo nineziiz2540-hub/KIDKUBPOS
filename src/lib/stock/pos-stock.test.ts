@@ -2,11 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { posStock, posStockRows, refreshCatalogOf } from "./pos-stock.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
-import { choicesFromWindow, initialWindowState, pickLevel, pickSlot, pickSweetener, optionRows, type WindowState } from "./option-window.ts";
+import {
+  choicesFromWindow, initialWindowState, pickLevel, pickShot, pickSlot, pickSweetener, optionRows, tapSpecial, type WindowState,
+} from "./option-window.ts";
 import { defaultChoices } from "./pos-choices.ts";
 import { cupPriceDeltaSatang, resolveLine } from "./stock-core.ts";
 import { repriceItems } from "../cart-lines.ts";
-import type { CartChoices, CartItem } from "../../types/app.ts";
+import { toLineChoices } from "../order-pricing-core.ts";
+import type { CartItem } from "../../types/app.ts";
 
 // What the server reads (catalog.ts): fixed lines, material_add effects, sweetness amounts, menus
 // and options the POS does not sell.
@@ -86,11 +89,6 @@ test("the POS rows: menus on sale and their options only, slot lines and slot_ad
   assert.deepEqual(pos.levels, full.levels);
 });
 
-const ids = (c: CartChoices) => ({
-  slots: c.slots.map((s) => ({ groupId: s.groupId, memberId: s.memberId })),
-  sweetness: c.sweetness ? { levelId: c.sweetness.levelId, memberId: c.sweetness.memberId } : null,
-});
-
 test("INVARIANT: the client catalog (POS rows) prices and resolves every pick like the server's full catalog", () => {
   const server = buildStockCatalog(fullRows());
   const client = buildStockCatalog(posStockRows(fullRows(), ON_SALE, OFFERED));
@@ -100,6 +98,9 @@ test("INVARIANT: the client catalog (POS rows) prices and resolves every pick li
     ["kenya + เพิ่มช็อต", "latte", pickSlot(start("latte"), "g_bean", "m_kenya"), ["o_shot"]],
     ["ethiopia + oat", "latte", pickSlot(start("latte"), "g_bean", "m_eth"), ["o_oat"]],
     ["kenya + เพิ่มช็อต + oat", "latte", pickSlot(start("latte"), "g_bean", "m_kenya"), ["o_shot", "o_oat"]],
+    ["kenya ×2 + เพิ่มช็อต on คั่วเข้ม", "latte",
+      pickShot(tapSpecial(tapSpecial(start("latte"), "g_bean", "m_kenya"), "g_bean", "m_kenya"), "g_bean", "m_dark"), ["o_shot"]],
+    ["ethiopia ×2", "latte", tapSpecial(tapSpecial(start("latte"), "g_bean", "m_eth"), "g_bean", "m_eth"), []],
     ["less + mix", "latte", pickSweetener(pickLevel(start("latte"), "lv_less"), optionRows("latte", client), "s_mix"), []],
     ["no sugar", "latte", pickLevel(start("latte"), "lv_none"), ["o_shot"]],
     ["americano dark + shot", "americano", start("americano"), ["o_shot"]],
@@ -109,20 +110,26 @@ test("INVARIANT: the client catalog (POS rows) prices and resolves every pick li
   ];
   for (const [name, product, state, options] of cases) {
     const choices = choicesFromWindow(product, client, state, options);
-    const s = resolveLine(product, 2, ids(choices), options, server);
-    const c = resolveLine(product, 2, ids(choices), options, client);
+    // what the server receives: the ids plus count 2 and the shot's member (toLineChoices)
+    const s = resolveLine(product, 2, toLineChoices(choices), options, server);
+    const c = resolveLine(product, 2, toLineChoices(choices), options, client);
     assert.ok(!("error" in s) && !("error" in c), name);
-    assert.equal(cupPriceDeltaSatang(choices.slots, choices.slotAddGroupIds), s.priceDeltaSatang, `${name}: cart price`);
+    assert.equal(cupPriceDeltaSatang(choices.slots), s.priceDeltaSatang, `${name}: cart price`);
     assert.equal(c.priceDeltaSatang, s.priceDeltaSatang, `${name}: client resolve price`);
     assert.deepEqual(c.snapshot, s.snapshot, `${name}: snapshot`);
     assert.deepEqual(choices.slots.map((x) => x.memberId), s.snapshot.slots.map((x) => x.memberId), name);
+    assert.deepEqual(choices.slots.map((x) => [x.count, x.shot?.memberId, x.shot?.optionIds]),
+      s.snapshot.slots.map((x) => [x.count, x.shot?.memberId, x.shot?.optionIds]), `${name}: count/shot`);
     assert.deepEqual(choices.sweetness && [choices.sweetness.levelId, choices.sweetness.memberId],
       s.snapshot.sweetness && [s.snapshot.sweetness.levelId, s.snapshot.sweetness.memberId], name);
   }
   for (const p of ON_SALE) assert.deepEqual(defaultChoices(p, client), defaultChoices(p, server), p);
-  // a sanity check that the case list really exercises the specialty price
-  const kenyaShot = choicesFromWindow("latte", client, pickSlot(start("latte"), "g_bean", "m_kenya"), ["o_shot"]);
-  assert.equal(cupPriceDeltaSatang(kenyaShot.slots, kenyaShot.slotAddGroupIds), 4000);
+  // a sanity check that the case list really exercises the specialty price and the shot's house bean
+  const kenyaShot = choicesFromWindow("latte", client, tapSpecial(start("latte"), "g_bean", "m_kenya"), ["o_shot"]);
+  assert.equal(cupPriceDeltaSatang(kenyaShot.slots), 2000);
+  assert.equal(kenyaShot.slots[0]!.shot?.memberId, "m_med");
+  const doubled = choicesFromWindow("latte", client, tapSpecial(tapSpecial(start("latte"), "g_bean", "m_kenya"), "g_bean", "m_kenya"), []);
+  assert.equal(cupPriceDeltaSatang(doubled.slots), 4000);
 });
 
 // ── not loaded: a query failure (null) or a builder throw ─────────────────
@@ -151,7 +158,7 @@ test("a builder throw leaves a resumed line's choices exactly as stored (never w
   const parked: CartItem = {
     cartItemKey: "a", productId: "latte", name: "ลาเต้", basePrice: 65, quantity: 1,
     selectedModifiers: [{ modifierId: "mod_extra", modifierName: "เพิ่ม", optionId: "o_shot", optionName: "เพิ่มช็อต", priceDelta: 15 }],
-    totalPrice: 65 + 15 + 40, note: null,
+    totalPrice: 65 + 15 + 20, note: null,
     choices: {
       slots: [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20 }],
       slotAddGroupIds: ["g_bean"],
@@ -163,7 +170,7 @@ test("a builder throw leaves a resumed line's choices exactly as stored (never w
   const threw = posStock({ ...fullRows(), levels: undefined } as unknown as StockCatalogRows, () => {});
   const [out] = repriceItems([parked], products, [], refreshCatalogOf(threw));
   assert.deepEqual(out!.choices, stored);
-  assert.equal(out!.totalPrice, 65 + 15 + 40);
+  assert.equal(out!.totalPrice, 65 + 15 + 20);
   // what passing the empty catalog itself would have done — the reason "not loaded" is null
   const [wiped] = repriceItems([parked], products, [], threw.catalog);
   assert.deepEqual(wiped!.choices, { slots: [], slotAddGroupIds: [], sweetness: null });

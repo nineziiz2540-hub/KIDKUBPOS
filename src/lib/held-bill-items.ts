@@ -39,6 +39,9 @@ function choicesFromSnapshot(line: PricedLine): CartChoices {
   return {
     slots: snap.slots.map((s) => ({
       groupId: s.groupId, memberId: s.memberId, label: s.label, tier: s.tier, priceDelta: s.priceDelta,
+      ...(s.count === 2 ? { count: 2 as const } : {}),
+      // the client copy never carries a material id
+      ...(s.shot ? { shot: { memberId: s.shot.memberId, label: s.shot.label, optionIds: [...s.shot.optionIds] } } : {}),
     })),
     slotAddGroupIds: [...snap.slotAddGroupIds],
     sweetness: snap.sweetness

@@ -28,7 +28,8 @@ export type PricedLine = {
   basePrice: number;
   unitPrice: number;
   lineTotal: number;
-  modifiersSnapshot: { group: string; option: string; priceDelta: number }[] | null;
+  /** optionId lets the bill tell which option word carries the extra shot's house bean */
+  modifiersSnapshot: { group: string; option: string; priceDelta: number; optionId: string }[] | null;
   note: string | null;
   /** materials this line deducts (already multiplied by quantity) */
   stock: StockLine[];
@@ -74,8 +75,12 @@ export function isValidCartChoices(value: unknown): boolean {
   if (!Array.isArray(slots) || slots.length > 8) return false;
   for (const s of slots) {
     if (typeof s !== "object" || s === null) return false;
-    const { groupId, memberId } = s as { groupId?: unknown; memberId?: unknown };
+    const { groupId, memberId, count, shot } = s as { groupId?: unknown; memberId?: unknown; count?: unknown; shot?: unknown };
     if (typeof groupId !== "string" || typeof memberId !== "string") return false;
+    if (count !== undefined && count !== 1 && count !== 2) return false;
+    if (shot !== undefined && (typeof shot !== "object" || shot === null || typeof (shot as { memberId?: unknown }).memberId !== "string")) {
+      return false;
+    }
   }
   if (sweetness === undefined || sweetness === null) return true;
   if (typeof sweetness !== "object") return false;
@@ -83,11 +88,19 @@ export function isValidCartChoices(value: unknown): boolean {
   return typeof levelId === "string" && (memberId === null || typeof memberId === "string");
 }
 
-/** Keeps only the ids from the client's choices: its labels and prices are never trusted. */
+/**
+ * Keeps only the ids from the client's choices (plus a doubled special's count 2 and the extra shot's
+ * house member id): its labels and prices are never trusted.
+ */
 export function toLineChoices(choices?: CartChoices): LineChoices | undefined {
   if (!choices) return undefined;
   return {
-    slots: (choices.slots ?? []).map((s) => ({ groupId: s.groupId, memberId: s.memberId })),
+    slots: (choices.slots ?? []).map((s) => ({
+      groupId: s.groupId,
+      memberId: s.memberId,
+      ...(s.count === 2 ? { count: 2 } : {}),
+      ...(s.shot ? { shotMemberId: s.shot.memberId } : {}),
+    })),
     sweetness: choices.sweetness
       ? { levelId: choices.sweetness.levelId, memberId: choices.sweetness.memberId }
       : null,
@@ -130,7 +143,7 @@ function catalogLine(
     chosenPerModifier.set(modifier.id, (chosenPerModifier.get(modifier.id) ?? 0) + 1);
     const delta = Number(option.price_delta ?? 0);
     unitSatang += toSatang(delta);
-    snapshot.push({ group: modifier.name, option: option.name, priceDelta: delta });
+    snapshot.push({ group: modifier.name, option: option.name, priceDelta: delta, optionId: option.id });
   }
 
   for (const modifierId of linked) {
@@ -237,6 +250,7 @@ export function priceLinesAsCharged(
         group: modifier?.name ?? String(sel.modifierName ?? ""),
         option: option?.name ?? String(sel.optionName ?? ""),
         priceDelta: Number.isFinite(delta) ? delta : 0,
+        optionId: String(sel.optionId ?? ""),
       };
     });
     const note = typeof item.note === "string" ? item.note.trim().slice(0, MAX_NOTE_LENGTH) : "";

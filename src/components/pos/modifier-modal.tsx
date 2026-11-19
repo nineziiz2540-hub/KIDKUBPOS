@@ -17,13 +17,15 @@ import {
   modifierHint,
   optionRows,
   pickLevel,
+  pickShot,
   pickSlot,
   pickSweetener,
   priceTag,
-  shotExtras,
+  shotRows,
   shownSweetener,
   sweetenerHint,
   sweetenerLocked,
+  tapSpecial,
   toggleOption,
   type WindowState,
 } from "@/lib/stock/option-window";
@@ -61,14 +63,8 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
     key: editing?.cartItemKey ?? "",
   });
   const missing = missingRequired(state, modifiers);
-  const extraShots = line.choices ? shotExtras(line.choices.slots, line.choices.slotAddGroupIds) : [];
-  // the "ช็อต…" lines go under the first option row that holds a shot-adding pick
-  const shotRowId =
-    extraShots.length === 0
-      ? null
-      : (modifiers.find((m) =>
-          (state.options[m.id] ?? []).some((id) => (catalog.optionEffects.get(id) ?? []).some((e) => e.kind === "slot_add"))
-        )?.id ?? null);
+  // "ช็อตเพิ่มใช้เมล็ดร้าน" rows: only on a special cup with a ticked extra shot, under that option's row
+  const shots = shotRows(rows, line);
   const locked = sweetenerLocked(state, rows);
   const sweetener = shownSweetener(state, rows);
 
@@ -123,16 +119,21 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                   )}
                   {slot.special.length > 0 && (
                     <ChipRow title={slot.specialTitle}>
-                      {slot.special.map((c) => (
-                        <ChoiceChip
-                          key={c.id}
-                          label={c.label}
-                          price={priceTag(c.priceDelta)}
-                          special
-                          selected={state.slots[slot.groupId] === c.id}
-                          onClick={() => setState((s) => pickSlot(s, slot.groupId, c.id))}
-                        />
-                      ))}
+                      {slot.special.map((c) => {
+                        const selected = state.slots[slot.groupId] === c.id;
+                        return (
+                          <ChoiceChip
+                            key={c.id}
+                            label={c.label}
+                            price={priceTag(c.priceDelta)}
+                            special
+                            selected={selected}
+                            // tap again = ×2 (one more dose), a third tap = ×1
+                            count={selected && state.counts[slot.groupId] === 2 ? 2 : null}
+                            onClick={() => setState((s) => tapSpecial(s, slot.groupId, c.id))}
+                          />
+                        );
+                      })}
                     </ChipRow>
                   )}
                 </Fragment>
@@ -167,23 +168,34 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
               )}
 
               {modifiers.map((modifier) => (
-                <ChipRow key={modifier.id} title={modifier.name} hint={modifierHint(modifier)}>
-                  {modifier.options.map((option) => (
-                    <ChoiceChip
-                      key={option.id}
-                      label={option.name}
-                      price={priceTag(option.priceDelta)}
-                      selected={(state.options[modifier.id] ?? []).includes(option.id)}
-                      onClick={() => setState((s) => toggleOption(s, modifier, option.id))}
-                    />
-                  ))}
-                  {modifier.id === shotRowId &&
-                    extraShots.map((e, i) => (
-                      <p key={i} className="col-span-full text-sm text-muted-foreground leading-tight">
-                        {`ช็อต${e.label} ${priceTag(e.priceDelta)}`}
-                      </p>
+                <Fragment key={modifier.id}>
+                  <ChipRow title={modifier.name} hint={modifierHint(modifier)}>
+                    {modifier.options.map((option) => (
+                      <ChoiceChip
+                        key={option.id}
+                        label={option.name}
+                        price={priceTag(option.priceDelta)}
+                        selected={(state.options[modifier.id] ?? []).includes(option.id)}
+                        onClick={() => setState((s) => toggleOption(s, modifier, option.id))}
+                      />
                     ))}
-                </ChipRow>
+                  </ChipRow>
+                  {shots
+                    .filter((row) => row.afterModifierId === modifier.id)
+                    .map((row) => (
+                      <ChipRow key={`shot-${row.groupId}`} title={row.title}>
+                        {row.chips.map((c) => (
+                          <ChoiceChip
+                            key={c.id}
+                            label={c.label}
+                            price={null}
+                            selected={row.selectedId === c.id}
+                            onClick={() => setState((s) => pickShot(s, row.groupId, c.id))}
+                          />
+                        ))}
+                      </ChipRow>
+                    ))}
+                </Fragment>
               ))}
 
               <div>
@@ -271,12 +283,14 @@ function ChipRow({
 
 /**
  * 56 px tall, 18 px text. Selected = solid accent, white text and ✓ (seen from arm's length). A special
- * bean/matcha has an accent frame and an accent "+20". Disabled = faded and untappable, never hidden.
+ * bean/matcha has an accent frame and an accent "+20"; doubled it reads "✓ เคนยา +20 ×2". Disabled =
+ * faded and untappable, never hidden.
  */
 function ChoiceChip({
   label,
   price,
   selected,
+  count = null,
   disabled = false,
   special = false,
   onClick,
@@ -284,6 +298,8 @@ function ChoiceChip({
   label: string;
   price: string | null;
   selected: boolean;
+  /** 2 = a doubled special: "×2" after the price, part of the button's accessible name */
+  count?: 2 | null;
   disabled?: boolean;
   special?: boolean;
   onClick: () => void;
@@ -302,13 +318,16 @@ function ChoiceChip({
       disabled={disabled}
       onClick={onClick}
       className={`min-h-14 w-full rounded-lg border-2 px-2 py-1 flex items-center justify-center gap-1.5 text-center text-lg font-semibold leading-tight transition-colors ${
-        disabled ? "" : "active:scale-[0.98]"
-      } ${look}`}
+        // a doubled chip lets "+20 ×2" drop under the name rather than squeeze the name apart
+        count === 2 ? "flex-wrap gap-y-0.5" : ""
+      } ${disabled ? "" : "active:scale-[0.98]"} ${look}`}
     >
       {selected && <span aria-hidden="true">✓</span>}
       <span className="min-w-0 break-words">{label}</span>
-      {price && (
-        <span className={`shrink-0 tabular-nums ${selected ? "text-white" : "text-accent"}`}>{price}</span>
+      {(price || count === 2) && (
+        <span className={`shrink-0 whitespace-nowrap tabular-nums ${selected ? "text-white" : "text-accent"}`}>
+          {[price, count === 2 ? "×2" : null].filter((w) => w !== null).join(" ")}
+        </span>
       )}
     </button>
   );

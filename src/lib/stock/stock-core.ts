@@ -34,16 +34,26 @@ export type StockCatalog = {
   optionEffects: Map<string, OptionEffect[]>;
 };
 
-/** What the POS sends per line (all optional: a pre-D1 cart has none). */
+/**
+ * What the POS sends per line (all optional: a pre-D1 cart has none). Per slot, `count` 2 doubles a
+ * special member (ignored on a house member) and `shotMemberId` is the house member the cashier
+ * picked for the extra shot on a special cup (anything else falls back to the menu's house default).
+ */
 export type LineChoices = {
-  slots?: { groupId: string; memberId: string }[];
+  slots?: { groupId: string; memberId: string; count?: number; shotMemberId?: string }[];
   sweetness?: { levelId: string; memberId: string | null } | null;
 };
 
 export type StockLine = { materialId: string; qty: number };
 export type ChoiceSnapshot = {
-  slots: { groupId: string; memberId: string; materialId: string; label: string; tier: "house" | "special"; priceDelta: number }[];
-  /** groups the line's options add to (slot_add effects), for the specialty price */
+  slots: {
+    groupId: string; memberId: string; materialId: string; label: string; tier: "house" | "special"; priceDelta: number;
+    /** present (= 2) only when a special member is doubled */
+    count?: 2;
+    /** present only when the slot member is special AND ≥1 chosen option has a slot_add effect on this group */
+    shot?: { memberId: string; materialId: string; label: string; optionIds: string[] };
+  }[];
+  /** groups the line's options add to (slot_add effects); a record only, no longer used for price */
   slotAddGroupIds: string[];
   sweetness: { levelId: string; levelName: string; memberId: string | null; label: string | null } | null;
 };
@@ -89,19 +99,34 @@ export function defaultLevel(
   return own ?? levels.find((l) => l.isDefault) ?? null;
 }
 
-/** Per-cup specialty price: each special slot member once, plus once more per slot_add option on that group. */
+/**
+ * Per-cup specialty price: each special slot member once, twice when doubled (count 2). House members
+ * and extra shots add nothing (an extra shot always uses a house member; its price is the option's).
+ */
 export function cupPriceDeltaSatang(
-  slotMembers: { groupId: string; tier: "house" | "special"; priceDelta: number }[],
-  slotAddGroupIds: string[]
+  slotMembers: { tier: "house" | "special"; priceDelta: number; count?: number }[]
 ): number {
   let total = 0;
   for (const m of slotMembers) {
     if (m.tier !== "special") continue;
-    const unit = toSatang(m.priceDelta);
-    const adds = slotAddGroupIds.filter((g) => g === m.groupId).length;
-    total += unit * (1 + adds);
+    total += toSatang(m.priceDelta) * (m.count === 2 ? 2 : 1);
   }
   return total;
+}
+
+/**
+ * The member an extra shot on group `group` uses when the cup's member is special: the cashier's pick
+ * when it is a house member of the group → the menu's house default → (no house member at all) the
+ * cup's own member. Shared by resolveLine and the POS option window so both pick the same.
+ */
+export function shotMember(
+  group: ChoiceGroup,
+  line: { defaultMemberId: string | null },
+  cupMember: GroupMember,
+  pickedId: string | undefined
+): GroupMember {
+  const picked = group.members.find((m) => m.id === pickedId && m.tier === "house");
+  return picked ?? defaultSlotMember(group, { defaultMemberId: line.defaultMemberId, allowSpecial: false }) ?? cupMember;
 }
 
 export function resolveLine(
@@ -117,8 +142,11 @@ export function resolveLine(
     if (qty > 0) perCup.set(materialId, (perCup.get(materialId) ?? 0) + qty);
   };
 
-  const resolvedSlots: { member: GroupMember }[] = [];
-  const memberByGroup = new Map<string, GroupMember>();
+  const resolvedSlots: { tier: "house" | "special"; priceDelta: number; count: number }[] = [];
+  type SnapSlot = ChoiceSnapshot["slots"][number];
+  const slotByGroup = new Map<string, {
+    group: ChoiceGroup; line: { defaultMemberId: string | null }; member: GroupMember; shotPick: string | undefined; snap: SnapSlot;
+  }>();
   const snapshot: ChoiceSnapshot = { slots: [], slotAddGroupIds: [], sweetness: null };
 
   for (const line of catalog.recipes.get(productId) ?? []) {
@@ -128,19 +156,23 @@ export function resolveLine(
     }
     const group = catalog.groups.get(line.groupId);
     if (!group || group.members.length === 0) continue;
-    const chosenId = choices?.slots?.find((s) => s.groupId === line.groupId)?.memberId;
+    const chosen = choices?.slots?.find((s) => s.groupId === line.groupId);
     // An unknown chosen member falls back to the default chain: never block a sale over stock data.
-    let member: GroupMember | null = group.members.find((m) => m.id === chosenId) ?? null;
+    let member: GroupMember | null = group.members.find((m) => m.id === chosen?.memberId) ?? null;
     if (member && member.tier === "special" && !line.allowSpecial) return stale;
     member ??= defaultSlotMember(group, line);
     if (!member) continue;
-    add(member.materialId, line.qty);
-    resolvedSlots.push({ member });
-    memberByGroup.set(line.groupId, member);
-    snapshot.slots.push({
+    // Only a special member can be doubled; a house member with count 2 is one dose.
+    const count = member.tier === "special" && chosen?.count === 2 ? 2 : 1;
+    add(member.materialId, line.qty * count);
+    resolvedSlots.push({ tier: member.tier, priceDelta: member.priceDelta, count });
+    const snap: SnapSlot = {
       groupId: line.groupId, memberId: member.id, materialId: member.materialId,
       label: member.label, tier: member.tier, priceDelta: member.priceDelta,
-    });
+    };
+    if (count === 2) snap.count = 2;
+    snapshot.slots.push(snap);
+    slotByGroup.set(line.groupId, { group, line, member, shotPick: chosen?.shotMemberId, snap });
   }
 
   const slotAddGroupIds: string[] = [];
@@ -149,10 +181,22 @@ export function resolveLine(
       if (effect.kind === "material_add") {
         add(effect.materialId, effect.qty);
       } else {
-        const member = memberByGroup.get(effect.groupId);
-        if (!member) continue;
-        add(member.materialId, effect.qty);
+        const slot = slotByGroup.get(effect.groupId);
+        if (!slot) continue;
         slotAddGroupIds.push(effect.groupId);
+        // A house cup's extra shot is the same member; a special cup's uses a house member and is
+        // recorded on the slot (no specialty price: cupPriceDeltaSatang never counts shots).
+        if (slot.member.tier === "house") {
+          add(slot.member.materialId, effect.qty);
+          continue;
+        }
+        if (!slot.snap.shot) {
+          const m = shotMember(slot.group, slot.line, slot.member, slot.shotPick);
+          slot.snap.shot = { memberId: m.id, materialId: m.materialId, label: m.label, optionIds: [] };
+        }
+        const shot = slot.snap.shot;
+        add(shot.materialId, effect.qty);
+        if (!shot.optionIds.includes(optionId)) shot.optionIds.push(optionId);
       }
     }
   }
@@ -194,7 +238,7 @@ export function resolveLine(
 
   return {
     stock,
-    priceDeltaSatang: cupPriceDeltaSatang(resolvedSlots.map((s) => s.member), slotAddGroupIds),
+    priceDeltaSatang: cupPriceDeltaSatang(resolvedSlots),
     snapshot,
   };
 }

@@ -76,22 +76,51 @@ function price(items: CartItem[]) {
 }
 
 test("a specialty latte keeps the menu price as base and the bean as a choice", () => {
-  // (65 + shot 10 + kenya 20 twice because of the slot_add shot) x 2
-  const items = [cartItem(["shot"], 2, 230, { slots: [kenya()], slotAddGroupIds: ["beans"], sweetness: null })];
+  // (65 + shot 10 + kenya 20 once: the shot uses the house bean) x 2
+  const items = [cartItem(["shot"], 2, 190, { slots: [kenya()], slotAddGroupIds: ["beans"], sweetness: null })];
   const lines = price(items);
   const [out] = normalizeHeldItems(items, lines);
   assert.equal(out!.basePrice, 65);
   assert.deepEqual(out!.choices!.slots[0], {
     groupId: "beans", memberId: "m_kenya", label: "เคนย่า", tier: "special", priceDelta: 20,
+    shot: { memberId: "m_house", label: "เมล็ดบ้าน", optionIds: ["shot"] },
   });
   assert.deepEqual(out!.choices!.slotAddGroupIds, ["beans"]);
   assert.equal(lineTotal(out!.basePrice, out!.selectedModifiers, out!.quantity, out!.choices), lines[0]!.lineTotal);
   assert.equal(out!.totalPrice, lines[0]!.lineTotal);
 });
 
+test("a doubled special and the extra shot's house pick are kept from the server snapshot (no material id)", () => {
+  const stock = stockCatalog();
+  stock.groups.get("beans")!.members.push({
+    id: "m_dark", groupId: "beans", materialId: "mat_m_dark", label: "คั่วเข้ม", tier: "house", priceDelta: 0, isDefault: false, sortOrder: 2,
+  });
+  const items = [cartItem(["shot"], 1, 65 + 10 + 40, {
+    slots: [{ ...kenya("FAKE"), count: 2, shot: { memberId: "m_dark", label: "FAKE", optionIds: ["FAKE"] } }],
+    slotAddGroupIds: [], sweetness: null,
+  })];
+  const r = priceLines(items, catalog(stock));
+  assert.ok(!("error" in r), JSON.stringify(r));
+  const [out] = normalizeHeldItems(items, r.lines);
+  assert.deepEqual(out!.choices!.slots, [{
+    groupId: "beans", memberId: "m_kenya", label: "เคนย่า", tier: "special", priceDelta: 20, count: 2,
+    shot: { memberId: "m_dark", label: "คั่วเข้ม", optionIds: ["shot"] },
+  }]);
+  assert.equal(lineTotal(out!.basePrice, out!.selectedModifiers, out!.quantity, out!.choices), 115);
+  // reopened and paid again: same total, same stock
+  const again = priceLines([out!], catalog(stock));
+  assert.ok(!("error" in again), JSON.stringify(again));
+  assert.equal(again.lines[0]!.lineTotal, 115);
+  assert.deepEqual(again.lines[0]!.stock, r.lines[0]!.stock);
+  // no count on a ×1 cup and no shot on a house cup
+  const plain = [cartItem(["shot"], 1, 75, { slots: [{ ...kenya(), memberId: "m_house", tier: "house", priceDelta: 0 }], slotAddGroupIds: [], sweetness: null })];
+  const [p] = normalizeHeldItems(plain, price(plain));
+  assert.deepEqual(Object.keys(p!.choices!.slots[0]!).sort(), ["groupId", "label", "memberId", "priceDelta", "tier"]);
+});
+
 test("reopening a parked bill re-prices to the same totals", () => {
   const items = [
-    cartItem(["shot"], 2, 230, { slots: [kenya()], slotAddGroupIds: ["beans"], sweetness: null }),
+    cartItem(["shot"], 2, 190, { slots: [kenya()], slotAddGroupIds: ["beans"], sweetness: null }),
     { ...cartItem(["pearl"], 1, 70), cartItemKey: "k2" },
   ];
   const lines = price(items);

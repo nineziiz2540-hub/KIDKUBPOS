@@ -78,14 +78,17 @@ test("plain latte uses every default", () => {
   assert.equal(r.priceDeltaSatang, 0);
 });
 
-test("kenya, less sweet, milk mix, extra shot (spec 6.4 example)", () => {
+test("kenya, less sweet, milk mix, extra shot (spec 6.4 example): the shot uses the menu's house bean", () => {
   const r = ok(resolveLine("latte", 1,
     { slots: [{ groupId: "beans", memberId: "m_kenya" }], sweetness: { levelId: "less", memberId: "m_mix" } },
     ["extraShot"], cat));
-  assert.deepEqual(r.stock, sorted([["ice", 150], ["kenya", 27], ["milk", 180], ["mix", 15]]));
-  assert.equal(r.priceDeltaSatang, 4000);
+  assert.deepEqual(r.stock, sorted([["ice", 150], ["kenya", 18], ["med", 9], ["milk", 180], ["mix", 15]]));
+  assert.equal(r.priceDeltaSatang, 2000);
   assert.deepEqual(r.snapshot.slots, [
-    { groupId: "beans", memberId: "m_kenya", materialId: "kenya", label: "kenya", tier: "special", priceDelta: 20 },
+    {
+      groupId: "beans", memberId: "m_kenya", materialId: "kenya", label: "kenya", tier: "special", priceDelta: 20,
+      shot: { memberId: "m_med", materialId: "med", label: "med", optionIds: ["extraShot"] },
+    },
   ]);
   assert.deepEqual(r.snapshot.slotAddGroupIds, ["beans"]);
   assert.deepEqual(r.snapshot.sweetness, { levelId: "less", levelName: "หวานน้อย", memberId: "m_mix", label: "mix" });
@@ -211,12 +214,148 @@ test("defaultLevel follows product default, shop default, none", () => {
   assert.equal(defaultLevel(cat.levels.map((l) => ({ ...l, isDefault: false })), undefined), null);
 });
 
-test("cupPriceDeltaSatang: special once, plus once per matching slot_add; house adds 0", () => {
-  const kenya = { groupId: "beans", tier: "special" as const, priceDelta: 20 };
-  const house = { groupId: "beans", tier: "house" as const, priceDelta: 0 };
-  assert.equal(cupPriceDeltaSatang([kenya], []), 2000);
-  assert.equal(cupPriceDeltaSatang([kenya], ["beans"]), 4000);
-  assert.equal(cupPriceDeltaSatang([kenya], ["beans", "beans"]), 6000);
-  assert.equal(cupPriceDeltaSatang([kenya], ["other"]), 2000);
-  assert.equal(cupPriceDeltaSatang([house], ["beans"]), 0);
+test("cupPriceDeltaSatang: each special once, twice when doubled; house adds 0 even when doubled", () => {
+  const kenya = { tier: "special" as const, priceDelta: 20 };
+  const house = { tier: "house" as const, priceDelta: 0 };
+  assert.equal(cupPriceDeltaSatang([kenya]), 2000);
+  assert.equal(cupPriceDeltaSatang([{ ...kenya, count: 2 }]), 4000);
+  assert.equal(cupPriceDeltaSatang([{ ...kenya, count: 1 }]), 2000);
+  assert.equal(cupPriceDeltaSatang([{ ...kenya, count: 3 }]), 2000);
+  assert.equal(cupPriceDeltaSatang([house, { ...house, count: 2 }]), 0);
+  assert.equal(cupPriceDeltaSatang([kenya, { tier: "special", priceDelta: 12.5, count: 2 }]), 4500);
+  assert.equal(cupPriceDeltaSatang([]), 0);
+});
+
+// ---- extra shot uses a house bean; a special can be doubled (owner 2026-11-19) ----
+
+/** The test catalog with Thai labels, the shot at 18 g, and a matcha group without a house member. */
+function shotCat(): StockCatalog {
+  const c = build();
+  const labels: Record<string, string> = { m_light: "คั่วอ่อน", m_med: "คั่วกลาง", m_dark: "คั่วเข้ม", m_kenya: "เคนยา" };
+  const beans = c.groups.get("beans")!;
+  beans.members = [
+    ...beans.members.map((m) => ({ ...m, label: labels[m.id] ?? m.label })),
+    member("m_eth", "beans", "eth", { label: "เอธิโอเปีย", tier: "special", priceDelta: 30, sortOrder: 5 }),
+  ];
+  c.optionEffects.set("extraShot", [{ kind: "slot_add", groupId: "beans", qty: 18 }]);
+  c.groups.set("gyokuro", {
+    id: "gyokuro", kind: "matcha", name: "มัทฉะ",
+    members: [member("t_cer", "gyokuro", "ceremony", { label: "Ceremonial", tier: "special", priceDelta: 40, sortOrder: 1 })],
+  });
+  c.recipes.set("special_only", [{ kind: "slot", groupId: "gyokuro", qty: 4, defaultMemberId: "t_cer", allowSpecial: true }]);
+  c.optionEffects.set("matchaShot", [{ kind: "slot_add", groupId: "gyokuro", qty: 4 }]);
+  return c;
+}
+const kenyaPick = (o: { count?: number; shotMemberId?: string } = {}) => ({ slots: [{ groupId: "beans", memberId: "m_kenya", ...o }] });
+const beanStock = (r: ResolvedLine) => r.stock.filter((l) => !["ice", "milk", "syrup"].includes(l.materialId));
+
+test("Kenya + shot with a house pick: the shot uses คั่วเข้ม, only the cup pays the specialty", () => {
+  const r = ok(resolveLine("latte", 1, kenyaPick({ shotMemberId: "m_dark" }), ["extraShot"], shotCat()));
+  assert.equal(r.priceDeltaSatang, 2000);
+  assert.deepEqual(beanStock(r), sorted([["dark", 18], ["kenya", 18]]));
+  assert.deepEqual(r.snapshot.slots[0]!.shot, { memberId: "m_dark", materialId: "dark", label: "คั่วเข้ม", optionIds: ["extraShot"] });
+  assert.equal("count" in r.snapshot.slots[0]!, false);
+  assert.deepEqual(r.snapshot.slotAddGroupIds, ["beans"]);
+});
+
+test("Kenya + shot with no shot pick: the shot uses the line's house default (คั่วกลาง)", () => {
+  const r = ok(resolveLine("latte", 1, kenyaPick(), ["extraShot"], shotCat()));
+  assert.equal(r.priceDeltaSatang, 2000);
+  assert.deepEqual(beanStock(r), sorted([["kenya", 18], ["med", 18]]));
+  assert.equal(r.snapshot.slots[0]!.shot?.label, "คั่วกลาง");
+  // the line's own default wins over the group's flagged default
+  const c = shotCat();
+  c.recipes.set("latte", [{ kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_light", allowSpecial: true }]);
+  assert.equal(ok(resolveLine("latte", 1, kenyaPick(), ["extraShot"], c)).snapshot.slots[0]!.shot?.memberId, "m_light");
+  // a menu whose own default is a special: the shot still uses a house bean
+  c.recipes.set("latte", [{ kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_kenya", allowSpecial: true }]);
+  const own = ok(resolveLine("latte", 1, undefined, ["extraShot"], c));
+  assert.equal(own.snapshot.slots[0]!.memberId, "m_kenya");
+  assert.equal(own.snapshot.slots[0]!.shot?.memberId, "m_med");
+  assert.equal(own.priceDeltaSatang, 2000);
+});
+
+test("Kenya + shot whose shot pick is a special or unknown member: the house default, never a special", () => {
+  for (const shotMemberId of ["m_eth", "m_kenya", "nope"]) {
+    const r = ok(resolveLine("latte", 1, kenyaPick({ shotMemberId }), ["extraShot"], shotCat()));
+    assert.equal(r.priceDeltaSatang, 2000, shotMemberId);
+    assert.deepEqual(beanStock(r), sorted([["kenya", 18], ["med", 18]]), shotMemberId);
+    assert.equal(r.snapshot.slots[0]!.shot?.memberId, "m_med", shotMemberId);
+  }
+});
+
+test("Kenya ×2: two doses and the specialty twice; with a shot 36 + 18 house; a house ×2 is ×1", () => {
+  const two = ok(resolveLine("latte", 1, kenyaPick({ count: 2 }), [], shotCat()));
+  assert.deepEqual(beanStock(two), sorted([["kenya", 36]]));
+  assert.equal(two.priceDeltaSatang, 4000);
+  assert.equal(two.snapshot.slots[0]!.count, 2);
+  assert.equal("shot" in two.snapshot.slots[0]!, false);
+
+  const twoShot = ok(resolveLine("latte", 1, kenyaPick({ count: 2, shotMemberId: "m_dark" }), ["extraShot"], shotCat()));
+  assert.deepEqual(beanStock(twoShot), sorted([["dark", 18], ["kenya", 36]]));
+  assert.equal(twoShot.priceDeltaSatang, 4000);
+  assert.equal(twoShot.snapshot.slots[0]!.count, 2);
+  assert.equal(twoShot.snapshot.slots[0]!.shot?.memberId, "m_dark");
+
+  // quantity multiplies the doubled dose too
+  assert.deepEqual(beanStock(ok(resolveLine("latte", 3, kenyaPick({ count: 2 }), [], shotCat()))), sorted([["kenya", 108]]));
+
+  const house = ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_dark", count: 2 }] }, [], shotCat()));
+  assert.deepEqual(beanStock(house), sorted([["dark", 18]]));
+  assert.equal(house.priceDeltaSatang, 0);
+  assert.deepEqual(house.snapshot.slots, [
+    { groupId: "beans", memberId: "m_dark", materialId: "dark", label: "คั่วเข้ม", tier: "house", priceDelta: 0 },
+  ]);
+  // count 1 (or anything but 2) is a single dose with no count key
+  const one = ok(resolveLine("latte", 1, kenyaPick({ count: 1 }), [], shotCat()));
+  assert.equal(one.priceDeltaSatang, 2000);
+  assert.equal("count" in one.snapshot.slots[0]!, false);
+});
+
+test("a house cup + shot uses the same member, no shot key (today's behaviour)", () => {
+  const r = ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_dark", shotMemberId: "m_light" }] }, ["extraShot"], shotCat()));
+  assert.deepEqual(beanStock(r), sorted([["dark", 36]]));
+  assert.equal(r.priceDeltaSatang, 0);
+  assert.deepEqual(r.snapshot.slots, [
+    { groupId: "beans", memberId: "m_dark", materialId: "dark", label: "คั่วเข้ม", tier: "house", priceDelta: 0 },
+  ]);
+  assert.deepEqual(r.snapshot.slotAddGroupIds, ["beans"]);
+});
+
+test("a group with no house member: special + shot deducts the special itself, no surcharge", () => {
+  const r = ok(resolveLine("special_only", 1, { slots: [{ groupId: "gyokuro", memberId: "t_cer", shotMemberId: "t_cer" }] }, ["matchaShot"], shotCat()));
+  assert.deepEqual(r.stock, [{ materialId: "ceremony", qty: 8 }]);
+  assert.equal(r.priceDeltaSatang, 4000);
+  assert.deepEqual(r.snapshot.slots[0]!.shot, { memberId: "t_cer", materialId: "ceremony", label: "Ceremonial", optionIds: ["matchaShot"] });
+});
+
+test("shot optionIds: every shot-adding option on the group, in option order, once each", () => {
+  const c = shotCat();
+  c.optionEffects.set("doubleShot", [
+    { kind: "slot_add", groupId: "beans", qty: 18 },
+    { kind: "slot_add", groupId: "beans", qty: 9 },
+  ]);
+  const r = ok(resolveLine("latte", 1, kenyaPick({ shotMemberId: "m_light" }), ["doubleShot", "extraShot"], c));
+  assert.deepEqual(r.snapshot.slots[0]!.shot?.optionIds, ["doubleShot", "extraShot"]);
+  assert.deepEqual(beanStock(r), sorted([["kenya", 18], ["light", 45]]));
+  assert.equal(r.priceDeltaSatang, 2000);
+  assert.deepEqual(r.snapshot.slotAddGroupIds, ["beans", "beans", "beans"]);
+});
+
+test("one option adding to two groups: each special slot gets its own shot listing that option", () => {
+  const c = shotCat();
+  c.recipes.set("dirty_matcha", [
+    { kind: "slot", groupId: "beans", qty: 18, defaultMemberId: "m_med", allowSpecial: true },
+    { kind: "slot", groupId: "gyokuro", qty: 4, defaultMemberId: "t_cer", allowSpecial: true },
+  ]);
+  c.optionEffects.set("both", [
+    { kind: "slot_add", groupId: "beans", qty: 18 },
+    { kind: "slot_add", groupId: "gyokuro", qty: 4 },
+  ]);
+  const r = ok(resolveLine("dirty_matcha", 1, kenyaPick(), ["both"], c));
+  assert.deepEqual(r.snapshot.slots.map((s) => s.shot), [
+    { memberId: "m_med", materialId: "med", label: "คั่วกลาง", optionIds: ["both"] },
+    { memberId: "t_cer", materialId: "ceremony", label: "Ceremonial", optionIds: ["both"] },
+  ]);
+  assert.equal(r.priceDeltaSatang, 2000 + 4000);
 });

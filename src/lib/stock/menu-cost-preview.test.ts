@@ -199,7 +199,7 @@ test("draft rows: the sweetness row and the own table follow the draft", () => {
   assert.deepEqual(rows.amounts.filter((a) => a.product_id !== null).map((a) => [a.member_id, a.level_id, a.amount]), [["s-syrup", "l1", 12]]);
 });
 
-test("เพิ่มช็อต (+9 g in the bean group) adds to whichever bean the cup uses", () => {
+test("เพิ่มช็อต (+9 g in the bean group) adds to the house bean the cup uses, or the house default on a special cup", () => {
   const parsed = parseEffectDrafts([{ kind: "slot_add", targetId: "g-bean", amount: "9" }]);
   assert.ok("value" in parsed);
   const rows = draftCatalogRows(input());
@@ -210,7 +210,7 @@ test("เพิ่มช็อต (+9 g in the bean group) adds to whichever bea
   assert.equal(house.stock.find((l) => l.materialId === "bean-house")!.qty, 27);
   const kenya = resolveLine("__draft__", 2, { slots: [{ groupId: "g-bean", memberId: "m-kenya" }] }, ["opt-shot"], catalog);
   assert.ok(!("error" in kenya));
-  assert.equal(kenya.stock.find((l) => l.materialId === "bean-kenya")!.qty, 54); // (18 + 9) × 2 cups
-  assert.equal(kenya.stock.some((l) => l.materialId === "bean-house"), false);
-  assert.equal(kenya.priceDeltaSatang, 4000); // specialty +20 once for the cup and once for the extra shot
+  assert.equal(kenya.stock.find((l) => l.materialId === "bean-kenya")!.qty, 36); // 18 × 2 cups
+  assert.equal(kenya.stock.find((l) => l.materialId === "bean-house")!.qty, 18); // the shot: 9 × 2 cups, house bean
+  assert.equal(kenya.priceDeltaSatang, 2000); // specialty +20 once for the cup; the shot adds only its option price
 });

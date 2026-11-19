@@ -13,8 +13,14 @@ export type SelectedModifier = {
  * slotAddGroupIds are display/cart-maths only: the server re-resolves everything from the catalog.
  */
 export type CartChoices = {
-  slots: { groupId: string; memberId: string; label: string; tier: "house" | "special"; priceDelta: number }[];
-  /** groups that the line's selected options add to (slot_add effects), for the specialty price */
+  slots: {
+    groupId: string; memberId: string; label: string; tier: "house" | "special"; priceDelta: number;
+    /** present (= 2) only when a special member is doubled (one more dose and its price again) */
+    count?: 2;
+    /** present only on a special member with a chosen extra-shot option: the house member the shot uses */
+    shot?: { memberId: string; label: string; optionIds: string[] };
+  }[];
+  /** groups that the line's selected options add to (slot_add effects); a record only, not used for price */
   slotAddGroupIds: string[];
   sweetness: { levelId: string; levelName: string; memberId: string | null; memberLabel: string | null } | null;
 };

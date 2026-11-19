@@ -10,11 +10,11 @@ function unitSatang(
   modifiers: { priceDelta: number }[],
   choices?: CartChoices
 ): number {
-  const specialty = choices ? cupPriceDeltaSatang(choices.slots, choices.slotAddGroupIds) : 0;
+  const specialty = choices ? cupPriceDeltaSatang(choices.slots) : 0;
   return modifiers.reduce((sum, m) => sum + toSatang(m.priceDelta), toSatang(basePrice)) + specialty;
 }
 
-/** Price of one unit: the menu price plus every chosen option's delta plus any specialty bean price. */
+/** Price of one unit: the menu price plus every chosen option's delta plus any specialty bean price (twice when doubled). */
 export function unitPrice(
   basePrice: number,
   modifiers: { priceDelta: number }[],

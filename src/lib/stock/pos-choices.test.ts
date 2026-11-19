@@ -149,3 +149,13 @@ test("isDefaultChoice", () => {
   assert.equal(isDefaultChoice(noSweet, { kind: "level", levelId: "normal" }), false);
   assert.equal(isDefaultChoice(noSweet, { kind: "sweetener", memberId: null }), false);
 });
+
+test("isDefaultChoice: a doubled slot is never the default, even on the default member", () => {
+  const d = defaultChoices("latte", catalog);
+  assert.equal(isDefaultChoice(d, { kind: "slot", groupId: "beans", memberId: "m_med", count: 1 }), true);
+  assert.equal(isDefaultChoice(d, { kind: "slot", groupId: "beans", memberId: "m_med", count: 2 }), false);
+  const sp = defaultChoices("special_default", catalog);
+  const own = sp.slots[0]!;
+  assert.equal(isDefaultChoice(sp, { kind: "slot", groupId: own.groupId, memberId: own.memberId }), true);
+  assert.equal(isDefaultChoice(sp, { kind: "slot", groupId: own.groupId, memberId: own.memberId, count: 2 }), false);
+});

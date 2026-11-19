@@ -6,7 +6,10 @@ import type { CartChoices, CartItem, ModifierWithOptions, PosProduct, SelectedMo
 import { formatPrice } from "../cash.ts";
 import { lineTotal } from "../cart-math.ts";
 import { defaultChoices, isDefaultChoice } from "./pos-choices.ts";
-import { defaultLevel, defaultSlotMember, type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type StockCatalog } from "./stock-core.ts";
+import {
+  defaultLevel, defaultSlotMember, shotMember,
+  type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type StockCatalog,
+} from "./stock-core.ts";
 
 export type Chip = { id: string; label: string; priceDelta: number };
 
@@ -15,6 +18,8 @@ export type SlotRows = {
   groupId: string;
   houseTitle: string;
   specialTitle: string;
+  /** the sub-row under the extra-shot option on a special cup, e.g. "ช็อตเพิ่มใช้เมล็ดร้าน" */
+  shotTitle: string;
   house: Chip[];
   /** empty when the menu does not offer specials (or the group has none) */
   special: Chip[];
@@ -32,6 +37,13 @@ export type OptionRows = { slots: SlotRows[]; sweetness: SweetnessRows | null };
 export type WindowState = {
   /** groupId → the chosen member (house or special: one pick per group) */
   slots: Record<string, string>;
+  /** groupId → 2 while the chosen special is doubled (×2); absent = ×1. Never set for a house member. */
+  counts: Record<string, 2>;
+  /**
+   * groupId → the house member picked for the extra shot on a special cup. Kept (not shown) while the
+   * shot option is unticked, so ticking it again keeps the pick.
+   */
+  shots: Record<string, string>;
   levelId: string | null;
   /** the sweetener picked; kept (not shown) while the level is "ไม่หวาน", so going back needs no re-pick */
   sweetenerId: string | null;
@@ -60,10 +72,10 @@ function slotLines(productId: string, catalog: StockCatalog): { line: SlotLine; 
 const chip = (m: GroupMember): Chip => ({ id: m.id, label: m.label, priceDelta: m.priceDelta });
 
 /** Screen words from spec §8.1 (bean / matcha); any other group goes by the name the owner gave it. */
-function titles(group: ChoiceGroup): { house: string; special: string } {
-  if (group.kind === "bean") return { house: "เมล็ดร้าน (ระดับคั่ว)", special: "เมล็ดพิเศษ" };
-  if (group.kind === "matcha") return { house: "มัทฉะร้าน", special: "มัทฉะพิเศษ" };
-  return { house: group.name, special: `${group.name} พิเศษ` };
+function titles(group: ChoiceGroup): { house: string; special: string; shot: string } {
+  if (group.kind === "bean") return { house: "เมล็ดร้าน (ระดับคั่ว)", special: "เมล็ดพิเศษ", shot: "ช็อตเพิ่มใช้เมล็ดร้าน" };
+  if (group.kind === "matcha") return { house: "มัทฉะร้าน", special: "มัทฉะพิเศษ", shot: "ช็อตเพิ่มใช้มัทฉะร้าน" };
+  return { house: group.name, special: `${group.name} พิเศษ`, shot: `ช็อตเพิ่มใช้${group.name}` };
 }
 
 /** The bean/matcha and sweetness rows this menu shows, in screen order. */
@@ -74,6 +86,7 @@ export function optionRows(productId: string, catalog: StockCatalog): OptionRows
       groupId: group.id,
       houseTitle: t.house,
       specialTitle: t.special,
+      shotTitle: t.shot,
       house: group.members.filter((m) => m.tier === "house").map(chip),
       special: line.allowSpecial ? group.members.filter((m) => m.tier === "special").map(chip) : [],
     };
@@ -97,28 +110,49 @@ export function hasOptionRows(rows: OptionRows): boolean {
   return rows.slots.length > 0 || rows.sweetness !== null;
 }
 
-type Picks = { slots: Record<string, string>; levelId: string | null; sweetenerId: string | null };
+type Picks = {
+  slots: Record<string, string>;
+  counts: Record<string, 2>;
+  shots: Record<string, string>;
+  levelId: string | null;
+  sweetenerId: string | null;
+};
+
+type CartSlot = CartChoices["slots"][number];
 
 /**
  * Picks → CartChoices: each pick is kept when the catalog still offers it on this menu, otherwise
  * that part is the menu default (resolveLine's chain). A special on a line that forbids specials is
- * dropped here, so the server never has to refuse the line as stale.
+ * dropped here, so the server never has to refuse the line as stale. Rule for rule what resolveLine
+ * records: ×2 only on a special; an extra shot on a special cup uses a house member (shotMember) and
+ * is written on the slot; a house cup's shot is the same member and writes nothing.
  */
 function settle(productId: string, catalog: StockCatalog, picks: Picks, optionIds: string[]): CartChoices {
   const slots: CartChoices["slots"] = [];
-  const chosenGroups = new Set<string>();
+  const byGroup = new Map<string, { slot: CartSlot; group: ChoiceGroup; line: SlotLine; member: GroupMember }>();
   for (const { line, group, fallback } of slotLines(productId, catalog)) {
     const picked = group.members.find((m) => m.id === picks.slots[line.groupId]);
     const member = picked && (picked.tier === "house" || line.allowSpecial) ? picked : fallback;
-    chosenGroups.add(line.groupId);
-    slots.push({ groupId: line.groupId, memberId: member.id, label: member.label, tier: member.tier, priceDelta: member.priceDelta });
+    const slot: CartSlot = { groupId: line.groupId, memberId: member.id, label: member.label, tier: member.tier, priceDelta: member.priceDelta };
+    if (member.tier === "special" && picks.counts[line.groupId] === 2) slot.count = 2;
+    slots.push(slot);
+    byGroup.set(line.groupId, { slot, group, line, member });
   }
 
   // Same counting as resolveLine: once per slot_add effect whose group has a chosen member.
   const slotAddGroupIds: string[] = [];
   for (const optionId of optionIds) {
     for (const effect of catalog.optionEffects.get(optionId) ?? []) {
-      if (effect.kind === "slot_add" && chosenGroups.has(effect.groupId)) slotAddGroupIds.push(effect.groupId);
+      if (effect.kind !== "slot_add") continue;
+      const s = byGroup.get(effect.groupId);
+      if (!s) continue;
+      slotAddGroupIds.push(effect.groupId);
+      if (s.member.tier !== "special") continue;
+      if (!s.slot.shot) {
+        const m = shotMember(s.group, s.line, s.member, picks.shots[effect.groupId]);
+        s.slot.shot = { memberId: m.id, label: m.label, optionIds: [] };
+      }
+      if (!s.slot.shot.optionIds.includes(optionId)) s.slot.shot.optionIds.push(optionId);
     }
   }
 
@@ -145,9 +179,19 @@ export function choicesFromWindow(productId: string, catalog: StockCatalog, stat
   return settle(productId, catalog, state, optionIds);
 }
 
+function countsOf(choices: CartChoices): Record<string, 2> {
+  return Object.fromEntries(choices.slots.filter((s) => s.count === 2).map((s) => [s.groupId, 2 as const]));
+}
+
+function shotsOf(choices: CartChoices): Record<string, string> {
+  return Object.fromEntries(choices.slots.flatMap((s) => (s.shot ? [[s.groupId, s.shot.memberId]] : [])));
+}
+
 function picksOf(choices: CartChoices): Picks {
   return {
     slots: Object.fromEntries(choices.slots.map((s) => [s.groupId, s.memberId])),
+    counts: countsOf(choices),
+    shots: shotsOf(choices),
     levelId: choices.sweetness?.levelId ?? null,
     sweetenerId: choices.sweetness?.memberId ?? null,
   };
@@ -178,6 +222,8 @@ export function initialWindowState(
   }
   return {
     slots: Object.fromEntries(start.slots.map((s) => [s.groupId, s.memberId])),
+    counts: countsOf(start),
+    shots: shotsOf(start),
     levelId: start.sweetness?.levelId ?? null,
     // a ไม่หวาน start remembers the menu's sweetener for when a level is picked
     sweetenerId: start.sweetness?.memberId ?? catalog.productSweetness.get(productId)?.defaultMemberId ?? null,
@@ -185,8 +231,33 @@ export function initialWindowState(
   };
 }
 
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const rest = { ...record };
+  delete rest[key];
+  return rest;
+}
+
+/** A tap on a house chip: that member, ×1 (house members never double; a re-tap changes nothing). */
 export function pickSlot(state: WindowState, groupId: string, memberId: string): WindowState {
-  return { ...state, slots: { ...state.slots, [groupId]: memberId } };
+  return { ...state, slots: { ...state.slots, [groupId]: memberId }, counts: withoutKey(state.counts, groupId) };
+}
+
+/**
+ * A tap on a special chip: another member → that member at ×1; the chosen one at ×1 → ×2 (one more
+ * dose and its price again); at ×2 → back to ×1. ×2 is the most.
+ */
+export function tapSpecial(state: WindowState, groupId: string, memberId: string): WindowState {
+  if (state.slots[groupId] !== memberId) {
+    return { ...state, slots: { ...state.slots, [groupId]: memberId }, counts: withoutKey(state.counts, groupId) };
+  }
+  if (state.counts[groupId] === 2) return { ...state, counts: withoutKey(state.counts, groupId) };
+  return { ...state, counts: { ...state.counts, [groupId]: 2 } };
+}
+
+/** A tap in the "ช็อตเพิ่มใช้…" sub-row: the house member the extra shot uses on a special cup. */
+export function pickShot(state: WindowState, groupId: string, memberId: string): WindowState {
+  return { ...state, shots: { ...state.shots, [groupId]: memberId } };
 }
 
 export function pickLevel(state: WindowState, levelId: string): WindowState {
@@ -315,10 +386,14 @@ export function footerText(mode: "add" | "edit", line: CartItem): string {
 
 export type LinePart = { text: string; changed: boolean };
 
-/** A bean/matcha word: a special shows its price too ("เคนยา (+20)", spec §7.1); a house pick is just its label. */
-function slotText(s: { label: string; tier: "house" | "special"; priceDelta: number }): string {
+/**
+ * A bean/matcha word: a special shows its price too ("เคนยา (+20)", spec §7.1), and "×2" when doubled
+ * ("เคนยา (+20) ×2"); a house pick is just its label.
+ */
+function slotText(s: { label: string; tier: "house" | "special"; priceDelta: number; count?: number }): string {
   const tag = s.tier === "special" ? priceTag(s.priceDelta) : null;
-  return tag === null ? s.label : `${s.label} (${tag})`;
+  const word = tag === null ? s.label : `${s.label} (${tag})`;
+  return s.tier === "special" && s.count === 2 ? `${word} ×2` : word;
 }
 
 /** An option's words: "เพิ่มช็อต (+15)"; a free option is its name alone. */
@@ -327,20 +402,38 @@ export function optionText(name: string, priceDelta: number): string {
   return tag === null ? name : `${name} (${tag})`;
 }
 
+/** The house member an extra-shot option uses on a special cup: the first slot (slot order) whose shot lists it. */
+function shotLabelOf(slots: readonly { shot?: { label: string; optionIds: string[] } }[] | undefined, optionId: string | undefined): string | null {
+  if (optionId === undefined) return null;
+  for (const s of slots ?? []) if (s.shot?.optionIds.includes(optionId)) return s.shot.label;
+  return null;
+}
+
+/** A chosen option's words; the extra shot on a special cup names its house bean: "เพิ่มช็อต คั่วกลาง (+15)". */
+function chosenOptionText(name: string, priceDelta: number, shotLabel: string | null): string {
+  return optionText(shotLabel === null ? name : `${name} ${shotLabel}`, priceDelta);
+}
+
+/** The "ช็อตเพิ่มใช้…" sub-row the window shows right after the modifier row `afterModifierId`. */
+export type ShotRow = { groupId: string; title: string; chips: Chip[]; selectedId: string; afterModifierId: string };
+
 /**
- * The extra-shot surcharges: an option that adds to a bean group uses the chosen bean again, and the
- * specialty price is charged once more for each such option (cupPriceDeltaSatang). One entry per
- * occurrence, in slot order, so the words add up to what is charged. House and free beans add nothing.
+ * The extra-shot sub-rows, in slot order: one per slot whose member is special and that has a ticked
+ * option adding to it (its settled `shot`). `chips` are the group's house members, `selectedId` the
+ * house member the shot uses (the same one the server will deduct), `afterModifierId` the first
+ * modifier row holding such an option. Read from the built line (buildLine), so the row always
+ * shows what is charged and recorded. A group without house members has nothing to pick: no row.
  */
-export function shotExtras(
-  slots: { groupId: string; label: string; tier: "house" | "special"; priceDelta: number }[],
-  slotAddGroupIds: string[]
-): { text: string; label: string; priceDelta: number }[] {
-  const out: { text: string; label: string; priceDelta: number }[] = [];
-  for (const s of slots) {
-    if (s.tier !== "special" || !(s.priceDelta > 0)) continue;
-    const times = slotAddGroupIds.filter((g) => g === s.groupId).length;
-    for (let i = 0; i < times; i++) out.push({ text: optionText(`ช็อต${s.label}`, s.priceDelta), label: s.label, priceDelta: s.priceDelta });
+export function shotRows(rows: OptionRows, line: Pick<CartItem, "choices" | "selectedModifiers">): ShotRow[] {
+  const out: ShotRow[] = [];
+  for (const slot of line.choices?.slots ?? []) {
+    const shot = slot.shot;
+    if (!shot) continue;
+    const row = rows.slots.find((r) => r.groupId === slot.groupId);
+    if (!row || row.house.length === 0) continue;
+    const after = line.selectedModifiers.find((m) => shot.optionIds.includes(m.optionId));
+    if (!after) continue;
+    out.push({ groupId: slot.groupId, title: row.shotTitle, chips: row.house, selectedId: shot.memberId, afterModifierId: after.modifierId });
   }
   return out;
 }
@@ -358,16 +451,20 @@ export function snapshotParts(snapshot: ChoiceSnapshot | null | undefined): stri
 }
 
 /**
- * A saved order line's detail under its name: choices (bean, level, sweetener) then the chosen options.
+ * A saved order line's detail under its name: choices (bean, level, sweetener) then the chosen options
+ * (modifiers_snapshot entries; `optionId` tells which one is the extra shot and gets its house bean).
  * A line from before round D1 (no snapshot) keeps the old look: its options joined by ", ".
  */
 export function billLineDetail(
   snapshot: ChoiceSnapshot | null | undefined,
-  options: (string | { option: string; priceDelta?: number })[]
+  options: (string | { option: string; priceDelta?: number; optionId?: string })[]
 ): string | null {
-  const words = options.map((o) => (typeof o === "string" ? o : optionText(o.option, o.priceDelta ?? 0)));
+  const slots = snapshot?.slots;
+  const words = options.map((o) =>
+    typeof o === "string" ? o : chosenOptionText(o.option, o.priceDelta ?? 0, shotLabelOf(slots, o.optionId))
+  );
   if (!snapshot) return words.length === 0 ? null : words.join(", ");
-  const all = [...snapshotParts(snapshot), ...words, ...shotExtras(snapshot.slots ?? [], snapshot.slotAddGroupIds ?? []).map((e) => e.text)];
+  const all = [...snapshotParts(snapshot), ...words];
   return all.length === 0 ? null : all.join(" · ");
 }
 
@@ -380,7 +477,8 @@ export function choiceParts(choices: CartChoices | undefined, defaults: CartChoi
   const differs = (part: Parameters<typeof isDefaultChoice>[1]) => defaults !== null && !isDefaultChoice(defaults, part);
   const parts: LinePart[] = choices.slots.map((s) => ({
     text: slotText(s),
-    changed: differs({ kind: "slot", groupId: s.groupId, memberId: s.memberId }),
+    // a doubled special is never the menu default
+    changed: differs({ kind: "slot", groupId: s.groupId, memberId: s.memberId, count: s.count }),
   }));
   const sw = choices.sweetness;
   if (sw) {
@@ -394,12 +492,16 @@ export function choiceParts(choices: CartChoices | undefined, defaults: CartChoi
 
 /**
  * Everything the barista makes differently for this line, in the order they make it: bean/sweetness
- * words, then every chosen option (with its price), then one "ช็อต<bean>" word per extra-shot surcharge. Options have no default, so a chosen one is always marked (R42).
+ * words, then every chosen option with its price (the extra shot on a special cup names its house
+ * bean: "เพิ่มช็อต คั่วกลาง (+15)"). Options have no default, so a chosen one is always marked (R42).
  */
 export function cartLineParts(item: Pick<CartItem, "choices" | "selectedModifiers">, defaults: CartChoices | null): LinePart[] {
+  const slots = item.choices?.slots;
   return [
     ...choiceParts(item.choices, defaults),
-    ...item.selectedModifiers.map((m) => ({ text: optionText(m.optionName, m.priceDelta), changed: true })),
-    ...(item.choices ? shotExtras(item.choices.slots, item.choices.slotAddGroupIds).map((e) => ({ text: e.text, changed: true })) : []),
+    ...item.selectedModifiers.map((m) => ({
+      text: chosenOptionText(m.optionName, m.priceDelta, shotLabelOf(slots, m.optionId)),
+      changed: true,
+    })),
   ];
 }

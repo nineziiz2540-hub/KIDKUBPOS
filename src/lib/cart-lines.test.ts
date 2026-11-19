@@ -60,9 +60,24 @@ test("two pre-D1-style plain lines (no choices) still merge, a noted one does no
   assert.equal(addLine([plain("water", "แยกน้ำแข็ง")], plain("x")).length, 2);
 });
 
-test("withQuantity re-prices the specialty per cup", () => {
+test("Kenya ×1 and Kenya ×2 are different cups; so are two different shot beans; the same ×2 merges", () => {
+  const k1 = choices("m_kenya", "special", 20);
+  const k2: CartChoices = { ...k1, slots: [{ ...k1.slots[0]!, count: 2 }] };
+  assert.equal(addLine([line("a", { choices: k1, totalPrice: 85 })], line("b", { choices: k2, totalPrice: 105 })).length, 2);
+  const merged = addLine([line("a", { choices: k2, totalPrice: 105 })], line("b", { choices: k2, totalPrice: 105 }));
+  assert.deepEqual(merged.map((l) => [l.quantity, l.totalPrice]), [[2, 210]]);
+  const shotOn = (memberId: string): CartChoices => ({ ...k1, slots: [{ ...k1.slots[0]!, shot: { memberId, label: memberId, optionIds: ["o_shot"] } }] });
+  assert.equal(
+    addLine([line("a", { choices: shotOn("m_med"), selectedModifiers: [shot] })], line("b", { choices: shotOn("m_dark"), selectedModifiers: [shot] })).length,
+    2
+  );
+});
+
+test("withQuantity re-prices the specialty per cup (an extra shot adds only its own price; ×2 doubles the specialty)", () => {
   const k = line("a", { choices: { ...choices("m_kenya", "special", 20), slotAddGroupIds: ["g_bean"] }, selectedModifiers: [shot] });
-  assert.equal(withQuantity(k, 3).totalPrice, (65 + 15 + 40) * 3);
+  assert.equal(withQuantity(k, 3).totalPrice, (65 + 15 + 20) * 3);
+  const k2 = line("b", { choices: { ...choices("m_kenya", "special", 20), slots: [{ ...choices("m_kenya", "special", 20).slots[0]!, count: 2 }] } });
+  assert.equal(withQuantity(k2, 2).totalPrice, (65 + 40) * 2);
 });
 
 // ── editing a line replaces it ───────────────────────────────────────────
@@ -112,18 +127,26 @@ const modifiers: ModifierWithOptions[] = [{
 
 test("reprice: menu price, option price and the specialty price all come from today's menu", () => {
   const parked = line("a", {
-    quantity: 2, selectedModifiers: [shot], totalPrice: (65 + 15 + 40) * 2,
+    quantity: 2, selectedModifiers: [shot], totalPrice: (65 + 15 + 20) * 2,
     choices: { ...choices("m_kenya", "special", 20), slotAddGroupIds: ["g_bean"], sweetness: { levelId: "lv_normal", levelName: "x", memberId: "s_syrup", memberLabel: "x" } },
   });
   const [out] = repriceItems([parked], products, modifiers, stock);
   assert.equal(out!.basePrice, 70);
   assert.equal(out!.selectedModifiers[0]!.priceDelta, 20);
   assert.deepEqual(out!.choices, {
-    slots: [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 25 }],
+    slots: [{
+      groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 25,
+      shot: { memberId: "m_med", label: "คั่วกลาง", optionIds: ["o_shot"] },
+    }],
     slotAddGroupIds: ["g_bean"],
     sweetness: { levelId: "lv_normal", levelName: "หวานปกติ", memberId: "s_syrup", memberLabel: "ไซรัป" },
   });
-  assert.equal(out!.totalPrice, (70 + 20 + 25 * 2) * 2);
+  assert.equal(out!.totalPrice, (70 + 20 + 25) * 2);
+  // a parked ×2 stays ×2 and is re-priced at today's specialty price
+  const doubled = line("b", { choices: { ...choices("m_kenya", "special", 20), slots: [{ ...choices("m_kenya", "special", 20).slots[0]!, count: 2 }] } });
+  const [d] = repriceItems([doubled], products, modifiers, stock);
+  assert.equal(d!.choices!.slots[0]!.count, 2);
+  assert.equal(d!.totalPrice, 70 + 50);
   assert.equal(out!.cartItemKey, "a");
   assert.equal(out!.quantity, 2);
 });

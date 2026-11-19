@@ -28,7 +28,8 @@ type OrderItem = {
   unit_price: number;
   quantity: number;
   subtotal: number;
-  modifiers_snapshot: { option: string; priceDelta?: number }[] | null;
+  /** optionId (bills from after the house-bean extra shot) lets the shot's option word name its bean */
+  modifiers_snapshot: { option: string; priceDelta?: number; optionId?: string }[] | null;
   /** bean/sweetness snapshot (round D1); null on bills from before */
   choices: ChoiceSnapshot | null;
   note: string | null;
@@ -90,7 +91,10 @@ function detailOf(item: OrderItem): string | null {
   return billLineDetail(item.choices, (item.modifiers_snapshot ?? []));
 }
 
-/** The void dialog names each cup the way the cart did: "ลาเต้ · เคนยา (+20) · หวานน้อย · นมมิกซ์". */
+/**
+ * The void dialog names each cup the way the cart did, with the same words as the bill detail:
+ * "ลาเต้ · เคนยา (+20) ×2 · หวานน้อย · นมมิกซ์ · เพิ่มช็อต คั่วกลาง (+15)".
+ */
 function voidNameOf(item: OrderItem): string {
   const detail = item.choices ? detailOf(item) : null;
   return detail ? `${item.product_name} · ${detail}` : item.product_name;

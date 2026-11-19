@@ -19,13 +19,19 @@ test("cartSubtotal sums line totals in satang", () => {
   assert.equal(cartSubtotal([{ totalPrice: 0.1 }, { totalPrice: 0.2 }]), 0.3);
 });
 
-test("cart unitPrice adds the specialty price", () => {
+test("cart unitPrice adds the specialty price once (an extra shot adds only its own option price)", () => {
   const choices = {
     slots: [{ groupId: "beans", memberId: "k", label: "Kenya", tier: "special" as const, priceDelta: 20 }],
     slotAddGroupIds: ["beans"],
     sweetness: null,
   };
-  assert.equal(unitPrice(65, [{ priceDelta: 5 }], choices), 70 + 40);
+  assert.equal(unitPrice(65, [{ priceDelta: 5 }], choices), 70 + 20);
+  // a doubled special pays its price twice; a house member never pays
+  assert.equal(unitPrice(65, [], { ...choices, slots: [{ ...choices.slots[0]!, count: 2 as const }] }), 65 + 40);
+  assert.equal(
+    unitPrice(65, [], { ...choices, slots: [{ groupId: "beans", memberId: "h", label: "คั่วกลาง", tier: "house" as const, priceDelta: 0, count: 2 as const }] }),
+    65
+  );
   assert.equal(unitPrice(65, [], { slots: [], slotAddGroupIds: [], sweetness: null }), 65);
   assert.equal(unitPrice(65, []), 65);
 });

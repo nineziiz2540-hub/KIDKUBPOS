@@ -62,6 +62,10 @@ function cleanItem(i: CartItem): CartItem {
               label: s.label,
               tier: s.tier,
               priceDelta: s.priceDelta,
+              ...(s.count === 2 ? { count: 2 as const } : {}),
+              ...(s.shot
+                ? { shot: { memberId: s.shot.memberId, label: s.shot.label, optionIds: [...s.shot.optionIds] } }
+                : {}),
             })),
             slotAddGroupIds: [...c.slotAddGroupIds],
             sweetness: c.sweetness
@@ -132,7 +136,15 @@ function validChoices(c: unknown): boolean {
         isStr(s.memberId) &&
         isStr(s.label) &&
         (s.tier === "house" || s.tier === "special") &&
-        isNum(s.priceDelta),
+        isNum(s.priceDelta) &&
+        // ×2 on a special; 1 is the same as absent (the server accepts it too) and is not kept
+        (s.count === undefined || s.count === 1 || s.count === 2) &&
+        (s.shot === undefined ||
+          (isObj(s.shot) &&
+            isStr(s.shot.memberId) &&
+            isStr(s.shot.label) &&
+            Array.isArray(s.shot.optionIds) &&
+            s.shot.optionIds.every(isStr))),
     )
   ) {
     return false;

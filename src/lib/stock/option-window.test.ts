@@ -14,21 +14,24 @@ import {
   modifierHint,
   optionRows,
   pickLevel,
+  pickShot,
   pickSlot,
   pickSweetener,
   priceTag,
   refreshChoices,
-  shotExtras,
+  shotRows,
   shownSweetener,
   snapshotParts,
   sweetenerHint,
+  tapSpecial,
   toggleOption,
   type WindowState,
 } from "./option-window.ts";
 import { defaultChoices } from "./pos-choices.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
-import { cupPriceDeltaSatang, resolveLine, type StockCatalog } from "./stock-core.ts";
+import { cupPriceDeltaSatang, resolveLine, type ResolvedLine, type StockCatalog } from "./stock-core.ts";
 import { lineTotal, unitPrice } from "../cart-math.ts";
+import { toLineChoices } from "../order-pricing-core.ts";
 import type { CartChoices, CartItem, ModifierWithOptions } from "../../types/app.ts";
 
 // Rows shaped like the POS page sends them (slot lines, slot_add effects, no amounts): the client
@@ -85,7 +88,8 @@ function rows(): StockCatalogRows {
       sweet("unsweet", "s_syrup", ["s_mix"], "lv_none"),
     ],
     optionEffects: [
-      { option_id: "o_shot", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 9 },
+      { option_id: "o_shot", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 18 },
+      { option_id: "o_matcha_shot", kind: "slot_add", group_id: "g_matcha", raw_material_id: null, amount: 4 },
     ],
   };
 }
@@ -116,10 +120,6 @@ const toppings: ModifierWithOptions = {
 };
 
 const latte = { id: "latte", name: "ลาเต้", price: 65 };
-const ids = (c: CartChoices) => ({
-  slots: c.slots.map((s) => ({ groupId: s.groupId, memberId: s.memberId })),
-  sweetness: c.sweetness ? { levelId: c.sweetness.levelId, memberId: c.sweetness.memberId } : null,
-});
 
 // ── which rows a menu shows ──────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ test("shop with no sweetness levels → no sweetness rows", () => {
 
 test("plain latte: every row starts on its default, and adding it as-is is the menu default", () => {
   const s = initialWindowState("latte", catalog, [extras]);
-  assert.deepEqual(s, { slots: { g_bean: "m_med" }, levelId: "lv_normal", sweetenerId: "s_syrup", options: {} });
+  assert.deepEqual(s, { slots: { g_bean: "m_med" }, counts: {}, shots: {}, levelId: "lv_normal", sweetenerId: "s_syrup", options: {} });
   assert.deepEqual(choicesFromWindow("latte", catalog, s, []), defaultChoices("latte", catalog));
 });
 
@@ -234,7 +234,7 @@ test("a menu whose default is ไม่หวาน starts locked; picking a lev
 
 test("a pick the menu does not offer falls back to the default (never refused)", () => {
   // special on a house-only menu, unknown member, sweetener not allowed, unknown level
-  const s: WindowState = { slots: { g_bean: "m_kenya" }, levelId: "lv_gone", sweetenerId: "s_mix", options: {} };
+  const s: WindowState = { slots: { g_bean: "m_kenya" }, counts: {}, shots: {}, levelId: "lv_gone", sweetenerId: "s_mix", options: {} };
   const c = choicesFromWindow("espresso_house", catalog, s, []);
   assert.equal(c.slots[0]!.memberId, "m_dark");
   const t = choicesFromWindow("thai_tea", catalog, { ...s, levelId: "lv_less" }, []);
@@ -243,31 +243,173 @@ test("a pick the menu does not offer falls back to the default (never refused)",
   assert.equal(choicesFromWindow("latte", catalog, s, []).sweetness?.levelId, "lv_normal");
 });
 
-test("เพิ่มช็อต on a special bean charges the special again; on a house bean it is free", () => {
-  let s = pickSlot(initialWindowState("latte", catalog, []), "g_bean", "m_kenya");
+test("เพิ่มช็อต on a special bean uses a house bean and adds only the shot's price; on a house bean it is the same bean", () => {
+  let s = tapSpecial(initialWindowState("latte", catalog, []), "g_bean", "m_kenya");
   const kenya = choicesFromWindow("latte", catalog, s, ["o_shot"]);
   assert.deepEqual(kenya.slotAddGroupIds, ["g_bean"]);
-  assert.equal(unitPrice(65, [{ priceDelta: 15 }], kenya), 65 + 15 + 40);
+  assert.deepEqual(kenya.slots, [{
+    groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20,
+    shot: { memberId: "m_med", label: "คั่วกลาง", optionIds: ["o_shot"] },
+  }]);
+  assert.equal(unitPrice(65, [{ priceDelta: 15 }], kenya), 65 + 15 + 20);
   s = pickSlot(s, "g_bean", "m_med");
   const house = choicesFromWindow("latte", catalog, s, ["o_shot", "o_oat"]);
   assert.deepEqual(house.slotAddGroupIds, ["g_bean"]);
+  assert.deepEqual(house.slots, [{ groupId: "g_bean", memberId: "m_med", label: "คั่วกลาง", tier: "house", priceDelta: 0 }]);
   assert.equal(unitPrice(65, [{ priceDelta: 15 }, { priceDelta: 10 }], house), 90);
   // no slot for the effect's group → nothing added
   assert.deepEqual(choicesFromWindow("thai_tea", catalog, initialWindowState("thai_tea", catalog, []), ["o_shot"]).slotAddGroupIds, []);
 });
 
+test("the shot member: the picked house bean; a special or unknown pick → the menu's house default", () => {
+  const kenya = tapSpecial(initialWindowState("latte", catalog, []), "g_bean", "m_kenya");
+  const shotOf = (s: WindowState, p = "latte") => choicesFromWindow(p, catalog, s, ["o_shot"]).slots[0]!.shot;
+  assert.deepEqual(shotOf(pickShot(kenya, "g_bean", "m_dark")), { memberId: "m_dark", label: "คั่วเข้ม", optionIds: ["o_shot"] });
+  assert.equal(shotOf(pickShot(kenya, "g_bean", "m_eth"))?.memberId, "m_med");
+  assert.equal(shotOf(pickShot(kenya, "g_bean", "nope"))?.memberId, "m_med");
+  // a menu whose own default is a special: the shot uses the group's house default
+  assert.equal(shotOf(initialWindowState("kenya_default", catalog, []), "kenya_default")?.memberId, "m_med");
+  // no shot option ticked → no shot written, even with a pick kept
+  assert.equal("shot" in choicesFromWindow("latte", catalog, pickShot(kenya, "g_bean", "m_dark"), []).slots[0]!, false);
+});
+
 test("INVARIANT: the cart's specialty price equals the server's for every pick", () => {
-  const picks: [string, string, string[]][] = [
-    ["latte", "m_kenya", []], ["latte", "m_eth", ["o_shot"]], ["latte", "m_light", ["o_shot"]],
-    ["kenya_default", "m_kenya", ["o_shot"]], ["espresso_house", "m_kenya", ["o_shot"]],
+  const start = (p: string) => initialWindowState(p, catalog, []);
+  const twice = (s: WindowState, m: string) => tapSpecial(tapSpecial(s, "g_bean", m), "g_bean", m);
+  const picks: [string, WindowState, string[]][] = [
+    ["latte", pickSlot(start("latte"), "g_bean", "m_kenya"), []],
+    ["latte", pickSlot(start("latte"), "g_bean", "m_eth"), ["o_shot"]],
+    ["latte", pickSlot(start("latte"), "g_bean", "m_light"), ["o_shot"]],
+    ["latte", twice(start("latte"), "m_kenya"), []],
+    ["latte", pickShot(twice(start("latte"), "m_eth"), "g_bean", "m_light"), ["o_shot"]],
+    ["kenya_default", start("kenya_default"), ["o_shot"]],
+    ["kenya_default", twice(pickSlot(start("kenya_default"), "g_bean", "m_med"), "m_kenya"), ["o_shot"]],
+    ["espresso_house", pickSlot(start("espresso_house"), "g_bean", "m_kenya"), ["o_shot"]],
+    // a ×2 kept in the state for a special the menu does not allow: the house fallback is ×1
+    ["espresso_house", twice(start("espresso_house"), "m_kenya"), ["o_shot"]],
   ];
-  for (const [p, member, options] of picks) {
-    const c = choicesFromWindow(p, catalog, pickSlot(initialWindowState(p, catalog, []), "g_bean", member), options);
-    const server = resolveLine(p, 1, ids(c), options, catalog);
+  for (const [p, state, options] of picks) {
+    const c = choicesFromWindow(p, catalog, state, options);
+    const server = resolveLine(p, 1, toLineChoices(c), options, catalog);
     assert.ok(!("error" in server), p);
-    assert.equal(cupPriceDeltaSatang(c.slots, c.slotAddGroupIds), server.priceDeltaSatang, `${p} ${member}`);
-    assert.deepEqual(c.slots.map((x) => x.memberId), server.snapshot.slots.map((x) => x.memberId));
+    assert.equal(cupPriceDeltaSatang(c.slots), server.priceDeltaSatang, `${p} ${JSON.stringify(state.slots)}`);
+    assert.deepEqual(c.slots.map((x) => [x.memberId, x.count, x.shot?.memberId, x.shot?.optionIds]),
+      server.snapshot.slots.map((x) => [x.memberId, x.count, x.shot?.memberId, x.shot?.optionIds]), p);
   }
+});
+
+// ── taps: a special doubles, a house chip never does ─────────────────────
+
+test("tapSpecial: ×1 → ×2 → ×1; another special starts at ×1; a house chip clears ×2", () => {
+  const s0 = initialWindowState("latte", catalog, []);
+  const once = tapSpecial(s0, "g_bean", "m_kenya");
+  assert.deepEqual([once.slots, once.counts], [{ g_bean: "m_kenya" }, {}]);
+  const twice = tapSpecial(once, "g_bean", "m_kenya");
+  assert.deepEqual([twice.slots, twice.counts], [{ g_bean: "m_kenya" }, { g_bean: 2 }]);
+  assert.equal(choicesFromWindow("latte", catalog, twice, []).slots[0]!.count, 2);
+  const thrice = tapSpecial(twice, "g_bean", "m_kenya");
+  assert.deepEqual([thrice.slots, thrice.counts], [{ g_bean: "m_kenya" }, {}]);
+  assert.equal("count" in choicesFromWindow("latte", catalog, thrice, []).slots[0]!, false);
+  // switching to another special resets to ×1
+  const eth = tapSpecial(twice, "g_bean", "m_eth");
+  assert.deepEqual([eth.slots, eth.counts], [{ g_bean: "m_eth" }, {}]);
+  // a house chip after ×2: that house member, count cleared; re-tapping it changes nothing
+  const house = pickSlot(twice, "g_bean", "m_dark");
+  assert.deepEqual([house.slots, house.counts], [{ g_bean: "m_dark" }, {}]);
+  assert.deepEqual(pickSlot(house, "g_bean", "m_dark"), house);
+  // a house member never doubles, even with a stray count in the state
+  const stray: WindowState = { ...house, counts: { g_bean: 2 } };
+  assert.equal("count" in choicesFromWindow("latte", catalog, stray, []).slots[0]!, false);
+});
+
+test("pickShot: the pick is kept when the shot option is unticked and ticked again", () => {
+  let s = tapSpecial(initialWindowState("latte", catalog, [extras]), "g_bean", "m_kenya");
+  s = toggleOption(s, extras, "o_shot");
+  s = pickShot(s, "g_bean", "m_dark");
+  const built = (st: WindowState) => buildLine({ product: latte, modifiers: [extras], catalog, state: st, note: "", quantity: 1, key: "k" });
+  assert.equal(built(s).choices!.slots[0]!.shot?.memberId, "m_dark");
+  s = toggleOption(s, extras, "o_shot");
+  assert.equal("shot" in built(s).choices!.slots[0]!, false);
+  assert.deepEqual(s.shots, { g_bean: "m_dark" });
+  s = toggleOption(s, extras, "o_shot");
+  assert.equal(built(s).choices!.slots[0]!.shot?.memberId, "m_dark");
+  // and when the cup goes house and back to Kenya
+  s = tapSpecial(pickSlot(s, "g_bean", "m_light"), "g_bean", "m_kenya");
+  assert.equal(built(s).choices!.slots[0]!.shot?.memberId, "m_dark");
+});
+
+// ── the "ช็อตเพิ่มใช้…" sub-row ──────────────────────────────────────────
+
+test("shot sub-row titles: bean, matcha, any other group by its name", () => {
+  assert.equal(optionRows("latte", catalog).slots[0]!.shotTitle, "ช็อตเพิ่มใช้เมล็ดร้าน");
+  assert.equal(optionRows("matcha_latte", catalog).slots[0]!.shotTitle, "ช็อตเพิ่มใช้มัทฉะร้าน");
+  const other = buildStockCatalog({ ...rows(), groups: rows().groups.map((g) => (g.id === "g_bean" ? { ...g, kind: "other" as const, name: "ช็อต" } : g)) });
+  assert.equal(optionRows("latte", other).slots[0]!.shotTitle, "ช็อตเพิ่มใช้ช็อต");
+});
+
+test("shotRows: a special cup with a ticked shot gets the house chips right after that option's row", () => {
+  const r = optionRows("latte", catalog);
+  const lineOf = (s: WindowState) => buildLine({ product: latte, modifiers: [temp, extras], catalog, state: s, note: "", quantity: 1, key: "k" });
+  let s = initialWindowState("latte", catalog, [temp, extras]);
+  // a house cup, with or without the shot: no row
+  assert.deepEqual(shotRows(r, lineOf(s)), []);
+  assert.deepEqual(shotRows(r, lineOf(toggleOption(s, extras, "o_shot"))), []);
+  // a special cup without the shot: no row
+  s = tapSpecial(s, "g_bean", "m_kenya");
+  assert.deepEqual(shotRows(r, lineOf(s)), []);
+  s = toggleOption(s, extras, "o_shot");
+  assert.deepEqual(shotRows(r, lineOf(s)), [{
+    groupId: "g_bean", title: "ช็อตเพิ่มใช้เมล็ดร้าน", chips: r.slots[0]!.house, selectedId: "m_med", afterModifierId: "mod_extra",
+  }]);
+  assert.deepEqual(r.slots[0]!.house.map((c) => c.label), ["คั่วอ่อน", "คั่วกลาง", "คั่วเข้ม"]);
+  assert.equal(shotRows(r, lineOf(pickShot(s, "g_bean", "m_dark")))[0]!.selectedId, "m_dark");
+  // ×2 keeps the row
+  assert.equal(shotRows(r, lineOf(tapSpecial(s, "g_bean", "m_kenya"))).length, 1);
+  // a matcha menu with its own shot option
+  const matchaShot: ModifierWithOptions = {
+    id: "mod_matcha", name: "เพิ่ม", isRequired: false, isMultiSelect: false, sortOrder: 1,
+    options: [{ id: "o_matcha_shot", name: "เพิ่มช็อตมัทฉะ", priceDelta: 50, sortOrder: 1 }],
+  };
+  const m = toggleOption(tapSpecial(initialWindowState("matcha_latte", catalog, [matchaShot]), "g_matcha", "t_cer"), matchaShot, "o_matcha_shot");
+  const mLine = buildLine({ product: { id: "matcha_latte", name: "มัทฉะลาเต้", price: 70 }, modifiers: [matchaShot], catalog, state: m, note: "", quantity: 1, key: "m" });
+  assert.deepEqual(shotRows(optionRows("matcha_latte", catalog), mLine).map((x) => [x.title, x.selectedId, x.afterModifierId, x.chips.map((c) => c.label)]),
+    [["ช็อตเพิ่มใช้มัทฉะร้าน", "t_uji", "mod_matcha", ["อุจิ"]]]);
+  assert.equal(mLine.totalPrice, 70 + 40 + 50);
+  assert.deepEqual(cartLineParts(mLine, null).map((p) => p.text), ["Ceremonial (+40)", "เพิ่มช็อตมัทฉะ อุจิ (+50)"]);
+});
+
+test("shotRows: the row follows the FIRST modifier row holding a shot option; no house member → no row", () => {
+  const second: ModifierWithOptions = {
+    id: "mod_more", name: "เพิ่มอีก", isRequired: false, isMultiSelect: false, sortOrder: 0,
+    options: [{ id: "o_shot2", name: "ช็อตคู่", priceDelta: 25, sortOrder: 1 }],
+  };
+  const c = buildStockCatalog({
+    ...rows(),
+    optionEffects: [...rows().optionEffects, { option_id: "o_shot2", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 18 }],
+  });
+  let s = tapSpecial(initialWindowState("latte", c, [second, extras]), "g_bean", "m_kenya");
+  s = toggleOption(toggleOption(s, extras, "o_shot"), second, "o_shot2");
+  const line = buildLine({ product: latte, modifiers: [second, extras], catalog: c, state: s, note: "", quantity: 1, key: "k" });
+  assert.deepEqual(line.choices!.slots[0]!.shot?.optionIds, ["o_shot2", "o_shot"]);
+  assert.equal(shotRows(optionRows("latte", c), line)[0]!.afterModifierId, "mod_more");
+  // both options name the house bean
+  assert.deepEqual(cartLineParts(line, null).map((p) => p.text).slice(-2), ["ช็อตคู่ คั่วกลาง (+25)", "เพิ่มช็อต คั่วกลาง (+15)"]);
+  // a group with only special members: the shot uses the special itself and there is nothing to pick
+  const onlySpecial = buildStockCatalog({
+    ...rows(),
+    members: rows().members.filter((m) => m.group_id !== "g_matcha" || m.tier === "special"),
+    recipes: [{ product_id: "ceremony_only", line_kind: "slot", raw_material_id: null, group_id: "g_matcha", quantity_used: 4, default_member_id: "t_cer", allow_special: true }],
+  });
+  const ms: ModifierWithOptions = { ...extras, id: "mod_m", options: [{ id: "o_matcha_shot", name: "เพิ่มช็อตมัทฉะ", priceDelta: 50, sortOrder: 1 }] };
+  const st = toggleOption(initialWindowState("ceremony_only", onlySpecial, [ms]), ms, "o_matcha_shot");
+  const ml = buildLine({ product: { id: "ceremony_only", name: "มัทฉะพิเศษ", price: 90 }, modifiers: [ms], catalog: onlySpecial, state: st, note: "", quantity: 1, key: "m" });
+  assert.equal(ml.choices!.slots[0]!.shot?.memberId, "t_cer");
+  assert.equal(ml.totalPrice, 90 + 40 + 50);
+  assert.deepEqual(shotRows(optionRows("ceremony_only", onlySpecial), ml), []);
+  const server = resolveLine("ceremony_only", 1, toLineChoices(ml.choices), ["o_matcha_shot"], onlySpecial);
+  assert.ok(!("error" in server));
+  assert.equal(server.priceDeltaSatang, 4000);
+  assert.deepEqual(server.stock, [{ materialId: "ceremony", qty: 8 }]);
 });
 
 // ── other options (modifiers) ────────────────────────────────────────────
@@ -316,8 +458,11 @@ test("buildLine: price from cart-math, choices attached, options in menu order, 
   assert.equal(line.basePrice, 65);
   assert.deepEqual(line.choices, choicesFromWindow("latte", catalog, s, ["o_shot", "o_pearl", "o_jelly"]));
   assert.equal(line.totalPrice, lineTotal(65, line.selectedModifiers, 1, line.choices));
-  assert.equal(line.totalPrice, 65 + 15 + 10 + 10 + 20 * 2);
-  assert.equal(footerText("add", line), "เพิ่มลงตะกร้า · ฿140");
+  assert.equal(line.totalPrice, 65 + 15 + 10 + 10 + 20);
+  assert.equal(footerText("add", line), "เพิ่มลงตะกร้า · ฿120");
+  // the footer follows ×2 too
+  const doubled = buildLine({ product: latte, modifiers: [extras, toppings], catalog, state: tapSpecial(s, "g_bean", "m_kenya"), note: "", quantity: 1, key: "k1" });
+  assert.equal(footerText("add", doubled), "เพิ่มลงตะกร้า · ฿140");
 });
 
 test("a menu with no stock rows gets no choices key at all (same shape as before D1)", () => {
@@ -354,9 +499,12 @@ test("priceTag", () => {
 const kenyaLine: CartItem = {
   cartItemKey: "line1", productId: "latte", name: "ลาเต้", basePrice: 65, quantity: 2,
   selectedModifiers: [{ modifierId: "mod_extra", modifierName: "เพิ่ม", optionId: "o_shot", optionName: "เพิ่มช็อต", priceDelta: 15 }],
-  totalPrice: (65 + 15 + 40) * 2, note: "แยกน้ำแข็ง",
+  totalPrice: (65 + 15 + 20) * 2, note: "แยกน้ำแข็ง",
   choices: {
-    slots: [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20 }],
+    slots: [{
+      groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20,
+      shot: { memberId: "m_med", label: "คั่วกลาง", optionIds: ["o_shot"] },
+    }],
     slotAddGroupIds: ["g_bean"],
     sweetness: { levelId: "lv_less", levelName: "หวานน้อย", memberId: "s_mix", memberLabel: "นมมิกซ์" },
   },
@@ -364,9 +512,20 @@ const kenyaLine: CartItem = {
 
 test("edit: the window starts on the line's own picks and rebuilds the same line", () => {
   const s = initialWindowState("latte", catalog, [extras, temp], kenyaLine);
-  assert.deepEqual(s, { slots: { g_bean: "m_kenya" }, levelId: "lv_less", sweetenerId: "s_mix", options: { mod_extra: ["o_shot"] } });
+  assert.deepEqual(s, {
+    slots: { g_bean: "m_kenya" }, counts: {}, shots: { g_bean: "m_med" },
+    levelId: "lv_less", sweetenerId: "s_mix", options: { mod_extra: ["o_shot"] },
+  });
   const again = buildLine({ product: latte, modifiers: [extras, temp], catalog, state: s, note: kenyaLine.note!, quantity: 2, key: "line1" });
   assert.deepEqual(again, kenyaLine);
+});
+
+test("edit: a Kenya ×2 line with its shot on คั่วเข้ม opens on ×2 and that shot bean, and rebuilds the same line", () => {
+  const slot = { ...kenyaLine.choices!.slots[0]!, count: 2 as const, shot: { memberId: "m_dark", label: "คั่วเข้ม", optionIds: ["o_shot"] } };
+  const line: CartItem = { ...kenyaLine, totalPrice: (65 + 15 + 40) * 2, choices: { ...kenyaLine.choices!, slots: [slot] } };
+  const s = initialWindowState("latte", catalog, [extras, temp], line);
+  assert.deepEqual([s.counts, s.shots], [{ g_bean: 2 }, { g_bean: "m_dark" }]);
+  assert.deepEqual(buildLine({ product: latte, modifiers: [extras, temp], catalog, state: s, note: line.note!, quantity: 2, key: "line1" }), line);
 });
 
 test("edit: a pre-D1 line (no choices) opens on the menu defaults; a ไม่หวาน line remembers the menu's sweetener", () => {
@@ -388,10 +547,31 @@ test("refresh: labels, tier and price come from the catalog, never the parked co
     sweetness: { levelId: "lv_less", levelName: "น้อย", memberId: "s_mix", memberLabel: "mix" },
   };
   assert.deepEqual(refreshChoices("latte", catalog, parked, ["o_shot"]), {
-    slots: [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20 }],
+    slots: [{
+      groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20,
+      shot: { memberId: "m_med", label: "คั่วกลาง", optionIds: ["o_shot"] },
+    }],
     slotAddGroupIds: ["g_bean"],
     sweetness: { levelId: "lv_less", levelName: "หวานน้อย", memberId: "s_mix", memberLabel: "นมมิกซ์" },
   });
+});
+
+test("refresh: ×2 and the shot bean are kept while still offered; a stale label is replaced; ×2 on a house member is dropped", () => {
+  const parked: CartChoices = {
+    slots: [{ groupId: "g_bean", memberId: "m_kenya", label: "old", tier: "special", priceDelta: 15, count: 2, shot: { memberId: "m_light", label: "old", optionIds: ["x"] } }],
+    slotAddGroupIds: [],
+    sweetness: null,
+  };
+  assert.deepEqual(refreshChoices("latte", catalog, parked, ["o_shot"]).slots, [{
+    groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20, count: 2,
+    shot: { memberId: "m_light", label: "คั่วอ่อน", optionIds: ["o_shot"] },
+  }]);
+  // the shot option no longer chosen → no shot; a house member stored with ×2 → ×1
+  assert.equal("shot" in refreshChoices("latte", catalog, parked, []).slots[0]!, false);
+  const house: CartChoices = { ...parked, slots: [{ ...parked.slots[0]!, memberId: "m_dark", tier: "house" }] };
+  assert.deepEqual(refreshChoices("latte", catalog, house, ["o_shot"]).slots, [
+    { groupId: "g_bean", memberId: "m_dark", label: "คั่วเข้ม", tier: "house", priceDelta: 0 },
+  ]);
 });
 
 test("refresh: a member, level or sweetener no longer offered falls back to the menu default", () => {
@@ -464,7 +644,7 @@ test("R42: every chosen option shows after the bean/sweetness words, always mark
   };
   assert.deepEqual(cartLineParts(line, d), [
     { text: "เคนยา (+20)", changed: true }, { text: "หวานน้อย", changed: true }, { text: "นมมิกซ์", changed: true },
-    { text: "เพิ่มช็อต (+15)", changed: true }, { text: "ไข่มุก (+10)", changed: true }, { text: "ช็อตเคนยา (+20)", changed: true },
+    { text: "เพิ่มช็อต คั่วกลาง (+15)", changed: true }, { text: "ไข่มุก (+10)", changed: true },
   ]);
   // defaults stay plain; options are still marked even when the stock data did not load
   const plainShot: CartItem = { ...line, choices: d, selectedModifiers: [line.selectedModifiers[0]!] };
@@ -503,14 +683,14 @@ test("bill history: a pre-D1 line (no snapshot) renders as before; an empty snap
   assert.equal(billLineDetail({ slots: [], slotAddGroupIds: [], sweetness: null }, []), null);
 });
 
-// ---- itemised specialty surcharge: the words add up to the price charged ----
+// ---- extra shot on a house bean, ×2 specials: the words add up to the price charged ----
 
-/** Every "(+N)" / "(−N)" amount in the words. */
+/** Every "(+N)" / "(−N)" amount in the words; "×2" after an amount counts it twice. */
 function amountsOf(words: string[]): number {
   let sum = 0;
   for (const w of words) {
-    const m = /\(([+−])(\d+(?:\.\d+)?)\)/.exec(w);
-    if (m) sum += (m[1] === "+" ? 1 : -1) * Number(m[2]);
+    const m = /\(([+−])(\d+(?:\.\d+)?)\)( ×2)?/.exec(w);
+    if (m) sum += (m[1] === "+" ? 1 : -1) * Number(m[2]) * (m[3] ? 2 : 1);
   }
   return sum;
 }
@@ -520,74 +700,121 @@ function fixture(pick: (s: WindowState) => WindowState): CartItem {
   const base = initialWindowState("latte", catalog, [extras, temp]);
   return buildLine({ product: latteProduct, modifiers: [extras, temp], catalog, state: pick(base), note: "", quantity: 1, key: "k" });
 }
-const withKenya = (s: WindowState) => pickSlot(s, "g_bean", "m_kenya");
+const withKenya = (s: WindowState) => tapSpecial(s, "g_bean", "m_kenya");
+const withKenya2 = (s: WindowState) => tapSpecial(tapSpecial(s, "g_bean", "m_kenya"), "g_bean", "m_kenya");
 const withShot = (s: WindowState) => toggleOption(s, extras, "o_shot");
 const withOat = (s: WindowState) => toggleOption(s, extras, "o_oat");
 const withIced = (s: WindowState) => toggleOption(s, temp, "o_iced");
+const shotOnDark = (s: WindowState) => pickShot(s, "g_bean", "m_dark");
 
-const surchargeFixtures: [string, CartItem][] = [
-  ["house latte", fixture((s) => s)],
-  ["Kenya latte", fixture(withKenya)],
-  ["Kenya + shot", fixture((s) => withShot(withKenya(s)))],
-  ["house + shot", fixture(withShot)],
-  ["Kenya + priced option without slot_add", fixture((s) => withIced(withOat(withKenya(s))))],
-  ["Kenya + shot + oat + iced", fixture((s) => withIced(withOat(withShot(withKenya(s)))))],
-];
-const freeKenya: CartItem = (() => {
-  const l = fixture((s) => withShot(withKenya(s)));
-  const choices = { ...l.choices!, slots: l.choices!.slots.map((x) => ({ ...x, priceDelta: 0 })) };
-  return { ...l, choices, totalPrice: lineTotal(l.basePrice, l.selectedModifiers, l.quantity, choices) };
-})();
-surchargeFixtures.push(["free special + shot", freeKenya]);
+/** The server's view of the window's line: the ids it receives (toLineChoices) resolved from the catalog. */
+function serverOf(line: CartItem): ResolvedLine {
+  const r = resolveLine("latte", line.quantity, toLineChoices(line.choices), line.selectedModifiers.map((m) => m.optionId), catalog);
+  assert.ok(!("error" in r));
+  return r;
+}
+/** The bill's words: the server's snapshot + the stored modifiers_snapshot entries (with optionId). */
+function billOf(line: CartItem): string | null {
+  return billLineDetail(
+    serverOf(line).snapshot,
+    line.selectedModifiers.map((m) => ({ option: m.optionName, priceDelta: m.priceDelta, optionId: m.optionId }))
+  );
+}
 
-test("invariant: the (+N) amounts in the words plus the menu price equal the unit price charged", () => {
-  for (const [name, line] of surchargeFixtures) {
-    const words = cartLineParts(line, null).map((p) => p.text);
-    assert.equal(line.basePrice + amountsOf(words), unitPrice(line.basePrice, line.selectedModifiers, line.choices), `cart: ${name}`);
-    // the server's own resolveLine charges the same, and its snapshot gives the bill the same words
-    const resolved = resolveLine("latte", 1, line.choices && {
-      slots: line.choices.slots.map((x) => ({ groupId: x.groupId, memberId: x.memberId })),
-      sweetness: line.choices.sweetness && { levelId: line.choices.sweetness.levelId, memberId: line.choices.sweetness.memberId },
-    }, line.selectedModifiers.map((m) => m.optionId), catalog);
-    assert.ok(!("error" in resolved), name);
+test("invariant: {house, special ×1, special ×2} × {no shot, shot} × {default shot bean, another house bean}", () => {
+  const cups: [string, (s: WindowState) => WindowState][] = [["house", (s) => s], ["special ×1", withKenya], ["special ×2", withKenya2]];
+  const shots: [string, (s: WindowState) => WindowState][] = [["no shot", (s) => s], ["shot", withShot]];
+  const shotPicks: [string, (s: WindowState) => WindowState][] = [["default shot bean", (s) => s], ["other house shot bean", shotOnDark]];
+  // and the same with a priced option that adds no shot, to keep the option words honest
+  const extrasToo: [string, (s: WindowState) => WindowState][] = [["", (s) => s], [" + oat + iced", (s) => withIced(withOat(s))]];
+  let cases = 0;
+  for (const [cupName, cup] of cups) for (const [shotName, shot] of shots) for (const [pickName, pick] of shotPicks) for (const [moreName, more] of extrasToo) {
+    // the extras row is single-select: "+ oat" replaces the shot, so only combine it with "no shot"
+    if (moreName !== "" && shotName === "shot") continue;
+    const name = `${cupName}, ${shotName}, ${pickName}${moreName}`;
+    const line = fixture((s) => more(pick(shot(cup(s)))));
+    const server = serverOf(line);
     const optionTotal = line.selectedModifiers.reduce((a, m) => a + m.priceDelta, 0);
-    const detail = billLineDetail(resolved.snapshot, line.selectedModifiers.map((m) => ({ option: m.optionName, priceDelta: m.priceDelta })));
-    assert.equal(line.basePrice + amountsOf((detail ?? "").split(" · ")), line.basePrice + optionTotal + resolved.priceDeltaSatang / 100, `bill: ${name}`);
+    const unit = unitPrice(line.basePrice, line.selectedModifiers, line.choices);
+    // the window's price is the server's price plus the option prices
+    assert.equal(unit, line.basePrice + optionTotal + server.priceDeltaSatang / 100, `price: ${name}`);
+    assert.equal(line.totalPrice, unit, `line total: ${name}`);
+    // the cart words and the bill words both add up to it
+    assert.equal(line.basePrice + amountsOf(cartLineParts(line, null).map((p) => p.text)), unit, `cart words: ${name}`);
+    assert.equal(line.basePrice + amountsOf((billOf(line) ?? "").split(" · ")), unit, `bill words: ${name}`);
+    // the cart and the bill say the same thing
+    assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), billOf(line), `same words: ${name}`);
+    // the window's shot bean is the one the server deducts
+    assert.equal(line.choices!.slots[0]!.shot?.memberId, server.snapshot.slots[0]!.shot?.memberId, `shot member: ${name}`);
+    assert.equal(line.choices!.slots[0]!.count, server.snapshot.slots[0]!.count, `count: ${name}`);
+    cases++;
   }
+  assert.equal(cases, 3 * 2 * 2 + 3 * 1 * 2);
 });
 
-test("itemised words: Kenya + เพิ่มช็อต reads เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต (+15) · ช็อตเคนยา (+20)", () => {
+test("exact words: house latte + shot", () => {
+  const line = fixture(withShot);
+  const words = "คั่วกลาง · หวานปกติ · ไซรัป · เพิ่มช็อต (+15)";
+  assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
+  assert.equal(billOf(line), words);
+  assert.equal(unitPrice(65, line.selectedModifiers, line.choices), 80);
+  // the same house bean twice: 18 + 18 g
+  assert.deepEqual(serverOf(line).stock.filter((l) => ["med", "dark", "kenya"].includes(l.materialId)), [{ materialId: "med", qty: 36 }]);
+});
+
+test("exact words: Kenya + shot on คั่วกลาง (the menu's house default) is ฿100", () => {
   const line = fixture((s) => withShot(withKenya(s)));
-  const cart = cartLineParts(line, null).map((p) => p.text);
-  // the temperature pick is required, so the fixture has none: only the shot option
-  assert.deepEqual(cart, ["เคนยา (+20)", "หวานปกติ", "ไซรัป", "เพิ่มช็อต (+15)", "ช็อตเคนยา (+20)"]);
-  assert.equal(cart.join(" · "), "เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต (+15) · ช็อตเคนยา (+20)");
-  assert.equal(unitPrice(65, line.selectedModifiers, line.choices), 120);
-  assert.equal(cartLineParts(line, defaultChoices("latte", catalog)).at(-1)!.changed, true);
-  // bill history: stored snapshot + stored options (modifiers_snapshot shape) give the same text
-  const snapshot = { ...line.choices!, slots: line.choices!.slots.map((s) => ({ ...s, materialId: "mat" })), sweetness: { levelId: "lv_normal", levelName: "หวานปกติ", memberId: "s_syrup", label: "ไซรัป" } };
-  assert.equal(
-    billLineDetail(snapshot, [{ option: "เพิ่มช็อต", priceDelta: 15 }]),
-    "เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต (+15) · ช็อตเคนยา (+20)"
-  );
+  const words = "เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต คั่วกลาง (+15)";
+  assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
+  assert.equal(billOf(line), words);
+  assert.equal(unitPrice(65, line.selectedModifiers, line.choices), 100);
+  assert.deepEqual(serverOf(line).stock.filter((l) => ["med", "dark", "kenya"].includes(l.materialId)),
+    [{ materialId: "kenya", qty: 18 }, { materialId: "med", qty: 18 }]);
 });
 
-test("itemised words: house beans, free specials and no shot add nothing; free options stay name-only", () => {
-  const house = cartLineParts(fixture(withShot), null).map((p) => p.text);
-  assert.deepEqual(house, ["คั่วกลาง", "หวานปกติ", "ไซรัป", "เพิ่มช็อต (+15)"]);
-  assert.deepEqual(cartLineParts(freeKenya, null).map((p) => p.text), ["เคนยา", "หวานปกติ", "ไซรัป", "เพิ่มช็อต (+15)"]);
-  assert.deepEqual(cartLineParts(fixture(withKenya), null).map((p) => p.text), ["เคนยา (+20)", "หวานปกติ", "ไซรัป"]);
+test("exact words: Kenya ×2 is ฿105", () => {
+  const line = fixture(withKenya2);
+  const words = "เคนยา (+20) ×2 · หวานปกติ · ไซรัป";
+  assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
+  assert.equal(billOf(line), words);
+  assert.equal(unitPrice(65, line.selectedModifiers, line.choices), 105);
+  assert.deepEqual(serverOf(line).stock.filter((l) => ["med", "dark", "kenya"].includes(l.materialId)), [{ materialId: "kenya", qty: 36 }]);
+});
+
+test("exact words: Kenya ×2 + shot on คั่วเข้ม is ฿120 — Kenya 36 g + คั่วเข้ม 18 g", () => {
+  const line = fixture((s) => shotOnDark(withShot(withKenya2(s))));
+  const words = "เคนยา (+20) ×2 · หวานปกติ · ไซรัป · เพิ่มช็อต คั่วเข้ม (+15)";
+  assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
+  assert.equal(billOf(line), words);
+  assert.equal(unitPrice(65, line.selectedModifiers, line.choices), 120);
+  assert.deepEqual(serverOf(line).stock.filter((l) => ["med", "dark", "kenya"].includes(l.materialId)),
+    [{ materialId: "dark", qty: 18 }, { materialId: "kenya", qty: 36 }]);
+});
+
+test("words: ×2 is always marked; a free special ×2 says ×2; a bill without option ids keeps the plain option word", () => {
+  const d = defaultChoices("kenya_default", catalog);
+  const own = buildLine({
+    product: { id: "kenya_default", name: "เคนยาดริป", price: 80 }, modifiers: [], catalog,
+    state: tapSpecial(initialWindowState("kenya_default", catalog, []), "g_bean", "m_kenya"), note: "", quantity: 1, key: "k",
+  });
+  // the menu's own default member, doubled, is not the default cup
+  assert.deepEqual(cartLineParts(own, d)[0], { text: "เคนยา (+20) ×2", changed: true });
+  assert.deepEqual(cartLineParts(buildLine({ product: { id: "kenya_default", name: "เคนยาดริป", price: 80 }, modifiers: [], catalog,
+    state: initialWindowState("kenya_default", catalog, []), note: "", quantity: 1, key: "k" }), d)[0], { text: "เคนยา (+20)", changed: false });
+  const free = { ...own.choices!, slots: own.choices!.slots.map((s) => ({ ...s, priceDelta: 0 })) };
+  assert.equal(choiceParts(free, null)[0]!.text, "เคนยา ×2");
+  // a snapshot shot only names the option it lists, matched by option id
+  const line = fixture((s) => withShot(withKenya(s)));
+  const snapshot = serverOf(line).snapshot;
+  assert.equal(billLineDetail(snapshot, [{ option: "เพิ่มช็อต", priceDelta: 15 }]), "เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต (+15)");
+  assert.equal(billLineDetail(snapshot, [{ option: "นมโอ๊ต", priceDelta: 10, optionId: "o_oat" }]), "เคนยา (+20) · หวานปกติ · ไซรัป · นมโอ๊ต (+10)");
+  assert.equal(billLineDetail(snapshot, ["เพิ่มช็อต"]), "เคนยา (+20) · หวานปกติ · ไซรัป · เพิ่มช็อต");
   assert.equal(billLineDetail(null, [{ option: "ร้อน", priceDelta: 0 }, { option: "เย็น", priceDelta: 5 }]), "ร้อน, เย็น (+5)");
-  // two shot-adding picks on one cup charge the specialty twice more
-  assert.deepEqual(
-    shotExtras([{ groupId: "g_bean", label: "เคนยา", tier: "special", priceDelta: 20 }], ["g_bean", "g_bean"]).map((e) => e.text),
-    ["ช็อตเคนยา (+20)", "ช็อตเคนยา (+20)"]
-  );
 });
 
 test("a pre-D1 line without choices is unchanged apart from option prices", () => {
   const legacy: CartItem = { ...kenyaLine };
   delete legacy.choices;
   assert.deepEqual(cartLineParts(legacy, null), [{ text: "เพิ่มช็อต (+15)", changed: true }]);
-  assert.equal(billLineDetail(null, [{ option: "เพิ่มช็อต", priceDelta: 15 }, { option: "ร้อน", priceDelta: 0 }]), "เพิ่มช็อต (+15), ร้อน");
+  assert.equal(billLineDetail(null, [{ option: "เพิ่มช็อต", priceDelta: 15, optionId: "o_shot" }, { option: "ร้อน", priceDelta: 0 }]), "เพิ่มช็อต (+15), ร้อน");
 });

@@ -34,7 +34,8 @@ export function defaultChoices(productId: string, catalog: StockCatalog): CartCh
 }
 
 export type ChoicePart =
-  | { kind: "slot"; groupId: string; memberId: string }
+  /** count 2 = a doubled special, never a menu default */
+  | { kind: "slot"; groupId: string; memberId: string; count?: number }
   | { kind: "level"; levelId: string }
   | { kind: "sweetener"; memberId: string | null };
 
@@ -42,7 +43,7 @@ export type ChoicePart =
 export function isDefaultChoice(defaults: CartChoices, part: ChoicePart): boolean {
   switch (part.kind) {
     case "slot":
-      return defaults.slots.some((s) => s.groupId === part.groupId && s.memberId === part.memberId);
+      return part.count !== 2 && defaults.slots.some((s) => s.groupId === part.groupId && s.memberId === part.memberId);
     case "level":
       return defaults.sweetness?.levelId === part.levelId;
     case "sweetener":
