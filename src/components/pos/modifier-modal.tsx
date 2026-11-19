@@ -83,12 +83,12 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 bg-black/50 z-40" />
         <Dialog.Popup
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end sm:items-start justify-center p-0 sm:p-4 sm:pt-[4dvh]"
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose();
           }}
         >
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-[720px] max-h-[92dvh] flex flex-col">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-[720px] h-[92dvh] sm:h-auto max-h-[92dvh] flex flex-col">
             {/* Header */}
             <div className="flex items-baseline justify-between gap-3 px-4 sm:px-5 pt-4 pb-3 border-b shrink-0">
               <Dialog.Title className="min-w-0 font-bold text-sidebar text-xl leading-tight">

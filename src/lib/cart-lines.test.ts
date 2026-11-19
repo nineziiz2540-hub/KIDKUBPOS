@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addLine, replaceLine, repriceItems, withQuantity } from "./cart-lines.ts";
+import { addLine, replaceLine, repriceItems, restoreLine, withQuantity } from "./cart-lines.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./stock/catalog-build.ts";
 import type { CartChoices, CartItem, ModifierWithOptions, SelectedModifier } from "../types/app.ts";
 
@@ -185,4 +185,35 @@ test("reprice: a resumed line without choices, on a menu that has option rows no
   assert.equal(out!.totalPrice, 140);
   // stock data not loaded: untouched, still no choices
   assert.equal("choices" in repriceItems([legacy], products, modifiers, null)[0]!, false);
+});
+
+// ── undo a removed line ──────────────────────────────────────────────────
+
+test("restoreLine puts the line back where it was", () => {
+  const a = line("a"), b = line("b"), c = line("c");
+  assert.deepEqual(restoreLine([a, c], b, 1).map((l) => l.cartItemKey), ["a", "b", "c"]);
+});
+
+test("restoreLine clamps an index past the end", () => {
+  const a = line("a"), b = line("b");
+  assert.deepEqual(restoreLine([a], b, 5).map((l) => l.cartItemKey), ["a", "b"]);
+});
+
+test("restoreLine clamps a negative index", () => {
+  const a = line("a"), b = line("b");
+  assert.deepEqual(restoreLine([a], b, -3).map((l) => l.cartItemKey), ["b", "a"]);
+});
+
+test("restoreLine ignores a line already in the cart", () => {
+  const cart = [line("a"), line("b")];
+  assert.equal(restoreLine(cart, line("b", { quantity: 9 }), 0), cart);
+});
+
+test("restoreLine keeps the line exactly", () => {
+  const ch = choices("m_kenya", "special", 20);
+  ch.slots[0]!.count = 2;
+  const item = line("x", { quantity: 2, choices: ch, note: "ไม่ใส่น้ำแข็ง", totalPrice: 170 });
+  const out = restoreLine([line("a")], item, 1);
+  assert.deepEqual(out[1], item);
+  assert.deepEqual(out[1]!.choices, ch);
 });

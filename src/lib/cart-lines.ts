@@ -73,3 +73,13 @@ export function repriceItems(
     return out;
   });
 }
+
+/**
+ * Undo of a removed cart line: the line goes back at its old place (index clamped to the cart), exactly
+ * as it was. A line with the same key already there (a double undo) leaves the cart as is.
+ */
+export function restoreLine(cart: CartItem[], item: CartItem, index: number): CartItem[] {
+  if (cart.some((l) => l.cartItemKey === item.cartItemKey)) return cart;
+  const at = Math.min(Math.max(index, 0), cart.length);
+  return [...cart.slice(0, at), item, ...cart.slice(at)];
+}

@@ -275,21 +275,37 @@ export function SmartCart({
             const editsOptions = canEditOptions?.(item) === true && onEditOptions !== undefined;
             // Without the catalog (no lineDetail) the words still show, just none marked as a choice.
             const parts = lineDetail?.(item) ?? cartLineParts(item, null);
+            const openEditor = () => (editsOptions ? onEditOptions(item.cartItemKey) : setNoteKey(item.cartItemKey));
+            const hint = editsOptions ? "แตะเพื่อแก้ไข" : !item.note ? "+ หมายเหตุ" : null;
             return (
-              <div key={item.cartItemKey} className="flex items-center gap-2 px-4 py-3">
+              <div key={item.cartItemKey} className="px-4 py-3">
+                {/* Rows 1-2 and the note are one button (opens the editor); the controls row below holds
+                    sibling buttons, so no button nests in another. */}
                 <button
                   type="button"
-                  onClick={() => (editsOptions ? onEditOptions(item.cartItemKey) : setNoteKey(item.cartItemKey))}
-                  className="flex-1 min-w-0 text-left rounded-md -mx-1 px-1 hover:bg-muted/60 active:bg-muted transition-colors"
+                  onClick={openEditor}
+                  className="block w-[calc(100%+0.5rem)] text-left rounded-md -mx-1 px-1 hover:bg-muted/60 active:bg-muted transition-colors"
                 >
-                  <p className="text-base font-semibold text-sidebar leading-snug line-clamp-2">
-                    {item.name}
-                  </p>
+                  <div className="flex items-start gap-2">
+                    <p className="flex-1 min-w-0 text-[17px] font-semibold text-sidebar leading-snug line-clamp-2">
+                      {item.name}
+                    </p>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[17px] font-bold text-sidebar tabular-nums leading-snug">
+                        ฿{formatPrice(item.totalPrice)}
+                      </p>
+                      {item.quantity > 1 && (
+                        <p className="text-[13px] text-muted-foreground tabular-nums">
+                          ฿{formatPrice(item.totalPrice / item.quantity)} / ชิ้น
+                        </p>
+                      )}
+                    </div>
+                  </div>
                   {parts.length > 0 && (
                     // Every brew choice — bean, sweetness, then each chosen option — with the ones that
                     // are not the menu default (every option, R42) bold accent, so the barista sees at a
                     // glance which cup is different. Never clamped: a hidden choice is a wrong cup.
-                    <p className="text-base text-sidebar leading-snug mt-0.5">
+                    <p className="text-sm text-sidebar leading-snug mt-0.5">
                       {parts.map((part, i) => (
                         <Fragment key={i}>
                           {i > 0 && " · "}
@@ -303,21 +319,28 @@ export function SmartCart({
                       📝 {item.note}
                     </p>
                   )}
-                  <p className="text-sm text-muted-foreground tabular-nums mt-0.5">
-                    ฿{formatPrice(item.totalPrice / item.quantity)} / ชิ้น
-                    {editsOptions ? (
-                      <span className="text-accent/80"> · แตะเพื่อแก้ไข</span>
-                    ) : (
-                      !item.note && <span className="text-accent/80"> · + หมายเหตุ</span>
-                    )}
-                  </p>
                 </button>
-                <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <p className="text-base font-bold text-sidebar tabular-nums">
-                    ฿{formatPrice(item.totalPrice)}
-                  </p>
-                  {/* Qty controls */}
-                  <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => onRemove(item.cartItemKey)}
+                    className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
+                    aria-label="ลบสินค้า"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  {hint ? (
+                    <button
+                      type="button"
+                      onClick={openEditor}
+                      className="flex-1 min-w-0 min-h-12 text-left text-[13px] text-accent/80 truncate"
+                    >
+                      {hint}
+                    </button>
+                  ) : (
+                    <div className="flex-1 min-w-0" />
+                  )}
+                  <div className="flex items-center gap-0.5 shrink-0">
                     <button
                       type="button"
                       onClick={() => onUpdateQty(item.cartItemKey, item.quantity - 1)}
@@ -339,14 +362,6 @@ export function SmartCart({
                     </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onRemove(item.cartItemKey)}
-                  className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
-                  aria-label="ลบสินค้า"
-                >
-                  <Trash2 size={18} />
-                </button>
               </div>
             );
           })

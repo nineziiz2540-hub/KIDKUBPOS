@@ -1,7 +1,8 @@
 "use client";
 import { formatPrice } from "@/lib/cash";
 import { cartSubtotal } from "@/lib/cart-math";
-import { addLine, replaceLine, repriceItems, withQuantity } from "@/lib/cart-lines";
+import { addLine, replaceLine, repriceItems, restoreLine, withQuantity } from "@/lib/cart-lines";
+import { useToastManager } from "@/components/ui/toast";
 import type { StockCatalogRows } from "@/lib/stock/catalog-build";
 import { posStock, refreshCatalogOf } from "@/lib/stock/pos-stock";
 import { defaultChoices } from "@/lib/stock/pos-choices";
@@ -136,6 +137,10 @@ export function PosScreen({
 }: Props) {
   const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const toast = useToastManager();
+  // Bumped whenever the cart is replaced or settled (sale, clear, park, resume, restored draft): an
+  // undo toast from an earlier cart must then do nothing, never put a line into another bill.
+  const cartEpochRef = useRef(0);
   // The option window: a menu just tapped (editing null) or a cart line being edited.
   const [optionWindow, setOptionWindow] = useState<
     { product: PosProduct; editing: CartItem | null } | null
@@ -454,10 +459,35 @@ export function PosScreen({
     setDraftAttemptRef(null);
   }
 
+  /** Takes a line out and offers 5 s to put it back (same place, same choices and note). */
+  function removeLineWithUndo(key: string) {
+    const index = cartItems.findIndex((i) => i.cartItemKey === key);
+    if (index === -1) return;
+    const item = cartItems[index]!;
+    const epoch = cartEpochRef.current;
+    forgetAttemptIfEmptied(key);
+    setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
+    let done = false;
+    const toastId = toast.add({
+      title: `ลบ ${item.name} ออกจากตะกร้าแล้ว`,
+      type: "success",
+      timeout: 5000,
+      actionProps: {
+        children: "ย้อนกลับ",
+        onClick: () => {
+          if (done) return;
+          done = true;
+          toast.close(toastId);
+          if (cartEpochRef.current !== epoch) return;
+          setCartItems((prev) => restoreLine(prev, item, index));
+        },
+      },
+    });
+  }
+
   function updateQty(key: string, qty: number) {
     if (qty <= 0) {
-      forgetAttemptIfEmptied(key);
-      setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
+      removeLineWithUndo(key);
     } else {
       setCartItems((prev) =>
         prev.map((i) => (i.cartItemKey === key ? withQuantity(i, qty) : i))
@@ -466,12 +496,12 @@ export function PosScreen({
   }
 
   function removeItem(key: string) {
-    forgetAttemptIfEmptied(key);
-    setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
+    removeLineWithUndo(key);
   }
 
   function restoreDraft(d: CartDraft) {
     const items = repriceFromMenu(d.items);
+    cartEpochRef.current++;
     setCartItems(items);
     setOrderType(d.orderType);
     setPaymentMethod(d.paymentMethod);
@@ -508,6 +538,7 @@ export function PosScreen({
   }
 
   function clearCart() {
+    cartEpochRef.current++;
     discardDraft();
     attemptRef.current = null;
     restoredRef.current = null;
@@ -551,6 +582,7 @@ export function PosScreen({
     setSaveError(null);
     setLastOffline(null);
     setResultShownAt(eventTime());
+    cartEpochRef.current++;
     setLastOrderNumber(sale.orderNumber);
     setLastQueueNumber(sale.queueNumber);
     snapshot.observe(sale.queueNumber);
@@ -757,6 +789,7 @@ export function PosScreen({
     lastOfflineRefKey.current = clientRef;
     setLastOffline(result);
     setResultShownAt(eventTime());
+    cartEpochRef.current++;
     setCartItems([]);
     setCustomer(null);
     resetDiscount();
@@ -1165,6 +1198,7 @@ export function PosScreen({
   }
 
   function resetAfterPark(queueNumber: number, customerLabel: string | null, saved: boolean) {
+    cartEpochRef.current++;
     discardDraft();
     restoredRef.current = null;
     attemptRef.current = null;
@@ -1253,6 +1287,7 @@ export function PosScreen({
     restoredRef.current = null;
     setDraftAttemptRef(null);
     const items = repriceFromMenu(bill.items);
+    cartEpochRef.current++;
     setCartItems(items);
     setOrderType(bill.orderType);
     setCustomer(bill.customerId ? { id: bill.customerId, phone: bill.customerPhone } : null);
