@@ -465,6 +465,9 @@ export function PosScreen({
     if (index === -1) return;
     const item = cartItems[index]!;
     const epoch = cartEpochRef.current;
+    // While a payment's answer is still unknown, no one-tap undo: emptying the cart forgets the
+    // attempt, so putting the same cart straight back would pay it again under a new client_ref.
+    const offerUndo = !paymentUnresolved;
     forgetAttemptIfEmptied(key);
     setCartItems((prev) => prev.filter((i) => i.cartItemKey !== key));
     let done = false;
@@ -472,7 +475,7 @@ export function PosScreen({
       title: `ลบ ${item.name} ออกจากตะกร้าแล้ว`,
       type: "success",
       timeout: 5000,
-      actionProps: {
+      actionProps: offerUndo ? {
         children: "ย้อนกลับ",
         onClick: () => {
           if (done) return;
@@ -481,7 +484,7 @@ export function PosScreen({
           if (cartEpochRef.current !== epoch) return;
           setCartItems((prev) => restoreLine(prev, item, index));
         },
-      },
+      } : undefined,
     });
   }
 

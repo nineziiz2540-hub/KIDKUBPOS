@@ -325,7 +325,7 @@ export function SmartCart({
                     type="button"
                     onClick={() => onRemove(item.cartItemKey)}
                     className="w-12 h-12 shrink-0 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
-                    aria-label="ลบสินค้า"
+                    aria-label={`ลบ ${item.name}`}
                   >
                     <Trash2 size={18} />
                   </button>

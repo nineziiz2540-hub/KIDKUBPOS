@@ -10,7 +10,10 @@ function Toaster() {
   const { toasts } = ToastPrimitive.useToastManager()
   return (
     <ToastPrimitive.Portal>
-      <ToastPrimitive.Viewport className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2">
+      {/* Top layer of the app (above the phone cart drawer z-[60], held-bill modals z-[70] and the
+          logout confirm z-[100]) so a "ย้อนกลับ" toast is never hidden behind the screen it came from.
+          w-max: a fixed box at left-1/2 would otherwise only get half the screen and wrap word by word. */}
+      <ToastPrimitive.Viewport className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[110] w-max max-w-[calc(100vw-2rem)] flex flex-col gap-2">
         {toasts.map((toast) => (
           <ToastPrimitive.Root
             key={toast.id}
