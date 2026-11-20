@@ -14,7 +14,8 @@ import { DisabledReason } from "./disabled-reason";
 import { OfflineSaleResult } from "./offline-sale-result";
 import type { OfflineResult } from "./outbox-sale";
 import type { Gate } from "@/lib/offline/feature-gates";
-import { cartLineParts, type LinePart } from "@/lib/stock/option-window";
+import { cartLineParts, HOUSE_GLASS_WORD, type LinePart } from "@/lib/stock/option-window";
+import { MAX_BAGS, stepBags } from "@/lib/bags";
 
 type PaymentMethod = "cash" | "transfer";
 type OrderType = "dine_in" | "take_away";
@@ -87,6 +88,11 @@ type Props = {
   /** True when tapping the line reopens the option window; otherwise the tap edits its note. */
   canEditOptions?: (item: CartItem) => boolean;
   onEditOptions?: (key: string) => void;
+  /** The line's "แก้วร้าน" toggle: shown only for a menu with packaging or a house-glass default (round D2a). */
+  houseGlassToggle?: (item: CartItem) => { shown: boolean; on: boolean };
+  onToggleHouseGlass?: (key: string) => void;
+  /** The carry-out bag counter; null = the shop has no bag material, nothing shown. */
+  bags?: { count: number; onChange: (count: number) => void } | null;
 };
 
 function reasonOf(g: Gate): string | null {
@@ -138,6 +144,9 @@ export function SmartCart({
   lineDetail,
   canEditOptions,
   onEditOptions,
+  houseGlassToggle,
+  onToggleHouseGlass,
+  bags = null,
 }: Props) {
   const reasonId = useId();
   const pinReason = reasonOf(gates.pinDiscount);
@@ -277,6 +286,7 @@ export function SmartCart({
             const parts = lineDetail?.(item) ?? cartLineParts(item, null);
             const openEditor = () => (editsOptions ? onEditOptions(item.cartItemKey) : setNoteKey(item.cartItemKey));
             const hint = editsOptions ? "แตะเพื่อแก้ไข" : !item.note ? "+ หมายเหตุ" : null;
+            const glass = houseGlassToggle?.(item);
             return (
               <div key={item.cartItemKey} className="px-4 py-3">
                 {/* Rows 1-2 and the note are one button (opens the editor); the controls row below holds
@@ -339,6 +349,23 @@ export function SmartCart({
                     </button>
                   ) : (
                     <div className="flex-1 min-w-0" />
+                  )}
+                  {glass?.shown && onToggleHouseGlass && (
+                    // A word in both states ("แก้วร้าน" / "แก้วร้าน ✓"), never colour alone. Same cup,
+                    // same price: it only changes what stock is used.
+                    <button
+                      type="button"
+                      onClick={() => onToggleHouseGlass(item.cartItemKey)}
+                      aria-pressed={glass.on}
+                      className={
+                        "h-12 min-w-12 shrink-0 rounded-lg border px-2.5 text-sm font-semibold whitespace-nowrap transition-colors " +
+                        (glass.on
+                          ? "border-accent bg-accent text-white"
+                          : "border-input bg-white text-sidebar hover:border-accent hover:text-accent")
+                      }
+                    >
+                      {glass.on ? `${HOUSE_GLASS_WORD} ✓` : HOUSE_GLASS_WORD}
+                    </button>
                   )}
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
@@ -476,6 +503,36 @@ export function SmartCart({
             <span className="text-3xl font-bold tabular-nums">฿{formatPrice(total)}</span>
           </div>
         </div>
+
+        {/* Carry-out bags: only for a shop that counts bags; starts at the automatic count */}
+        {bags && (
+          <div className="flex items-center justify-between">
+            <span className="text-base font-semibold text-sidebar">ถุง</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => bags.onChange(stepBags(bags.count, -1))}
+                disabled={bags.count <= 0}
+                className="w-12 h-12 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                aria-label="ลดจำนวนถุง"
+              >
+                −
+              </button>
+              <span className="w-10 text-center text-lg font-semibold tabular-nums" aria-live="polite">
+                {bags.count}
+              </span>
+              <button
+                type="button"
+                onClick={() => bags.onChange(stepBags(bags.count, 1))}
+                disabled={bags.count >= MAX_BAGS}
+                className="w-12 h-12 rounded-lg border border-input text-xl font-semibold text-sidebar flex items-center justify-center hover:bg-muted active:bg-muted disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                aria-label="เพิ่มจำนวนถุง"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Payment method */}
         <div className="flex gap-2">

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildLine,
   billLineDetail,
+  houseGlassToggle,
+  toggleHouseGlass,
   cartLineParts,
   choiceParts,
   choicesFromWindow,
@@ -29,7 +31,7 @@ import {
 } from "./option-window.ts";
 import { defaultChoices } from "./pos-choices.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
-import { cupPriceDeltaSatang, resolveLine, type ResolvedLine, type StockCatalog } from "./stock-core.ts";
+import { cupPriceDeltaSatang, emptyStockCatalog, resolveLine, type ChoiceSnapshot, type ResolvedLine, type StockCatalog } from "./stock-core.ts";
 import { lineTotal, unitPrice } from "../cart-math.ts";
 import { toLineChoices } from "../order-pricing-core.ts";
 import type { CartChoices, CartItem, ModifierWithOptions } from "../../types/app.ts";
@@ -879,4 +881,67 @@ test("editing a line keeps its houseGlass", () => {
   assert.ok(!("houseGlass" in buildLine({ ...args, editing: {} })), "absent stays absent");
   assert.equal(buildLine({ ...args, editing: { houseGlass: true } }).houseGlass, true);
   assert.equal(buildLine({ ...args, editing: { houseGlass: false } }).houseGlass, false);
+});
+
+// ---- D2a task 7: house glass words and the cart toggle ----
+
+function packagingCatalog(houseGlassDefault: boolean): StockCatalog {
+  const c = emptyStockCatalog();
+  c.packaging.set("p1", { setId: "set1", houseGlassDefault });
+  return c;
+}
+
+function plainLine(houseGlass?: boolean): CartItem {
+  const line: CartItem = {
+    cartItemKey: "k", productId: "p1", name: "ลาเต้", basePrice: 80, quantity: 2,
+    selectedModifiers: [], note: null, totalPrice: 160,
+  };
+  if (houseGlass !== undefined) line.houseGlass = houseGlass;
+  return line;
+}
+
+test("cart words add แก้วร้าน only when house glass is used", () => {
+  assert.deepEqual(cartLineParts(plainLine(), null, false), []);
+  assert.deepEqual(cartLineParts(plainLine(false), null, false), []);
+  assert.deepEqual(cartLineParts(plainLine(true), null, false), [{ text: "แก้วร้าน", changed: true }]);
+  // the word sits after the bean/sweetness words and before the options (as the bill reads)
+  const withOption: CartItem = { ...plainLine(true), selectedModifiers: [{ modifierId: "m", modifierName: "เพิ่ม", optionId: "o", optionName: "เพิ่มช็อต", priceDelta: 15 }] };
+  assert.deepEqual(cartLineParts(withOption, null, false).map((p) => p.text), ["แก้วร้าน", "เพิ่มช็อต (+15)"]);
+});
+
+test("a menu served in house glass by default shows แก้วร้าน unbolded", () => {
+  assert.deepEqual(cartLineParts(plainLine(), null, true), [{ text: "แก้วร้าน", changed: false }]);
+  assert.deepEqual(cartLineParts(plainLine(true), null, true), [{ text: "แก้วร้าน", changed: false }]);
+  // the cashier took it off: no word
+  assert.deepEqual(cartLineParts(plainLine(false), null, true), []);
+});
+
+test("bill words read the snapshot's houseGlass", () => {
+  const snap = (packaging?: ChoiceSnapshot["packaging"]): ChoiceSnapshot => ({ slots: [], slotAddGroupIds: [], sweetness: null, ...(packaging ? { packaging } : {}) });
+  assert.equal(billLineDetail(snap({ houseGlass: true }), []), "แก้วร้าน");
+  assert.equal(billLineDetail(snap({ houseGlass: true }), [{ option: "เพิ่มช็อต", priceDelta: 15 }]), "แก้วร้าน · เพิ่มช็อต (+15)");
+  assert.equal(billLineDetail(snap({ setId: "s", name: "แก้วพลาสติก" }), []), null);
+  assert.equal(billLineDetail(snap(), []), null);
+});
+
+test("toggleHouseGlass stores the key only when it differs from the menu default", () => {
+  const off = packagingCatalog(false);
+  const on = toggleHouseGlass(plainLine(), off);
+  assert.equal(on.houseGlass, true);
+  const back = toggleHouseGlass(on, off);
+  assert.ok(!("houseGlass" in back), "back to the default deletes the key");
+  const dflt = packagingCatalog(true);
+  const taken = toggleHouseGlass(plainLine(), dflt);
+  assert.equal(taken.houseGlass, false);
+  assert.ok(!("houseGlass" in toggleHouseGlass(taken, dflt)));
+  assert.equal(on.totalPrice, 160);
+  assert.equal(on.cartItemKey, "k");
+});
+
+test("houseGlassToggle shows only for a menu with packaging or a house-glass default", () => {
+  assert.deepEqual(houseGlassToggle(plainLine(), emptyStockCatalog()), { shown: false, on: false });
+  assert.deepEqual(houseGlassToggle(plainLine(), packagingCatalog(false)), { shown: true, on: false });
+  assert.deepEqual(houseGlassToggle(plainLine(true), packagingCatalog(false)), { shown: true, on: true });
+  assert.deepEqual(houseGlassToggle(plainLine(), packagingCatalog(true)), { shown: true, on: true });
+  assert.deepEqual(houseGlassToggle(plainLine(false), packagingCatalog(true)), { shown: true, on: false });
 });

@@ -23,6 +23,8 @@ type Args = {
   customer: DraftState["customer"];
   activeHeld: DraftState["activeHeld"];
   discount: DraftState["discount"];
+  /** The bag count shown on the counter (0 when the shop counts no bags); a count above 0 comes back as the cashier's own. */
+  bags: number;
   /** The cart's payment attempt ref (see CartDraft.attemptRef); null when none. */
   attemptRef: string | null;
   /** Called at most once, only if a draft was found and the cart was still empty. */
@@ -58,6 +60,7 @@ export function useCartDraft(args: Args): { discard: () => void } {
     customer,
     activeHeld,
     discount,
+    bags,
     attemptRef,
   } = args;
   const key = draftKey({ tenantId, sellerId });
@@ -169,6 +172,7 @@ export function useCartDraft(args: Args): { discard: () => void } {
           customer,
           activeHeld,
           discount,
+          bags,
           attemptRef: attemptRef ?? undefined,
         },
         { tenantId, sellerId }
@@ -197,6 +201,7 @@ export function useCartDraft(args: Args): { discard: () => void } {
     customer,
     activeHeld,
     discount,
+    bags,
     attemptRef,
   ]);
 

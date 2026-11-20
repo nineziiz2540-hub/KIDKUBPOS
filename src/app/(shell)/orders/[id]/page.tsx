@@ -72,6 +72,8 @@ type OrderDetail = {
   transfer_verified_at: string | null;
   transfer_verified_by: string | null;
   sold_offline: boolean;
+  /** carry-out bags on the bill (round D2a); 0 = none */
+  bags: number;
   order_items: OrderItem[];
 };
 
@@ -82,7 +84,7 @@ const ORDER_SELECT = [
   "cancelled_at, cancel_reason, cancelled_by, cancelled_approved_by",
   "refunded_at, refund_reason, refund_method, refunded_by, refunded_approved_by",
   "unpaid_at, unpaid_reason, unpaid_by, unpaid_approved_by",
-  "transfer_verified_at, transfer_verified_by, sold_offline",
+  "transfer_verified_at, transfer_verified_by, sold_offline, bags",
   "order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, choices, note)",
 ].join(", ");
 
@@ -267,6 +269,9 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
             </p>
           </div>
         ))}
+        {order.bags > 0 && (
+          <p className="px-4 py-3 text-base font-medium text-sidebar">ถุง {order.bags}</p>
+        )}
         {order.order_items.length === 0 && (
           <p className="px-4 py-8 text-center text-base text-muted-foreground">ไม่มีรายการสินค้า</p>
         )}

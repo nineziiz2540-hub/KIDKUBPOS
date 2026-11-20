@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { billStockLines, billStockPayload, defaultBags, validBags } from "./bags.ts";
+import { billStockLines, billStockPayload, defaultBags, manualFromDraft, MAX_BAGS, shownBags, stepBags, validBags } from "./bags.ts";
 
 test("defaultBags", () => {
   assert.equal(defaultBags(3, null), 0);
@@ -32,4 +32,20 @@ test("defaultBags never exceeds 99", () => {
   assert.equal(defaultBags(100, 1), 99);
   assert.equal(defaultBags(250, 2), 99);
   assert.equal(defaultBags(99, 1), 99);
+});
+
+test("shownBags: manual wins, else the automatic count; the draft round-trips", () => {
+  assert.equal(shownBags(null, 3, 2), 2);
+  assert.equal(shownBags(5, 3, 2), 5);
+  assert.equal(shownBags(0, 3, 2), 0);
+  assert.equal(shownBags(null, 3, null), 0);
+  assert.equal(manualFromDraft(0), null);
+  assert.equal(manualFromDraft(4), 4);
+});
+
+test("stepBags stops at 0 and MAX_BAGS", () => {
+  assert.equal(stepBags(0, -1), 0);
+  assert.equal(stepBags(2, -1), 1);
+  assert.equal(stepBags(2, 1), 3);
+  assert.equal(stepBags(MAX_BAGS, 1), MAX_BAGS);
 });

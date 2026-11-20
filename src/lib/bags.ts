@@ -27,3 +27,18 @@ export function billStockPayload(bags: number, bagMaterialId: string | null) {
     stock: billStockLines(bags, bagMaterialId).map((s) => ({ material_id: s.materialId, qty: s.qty })),
   };
 }
+
+/** The count the counter shows: the cashier's own value once they tapped − or +, else the automatic one. */
+export function shownBags(manual: number | null, cups: number, bagsPerCups: number | null): number {
+  return manual ?? defaultBags(cups, bagsPerCups);
+}
+
+/** One tap on − or +: stops at 0 and at MAX_BAGS. */
+export function stepBags(current: number, delta: 1 | -1): number {
+  return Math.max(0, Math.min(MAX_BAGS, current + delta));
+}
+
+/** A restored draft's count: above 0 it was the cashier's; 0 goes back to automatic. */
+export function manualFromDraft(bags: number): number | null {
+  return bags > 0 ? bags : null;
+}

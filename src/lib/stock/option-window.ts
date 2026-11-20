@@ -7,7 +7,7 @@ import { formatPrice } from "../cash.ts";
 import { lineTotal } from "../cart-math.ts";
 import { defaultChoices, isDefaultChoice } from "./pos-choices.ts";
 import {
-  defaultLevel, defaultSlotMember, slotAdds, slotCount,
+  defaultLevel, defaultSlotMember, effectiveHouseGlass, slotAdds, slotCount,
   type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type SlotForAdds, type StockCatalog,
 } from "./stock-core.ts";
 
@@ -454,7 +454,29 @@ export function snapshotParts(snapshot: ChoiceSnapshot | null | undefined): stri
     parts.push(sw.levelName);
     if (sw.memberId !== null && sw.label !== null) parts.push(sw.label);
   }
+  if (snapshot.packaging && "houseGlass" in snapshot.packaging) parts.push(HOUSE_GLASS_WORD);
   return parts;
+}
+
+/** The screen word for a cup served in the shop's own glass (cart toggle, cart words, bill words). */
+export const HOUSE_GLASS_WORD = "แก้วร้าน";
+
+/** The cart line's house-glass toggle: shown only for a menu with a packaging set or a house-glass default. */
+export function houseGlassToggle(item: Pick<CartItem, "productId" | "houseGlass">, catalog: StockCatalog): { shown: boolean; on: boolean } {
+  return { shown: catalog.packaging.has(item.productId), on: effectiveHouseGlass(item.productId, item.houseGlass, catalog) };
+}
+
+/**
+ * The toggle's tap: flips the line's effective house glass. The key is stored only when the new value
+ * differs from the menu default (deleted otherwise), so the raw value keeps equalling the effective
+ * one and two lines of the same cup still merge (addLine). Never changes the price.
+ */
+export function toggleHouseGlass(item: CartItem, catalog: StockCatalog): CartItem {
+  const menuDefault = catalog.packaging.get(item.productId)?.houseGlassDefault ?? false;
+  const next = !effectiveHouseGlass(item.productId, item.houseGlass, catalog);
+  const { houseGlass: _old, ...rest } = item;
+  void _old;
+  return next === menuDefault ? rest : { ...rest, houseGlass: next };
 }
 
 /**
@@ -502,10 +524,19 @@ export function choiceParts(choices: CartChoices | undefined, defaults: CartChoi
  * words, then every chosen option with its price (the extra shot on a special cup names its house
  * bean: "เพิ่มช็อต คั่วกลาง (+15)"). Options have no default, so a chosen one is always marked (R42).
  */
-export function cartLineParts(item: Pick<CartItem, "choices" | "selectedModifiers">, defaults: CartChoices | null): LinePart[] {
+export function cartLineParts(
+  item: Pick<CartItem, "choices" | "selectedModifiers"> & { houseGlass?: boolean },
+  defaults: CartChoices | null,
+  /** the menu serves in the shop's own glass by default (catalog.packaging houseGlassDefault) */
+  houseGlassDefault = false
+): LinePart[] {
   const slots = item.choices?.slots;
+  const houseGlass = item.houseGlass ?? houseGlassDefault;
   return [
     ...choiceParts(item.choices, defaults),
+    // after the brew words, before the options (the bill reads the same order); bold only when the
+    // cashier changed it from the menu default
+    ...(houseGlass ? [{ text: HOUSE_GLASS_WORD, changed: houseGlass !== houseGlassDefault }] : []),
     ...item.selectedModifiers.map((m) => ({
       text: optionText(optionName(m.optionName, m.optionId, slots), m.priceDelta),
       changed: true,

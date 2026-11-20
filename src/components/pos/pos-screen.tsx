@@ -6,7 +6,8 @@ import { useToastManager } from "@/components/ui/toast";
 import type { StockCatalogRows } from "@/lib/stock/catalog-build";
 import { posStock, refreshCatalogOf } from "@/lib/stock/pos-stock";
 import { defaultChoices } from "@/lib/stock/pos-choices";
-import { cartLineParts, hasOptionRows, optionRows } from "@/lib/stock/option-window";
+import { cartLineParts, hasOptionRows, houseGlassToggle, optionRows, toggleHouseGlass } from "@/lib/stock/option-window";
+import { manualFromDraft, shownBags } from "@/lib/bags";
 import { useEffect, useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { checkOrderSaved, createOrder } from "@/app/actions/orders";
@@ -98,6 +99,10 @@ type Props = {
   allModifiers: ModifierWithOptions[];
   /** Bean/matcha and sweetness config for the option window (round D1); null = it could not be loaded. */
   stockRows: StockCatalogRows | null;
+  /** The shop counts carry-out bags (tenants.bag_material_id is set): the counter shows (round D2a). */
+  bagsEnabled: boolean;
+  /** One bag per this many cups for the automatic count; null = no rule (starts at 0). */
+  bagsPerCups: number | null;
   userName: string;
   todayOrderCount: number;
   activeShiftId: string | null;
@@ -123,6 +128,8 @@ export function PosScreen({
   productModifierRecord,
   allModifiers,
   stockRows,
+  bagsEnabled,
+  bagsPerCups,
   userName,
   todayOrderCount,
   activeShiftId,
@@ -145,6 +152,8 @@ export function PosScreen({
   const [optionWindow, setOptionWindow] = useState<
     { product: PosProduct; editing: CartItem | null } | null
   >(null);
+  // null = automatic (defaultBags of the cups); set once the cashier taps − or + (this bill only).
+  const [manualBags, setManualBags] = useState<number | null>(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -224,6 +233,10 @@ export function PosScreen({
     [discountType, discountValue, discountReason]
   );
   const [notice, setNotice] = useState<string | null>(null);
+  // The bag count on screen: the cashier's own value, else one per bagsPerCups cups. 0 without a bag material.
+  const shownBagCount = bagsEnabled
+    ? shownBags(manualBags, cartItems.reduce((sum, item) => sum + item.quantity, 0), bagsPerCups)
+    : 0;
   const { discard: discardDraftRaw } = useCartDraft({
     tenantId,
     sellerId,
@@ -233,6 +246,7 @@ export function PosScreen({
     customer,
     activeHeld,
     discount: draftDiscount,
+    bags: shownBagCount,
     attemptRef: draftAttemptRef,
     onRestore: restoreDraft,
   });
@@ -447,7 +461,16 @@ export function PosScreen({
   }
 
   function lineDetail(item: CartItem) {
-    return cartLineParts(item, stock.loaded ? defaultChoices(item.productId, stockCatalog) : null);
+    return cartLineParts(
+      item,
+      stock.loaded ? defaultChoices(item.productId, stockCatalog) : null,
+      stockCatalog.packaging.get(item.productId)?.houseGlassDefault ?? false
+    );
+  }
+
+  /** The cart line's แก้วร้าน toggle: same cup, same price; the key is dropped when it equals the menu default. */
+  function toggleLineHouseGlass(key: string) {
+    setCartItems((prev) => prev.map((i) => (i.cartItemKey === key ? toggleHouseGlass(i, stockCatalog) : i)));
   }
 
   // The last item taken out by hand ends this cart as a sale, just like ล้าง: its payment attempt
@@ -516,6 +539,7 @@ export function PosScreen({
       setDiscountReason(d.discount.reason);
     }
     setActiveHeld(d.activeHeld);
+    setManualBags(bagsEnabled ? manualFromDraft(d.bags) : null);
     // The draft's own attempt ref (if a payment was tried) stays with the cart, and the restored
     // cart may take it over: keyed by exactly the fingerprint it will have once these states land.
     setDraftAttemptRef(d.attemptRef ?? null);
@@ -550,6 +574,7 @@ export function PosScreen({
     setLocalUnresolved(null);
     setResultShownAt(null);
     setCartItems([]);
+    setManualBags(null);
     setError(null);
     setSaveError(null);
     setLastOrderNumber(null);
@@ -595,6 +620,7 @@ export function PosScreen({
         : null
     );
     setCartItems([]);
+    setManualBags(null);
     setCustomer(null);
     resetDiscount();
     if (activeHeld) {
@@ -756,6 +782,8 @@ export function PosScreen({
       cashReceived,
       heldBillId: activeHeld?.id,
       heldBillVersion: activeHeld?.version,
+      // only for a shop that counts bags; otherwise the field is left out
+      ...(bagsEnabled ? { bags: shownBagCount } : {}),
       clientRef,
     };
   }
@@ -794,6 +822,7 @@ export function PosScreen({
     setResultShownAt(eventTime());
     cartEpochRef.current++;
     setCartItems([]);
+    setManualBags(null);
     setCustomer(null);
     resetDiscount();
     // No router.refresh() here: offline it can't load. The held list refreshes once it is sent.
@@ -1207,6 +1236,7 @@ export function PosScreen({
     attemptRef.current = null;
     setDraftAttemptRef(null);
     setCartItems([]);
+    setManualBags(null);
     setCustomer(null);
     resetDiscount();
     setActiveHeld(null);
@@ -1292,6 +1322,7 @@ export function PosScreen({
     const items = repriceFromMenu(bill.items);
     cartEpochRef.current++;
     setCartItems(items);
+    setManualBags(null);
     setOrderType(bill.orderType);
     setCustomer(bill.customerId ? { id: bill.customerId, phone: bill.customerPhone } : null);
     // The discount comes back without its approval — an over-threshold one is re-approved here.
@@ -1495,6 +1526,9 @@ export function PosScreen({
             paymentReady={outbox.loaded && unsettledSaves === 0}
             payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
             lineDetail={lineDetail}
+            houseGlassToggle={(item) => houseGlassToggle(item, stockCatalog)}
+            onToggleHouseGlass={toggleLineHouseGlass}
+            bags={bagsEnabled ? { count: shownBagCount, onChange: setManualBags } : null}
             canEditOptions={canEditOptions}
             onEditOptions={editLineOptions}
           />
@@ -1571,6 +1605,9 @@ export function PosScreen({
                 paymentReady={outbox.loaded && unsettledSaves === 0}
                 payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
                 lineDetail={lineDetail}
+                houseGlassToggle={(item) => houseGlassToggle(item, stockCatalog)}
+                onToggleHouseGlass={toggleLineHouseGlass}
+                bags={bagsEnabled ? { count: shownBagCount, onChange: setManualBags } : null}
                 canEditOptions={canEditOptions}
                 onEditOptions={editLineOptions}
               />
