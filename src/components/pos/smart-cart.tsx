@@ -285,8 +285,11 @@ export function SmartCart({
             // Without the catalog (no lineDetail) the words still show, just none marked as a choice.
             const parts = lineDetail?.(item) ?? cartLineParts(item, null);
             const openEditor = () => (editsOptions ? onEditOptions(item.cartItemKey) : setNoteKey(item.cartItemKey));
-            const hint = editsOptions ? "แตะเพื่อแก้ไข" : !item.note ? "+ หมายเหตุ" : null;
             const glass = houseGlassToggle?.(item);
+            // A line with the แก้วร้าน toggle has no room for the hint (it would read "แ…"): the top area
+            // still opens the editor, so the hint is left out there.
+            const showsToggle = glass?.shown === true && onToggleHouseGlass !== undefined;
+            const hint = showsToggle ? null : editsOptions ? "แตะเพื่อแก้ไข" : !item.note ? "+ หมายเหตุ" : null;
             return (
               <div key={item.cartItemKey} className="px-4 py-3">
                 {/* Rows 1-2 and the note are one button (opens the editor); the controls row below holds
