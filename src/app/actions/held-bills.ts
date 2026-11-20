@@ -234,7 +234,7 @@ async function heldBillStockLines(
 
   const totals = new Map<string, number>();
   for (const item of items) {
-    const lineChoices = toLineChoices(item.choices);
+    const lineChoices = toLineChoices(item);
     const optionIds = (item.selectedModifiers ?? []).map((m) => m.optionId);
     let resolved = resolveLine(item.productId, item.quantity, lineChoices, optionIds, loaded.catalog);
     // A special bean the menu no longer allows: keep the default bean, fixed materials (milk, cups)

@@ -117,6 +117,7 @@ const stockRows: StockCatalogRows = {
   amounts: [],
   productSweetness: [{ product_id: "latte", group_id: "g_sweet", default_member_id: "s_syrup", allowed_member_ids: [], default_level_id: null, use_custom: false }],
   optionEffects: [{ option_id: "o_shot", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 9 }],
+  productPackaging: [], packagingSets: [], packagingItems: [],
 };
 const stock = buildStockCatalog(stockRows);
 const products = [{ id: "latte", price: 70 }, { id: "water", price: 15 }];

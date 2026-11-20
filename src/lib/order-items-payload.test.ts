@@ -50,7 +50,7 @@ test("a Kenya latte line sends whole-line stock and the choices snapshot", () =>
       { id: "m_med", group_id: "beans", raw_material_id: "med", label: "med", tier: "house", price_delta: 0, is_default: true, sort_order: 0 },
       { id: "m_kenya", group_id: "beans", raw_material_id: "kenya", label: "kenya", tier: "special", price_delta: 20, is_default: false, sort_order: 1 },
     ],
-    levels: [], amounts: [], productSweetness: [], optionEffects: [],
+    levels: [], amounts: [], productSweetness: [], optionEffects: [], productPackaging: [], packagingSets: [], packagingItems: [],
   });
   const item = cartItem({
     quantity: 1, totalPrice: 75,

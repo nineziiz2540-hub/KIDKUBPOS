@@ -16,7 +16,7 @@ export async function loadStockCatalog(
 ): Promise<{ catalog: StockCatalog } | { error: string; retry: true }> {
   const none = (ids: string[]) => ids.length === 0;
 
-  const [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects] =
+  const [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects, productPackaging, packagingSets, packagingItems] =
     await Promise.all([
       // archived and unknown materials are treated the same by the builder, so skip reading archived ones
       supabase.from("raw_materials").select("id, archived_at").eq("tenant_id", tenantId).is("archived_at", null),
@@ -68,9 +68,18 @@ export async function loadStockCatalog(
             .eq("tenant_id", tenantId)
             .in("option_id", optionIds)
             .order("id"),
+      none(productIds)
+        ? null
+        : supabase
+            .from("products")
+            .select("id, packaging_set_id, house_glass_default")
+            .eq("tenant_id", tenantId)
+            .in("id", productIds),
+      supabase.from("packaging_sets").select("id, name").eq("tenant_id", tenantId).is("archived_at", null).order("id"),
+      supabase.from("packaging_set_items").select("set_id, raw_material_id, qty").eq("tenant_id", tenantId).order("set_id"),
     ]);
 
-  const all = [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects];
+  const all = [materials, recipes, groups, members, levels, standard, custom, productSweetness, effects, productPackaging, packagingSets, packagingItems];
   const failed = all.find((r) => r?.error);
   if (failed?.error) {
     console.error("[loadStockCatalog] query failed:", failed.error.message);
@@ -86,6 +95,11 @@ export async function loadStockCatalog(
     amounts: [...(standard.data ?? []), ...(custom?.data ?? [])],
     productSweetness: productSweetness?.data ?? [],
     optionEffects: effects?.data ?? [],
+    productPackaging: (productPackaging?.data ?? []).map((p) => ({
+      product_id: p.id, packaging_set_id: p.packaging_set_id, house_glass_default: p.house_glass_default,
+    })),
+    packagingSets: packagingSets.data ?? [],
+    packagingItems: packagingItems.data ?? [],
   } as StockCatalogRows; // line_kind / kind / tier are text columns whose check constraints narrow them
   return { catalog: buildStockCatalog(rows) };
 }

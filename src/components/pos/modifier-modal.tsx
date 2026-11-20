@@ -61,6 +61,7 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
     note,
     quantity: editing?.quantity ?? 1,
     key: editing?.cartItemKey ?? "",
+    editing,
   });
   const missing = missingRequired(state, modifiers);
   // "ช็อตเพิ่มใช้เมล็ดร้าน" rows: only on a special cup with a ticked extra shot, under that option's row

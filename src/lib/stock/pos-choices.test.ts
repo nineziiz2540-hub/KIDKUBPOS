@@ -75,7 +75,7 @@ function build(): StockCatalog {
       ["unsweet", sw("none")],
       ["orphan_member", { groupId: "sweet", defaultMemberId: "m_gone", allowedMemberIds: [], defaultLevelId: null, custom: null }],
     ]),
-    optionEffects: new Map(),
+    optionEffects: new Map(), packaging: new Map(), packagingSets: new Map(),
   };
 }
 

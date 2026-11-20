@@ -32,6 +32,10 @@ export type StockCatalog = {
   standardSweetness: AmountTable;
   productSweetness: Map<string, ProductSweetness>;
   optionEffects: Map<string, OptionEffect[]>;
+  /** menu -> its packaging set (null = none) and whether it defaults to the shop's own glass */
+  packaging: Map<string, { setId: string | null; houseGlassDefault: boolean }>;
+  /** non-archived sets only; items whose material is archived are already dropped */
+  packagingSets: Map<string, { name: string; items: { materialId: string; qty: number }[] }>;
 };
 
 /**
@@ -42,6 +46,8 @@ export type StockCatalog = {
 export type LineChoices = {
   slots?: { groupId: string; memberId: string; count?: number; shotMemberId?: string }[];
   sweetness?: { levelId: string; memberId: string | null } | null;
+  /** the cashier's house-glass toggle; absent = the menu's default */
+  houseGlass?: boolean;
 };
 
 export type StockLine = { materialId: string; qty: number };
@@ -56,6 +62,8 @@ export type ChoiceSnapshot = {
   /** groups the line's options add to (slot_add effects); a record only, no longer used for price */
   slotAddGroupIds: string[];
   sweetness: { levelId: string; levelName: string; memberId: string | null; label: string | null } | null;
+  /** absent when the menu has neither a packaging set nor a house-glass default */
+  packaging?: { houseGlass: true } | { setId: string; name: string };
 };
 export type ResolvedLine = {
   stock: StockLine[];
@@ -66,7 +74,7 @@ export type ResolvedLine = {
 export function emptyStockCatalog(): StockCatalog {
   return {
     recipes: new Map(), groups: new Map(), levels: [], standardSweetness: new Map(),
-    productSweetness: new Map(), optionEffects: new Map(),
+    productSweetness: new Map(), optionEffects: new Map(), packaging: new Map(), packagingSets: new Map(),
   };
 }
 
@@ -187,6 +195,11 @@ export function slotAdds(
   return { slotAddGroupIds, shots };
 }
 
+/** Effective house glass: the line's own toggle, else the menu's default. */
+export function effectiveHouseGlass(productId: string, houseGlass: boolean | undefined, catalog: StockCatalog): boolean {
+  return houseGlass ?? catalog.packaging.get(productId)?.houseGlassDefault ?? false;
+}
+
 export function resolveLine(
   productId: string,
   quantity: number,
@@ -270,6 +283,21 @@ export function resolveLine(
           add(member.materialId, table.get(`${member.id}:${level.id}`) ?? 0);
         }
         snapshot.sweetness = { levelId: level.id, levelName: level.name, memberId: finalId, label: member?.label ?? null };
+      }
+    }
+  }
+
+  // Packaging: the menu's set per cup, unless the cup goes in the shop's own glass. A missing or
+  // archived set deducts nothing and never raises. Packaging never touches the price.
+  const pack = catalog.packaging.get(productId);
+  if (pack) {
+    if (effectiveHouseGlass(productId, choices?.houseGlass, catalog)) {
+      snapshot.packaging = { houseGlass: true };
+    } else {
+      const set = pack.setId ? catalog.packagingSets.get(pack.setId) : undefined;
+      if (pack.setId && set) {
+        for (const item of set.items) add(item.materialId, item.qty);
+        snapshot.packaging = { setId: pack.setId, name: set.name };
       }
     }
   }

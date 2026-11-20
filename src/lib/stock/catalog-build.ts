@@ -35,6 +35,12 @@ export type StockCatalogRows = {
   }[];
   /** modifier_option_effects */
   optionEffects: { option_id: string; kind: "slot_add" | "material_add"; group_id: string | null; raw_material_id: string | null; amount: Num }[];
+  /** products (packaging_set_id, house_glass_default) */
+  productPackaging: { product_id: string; packaging_set_id: string | null; house_glass_default: boolean }[];
+  /** packaging_sets, non-archived */
+  packagingSets: { id: string; name: string }[];
+  /** packaging_set_items */
+  packagingItems: { set_id: string; raw_material_id: string; qty: Num }[];
 };
 
 /** A finite number >= min, else null. */
@@ -121,6 +127,18 @@ export function buildStockCatalog(rows: StockCatalogRows): StockCatalog {
       effect = { kind: "material_add", materialId: e.raw_material_id, qty };
     }
     push(catalog.optionEffects, e.option_id, effect);
+  }
+
+  for (const s of rows.packagingSets) catalog.packagingSets.set(s.id, { name: s.name, items: [] });
+  for (const i of rows.packagingItems) {
+    const set = catalog.packagingSets.get(i.set_id);
+    const qty = num(i.qty, { above: 0 });
+    if (!set || qty === null || !usable.has(i.raw_material_id)) continue;
+    set.items.push({ materialId: i.raw_material_id, qty });
+  }
+  for (const p of rows.productPackaging) {
+    if (p.packaging_set_id === null && !p.house_glass_default) continue;
+    catalog.packaging.set(p.product_id, { setId: p.packaging_set_id, houseGlassDefault: p.house_glass_default });
   }
 
   return catalog;

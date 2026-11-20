@@ -7,6 +7,7 @@ type MemberRow = StockCatalogRows["members"][number];
 
 const empty = (): StockCatalogRows => ({
   materials: [], recipes: [], groups: [], members: [], levels: [], amounts: [], productSweetness: [], optionEffects: [],
+  productPackaging: [], packagingSets: [], packagingItems: [],
 });
 const mem = (id: string, mat: string, o: Partial<MemberRow> = {}): MemberRow => ({
   id, group_id: "g", raw_material_id: mat, label: id, tier: "house", price_delta: 0, is_default: false, sort_order: 0, ...o,
@@ -133,7 +134,7 @@ test("end-to-end with resolveLine: latte", () => {
   const lv = (id: string, o: object) => ({ id, name: id, is_none: false, is_default: false, sort_order: 0, ...o });
   const amt = (l: string, a: number) => ({ product_id: null, member_id: "m_syrup", level_id: l, amount: a });
   const c = buildStockCatalog({
-    materials,
+    ...empty(), materials,
     groups: [
       { id: "beans", kind: "bean", name: "เมล็ด", sort_order: 1 },
       { id: "sweet", kind: "sweetener", name: "ความหวาน", sort_order: 2 },
@@ -181,4 +182,26 @@ test("end-to-end with resolveLine: latte", () => {
 
 test("empty input equals emptyStockCatalog()", () => {
   assert.deepEqual(buildStockCatalog(empty()), emptyStockCatalog());
+});
+
+test("packaging: sets keep usable items only; archived material and non-set rows drop; menus map to their set", () => {
+  const c = buildStockCatalog({
+    ...empty(),
+    materials: [{ id: "cup", archived_at: null }, { id: "old", archived_at: "2026-01-01T00:00:00Z" }],
+    packagingSets: [{ id: "s", name: "ชุด" }],
+    packagingItems: [
+      { set_id: "s", raw_material_id: "cup", qty: "1" },
+      { set_id: "s", raw_material_id: "old", qty: 1 },
+      { set_id: "gone", raw_material_id: "cup", qty: 1 },
+    ],
+    productPackaging: [
+      { product_id: "a", packaging_set_id: "s", house_glass_default: false },
+      { product_id: "b", packaging_set_id: null, house_glass_default: true },
+      { product_id: "c", packaging_set_id: null, house_glass_default: false },
+    ],
+  });
+  assert.deepEqual(c.packagingSets.get("s"), { name: "ชุด", items: [{ materialId: "cup", qty: 1 }] });
+  assert.deepEqual(c.packaging.get("a"), { setId: "s", houseGlassDefault: false });
+  assert.deepEqual(c.packaging.get("b"), { setId: null, houseGlassDefault: true });
+  assert.equal(c.packaging.has("c"), false);
 });

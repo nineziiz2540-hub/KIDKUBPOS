@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cupPriceDeltaSatang, defaultLevel, defaultSlotMember, resolveLine, slotCount, STOCK_STALE,
+  cupPriceDeltaSatang, defaultLevel, defaultSlotMember, effectiveHouseGlass, resolveLine, slotCount, STOCK_STALE,
   type ChoiceGroup, type GroupMember, type ResolvedLine, type StockCatalog,
 } from "./stock-core.ts";
 
@@ -61,6 +61,7 @@ function build(): StockCatalog {
       }],
     ]),
     optionEffects: new Map([["extraShot", [{ kind: "slot_add", groupId: "beans", qty: 9 }]]]),
+    packaging: new Map(), packagingSets: new Map(),
   };
 }
 
@@ -385,4 +386,65 @@ test("one option adding to two groups: each special slot gets its own shot listi
     { memberId: "t_cer", materialId: "ceremony", label: "Ceremonial", optionIds: ["both"] },
   ]);
   assert.equal(r.priceDeltaSatang, 2000 + 4000);
+});
+
+// ---- round D2a: packaging per cup and house glass ----
+
+function withPackaging(houseGlassDefault = false, setId: string | null = "set16"): StockCatalog {
+  const c = build();
+  c.packaging.set("latte", { setId, houseGlassDefault });
+  c.packagingSets.set("set16", {
+    name: "แก้วเย็น 16oz",
+    items: [{ materialId: "cup16", qty: 1 }, { materialId: "lid", qty: 1 }, { materialId: "straw", qty: 1 }],
+  });
+  return c;
+}
+const qtyOf = (r: ResolvedLine, id: string) => r.stock.find((l) => l.materialId === id)?.qty;
+
+test("resolveLine adds the menu's packaging set per cup", () => {
+  const r = ok(resolveLine("latte", 2, undefined, [], withPackaging()));
+  for (const id of ["cup16", "lid", "straw"]) assert.equal(qtyOf(r, id), 2);
+  assert.equal(qtyOf(r, "milk"), 360);
+  assert.deepEqual(r.snapshot.packaging, { setId: "set16", name: "แก้วเย็น 16oz" });
+});
+
+test("resolveLine with houseGlass true adds no packaging and says so", () => {
+  const r = ok(resolveLine("latte", 2, { houseGlass: true }, [], withPackaging()));
+  assert.equal(qtyOf(r, "cup16"), undefined);
+  assert.deepEqual(r.snapshot.packaging, { houseGlass: true });
+});
+
+test("a menu whose default is house glass, toggled off, uses its set", () => {
+  const c = withPackaging(true);
+  assert.equal(qtyOf(ok(resolveLine("latte", 1, undefined, [], c)), "cup16"), undefined);
+  const r = ok(resolveLine("latte", 1, { houseGlass: false }, [], c));
+  assert.equal(qtyOf(r, "cup16"), 1);
+  assert.deepEqual(r.snapshot.packaging, { setId: "set16", name: "แก้วเย็น 16oz" });
+});
+
+test("a menu with no set and no house-glass default has no packaging key", () => {
+  const r = ok(resolveLine("latte", 1, undefined, [], build()));
+  assert.ok(!("packaging" in r.snapshot));
+  assert.deepEqual(r.snapshot, ok(resolveLine("latte", 1, undefined, [], cat)).snapshot);
+});
+
+test("a menu whose set is archived deducts no packaging and has no packaging key", () => {
+  const c = withPackaging();
+  c.packagingSets.clear(); // the catalog keeps non-archived sets only
+  const r = ok(resolveLine("latte", 1, undefined, [], c));
+  assert.equal(qtyOf(r, "cup16"), undefined);
+  assert.ok(!("packaging" in r.snapshot));
+});
+
+test("packaging never changes the price", () => {
+  const withSet = ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_kenya" }] }, [], withPackaging()));
+  const without = ok(resolveLine("latte", 1, { slots: [{ groupId: "beans", memberId: "m_kenya" }] }, [], build()));
+  assert.equal(withSet.priceDeltaSatang, without.priceDeltaSatang);
+});
+
+test("effectiveHouseGlass: the line's toggle wins over the menu default", () => {
+  const c = withPackaging(true);
+  assert.equal(effectiveHouseGlass("latte", undefined, c), true);
+  assert.equal(effectiveHouseGlass("latte", false, c), false);
+  assert.equal(effectiveHouseGlass("espresso_house", undefined, c), false);
 });

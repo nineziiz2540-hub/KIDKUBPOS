@@ -22,6 +22,9 @@ export function posStockRows(rows: StockCatalogRows, productIds: string[], optio
     amounts: [],
     productSweetness: rows.productSweetness.filter((p) => onSale.has(p.product_id)),
     optionEffects: rows.optionEffects.filter((e) => e.kind === "slot_add" && offered.has(e.option_id)),
+    productPackaging: rows.productPackaging.filter((p) => onSale.has(p.product_id)),
+    packagingSets: rows.packagingSets,
+    packagingItems: rows.packagingItems,
   };
 }
 

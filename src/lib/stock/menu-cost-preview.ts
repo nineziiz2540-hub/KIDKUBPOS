@@ -26,6 +26,8 @@ export type CostPreviewInput = {
   /** the shop's standard sweetness table */
   standardAmounts: { member_id: string; level_id: string; amount: number }[];
   materials: PreviewMaterial[];
+  /** the menu's packaging set (its items), when it has one; deducted per cup unless house glass */
+  packaging?: { name: string; items: { materialId: string; qty: number }[]; houseGlassDefault?: boolean } | null;
 };
 
 export type CostPreview = {
@@ -43,6 +45,7 @@ export type CostPreview = {
 export const PREVIEW_INCOMPLETE = "บางรายการยังไม่มีปริมาณ/ตัวเลือก — ต้นทุนอาจต่ำกว่าจริง";
 
 const DRAFT_ID = "__draft__";
+const PACKAGING_ID = "__packaging__";
 
 /** The draft as catalog rows. Unparseable quantities simply drop out (the builder skips them). */
 export function draftCatalogRows(input: CostPreviewInput): StockCatalogRows {
@@ -72,7 +75,16 @@ export function draftCatalogRows(input: CostPreviewInput): StockCatalogRows {
     amounts: input.standardAmounts.map((a) => ({ product_id: null, member_id: a.member_id, level_id: a.level_id, amount: a.amount })),
     productSweetness: [],
     optionEffects: [],
+    productPackaging: [],
+    packagingSets: [],
+    packagingItems: [],
   };
+  const pk = input.packaging;
+  if (pk) {
+    rows.packagingSets.push({ id: PACKAGING_ID, name: pk.name });
+    rows.packagingItems.push(...pk.items.map((i) => ({ set_id: PACKAGING_ID, raw_material_id: i.materialId, qty: i.qty })));
+    rows.productPackaging.push({ product_id: DRAFT_ID, packaging_set_id: PACKAGING_ID, house_glass_default: pk.houseGlassDefault ?? false });
+  }
 
   const s = draft.sweetness;
   if (s) {

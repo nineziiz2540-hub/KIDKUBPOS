@@ -258,15 +258,15 @@ test("a doubled special (count 2) is charged twice and deducts two doses; the sh
 
 test("toLineChoices passes count 2 and the shot member id, and nothing else", () => {
   const slot = { groupId: "g", memberId: "m", label: "x", tier: "special" as const, priceDelta: 20 };
-  assert.deepEqual(toLineChoices({ slots: [slot], slotAddGroupIds: ["g"], sweetness: null }), {
+  assert.deepEqual(toLineChoices({ choices: { slots: [slot], slotAddGroupIds: ["g"], sweetness: null } }), {
     slots: [{ groupId: "g", memberId: "m" }], sweetness: null,
   });
   assert.deepEqual(
-    toLineChoices({ slots: [{ ...slot, count: 2, shot: { memberId: "h", label: "y", optionIds: ["o"] } }], slotAddGroupIds: [], sweetness: null }),
+    toLineChoices({ choices: { slots: [{ ...slot, count: 2, shot: { memberId: "h", label: "y", optionIds: ["o"] } }], slotAddGroupIds: [], sweetness: null } }),
     { slots: [{ groupId: "g", memberId: "m", count: 2, shotMemberId: "h" }], sweetness: null }
   );
   // a count 1 from a client is dropped (same as absent)
-  const one = toLineChoices({ slots: [{ ...slot, count: 1 as unknown as 2 }], slotAddGroupIds: [], sweetness: null });
+  const one = toLineChoices({ choices: { slots: [{ ...slot, count: 1 as unknown as 2 }], slotAddGroupIds: [], sweetness: null } });
   assert.deepEqual(one, { slots: [{ groupId: "g", memberId: "m" }], sweetness: null });
 });
 
@@ -343,4 +343,29 @@ test("basePrice is the menu price, without the specialty bean, in both pricing p
   const charged = priceLinesAsCharged([beanItem("m_kenya", 60)], catalog({ stock: beanStock() }));
   assert.ok(!("error" in charged));
   assert.equal(charged.lines[0]!.basePrice, 55);
+});
+
+// ---- round D2a: packaging and house glass ----
+
+test("toLineChoices carries houseGlass only when set", () => {
+  const choices = { slots: [], slotAddGroupIds: [], sweetness: null };
+  assert.deepEqual(toLineChoices({ choices }), { slots: [], sweetness: null });
+  assert.deepEqual(toLineChoices({ choices, houseGlass: false }), { houseGlass: false, slots: [], sweetness: null });
+  assert.deepEqual(toLineChoices({ houseGlass: true }), { houseGlass: true });
+  assert.equal(toLineChoices({}), undefined);
+});
+
+test("pricing core: a bill line with houseGlass passes it to resolveLine", () => {
+  const stock = emptyStockCatalog();
+  stock.packaging.set("latte", { setId: "s", houseGlassDefault: false });
+  stock.packagingSets.set("s", { name: "ชุด", items: [{ materialId: "cup", qty: 1 }] });
+  const withSet = priceLines([item(["small"], 110)], catalog({ stock }));
+  assert.ok(!("error" in withSet));
+  assert.deepEqual(withSet.lines[0]!.stock, [{ materialId: "cup", qty: 2 }]);
+  assert.deepEqual(withSet.lines[0]!.choicesSnapshot.packaging, { setId: "s", name: "ชุด" });
+  const house = priceLines([item(["small"], 110, { houseGlass: true })], catalog({ stock }));
+  assert.ok(!("error" in house));
+  assert.deepEqual(house.lines[0]!.stock, []);
+  assert.deepEqual(house.lines[0]!.choicesSnapshot.packaging, { houseGlass: true });
+  assert.equal(house.lines[0]!.unitPrice, withSet.lines[0]!.unitPrice);
 });

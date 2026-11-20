@@ -30,6 +30,8 @@ export function normalizeHeldItems(input: CartItem[], lines: PricedLine[]): Cart
     };
     // No choices key at all for pre-D1 items, so their stored JSON is unchanged.
     if (item.choices) out.choices = choicesFromSnapshot(line);
+    // House glass is the cashier's own toggle: a parked bill keeps it (absent = the menu default).
+    if (typeof item.houseGlass === "boolean") out.houseGlass = item.houseGlass;
     return out;
   });
 }

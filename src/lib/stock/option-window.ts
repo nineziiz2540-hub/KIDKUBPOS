@@ -348,6 +348,8 @@ export function buildLine(args: {
   note: string;
   quantity: number;
   key: string;
+  /** the line being edited: its houseGlass is kept exactly (the cart owns that toggle) */
+  editing?: Pick<CartItem, "houseGlass"> | null;
 }): CartItem {
   const { product, modifiers, catalog, state, quantity } = args;
   const selectedModifiers = selectedModifiersOf(state, modifiers);
@@ -366,6 +368,7 @@ export function buildLine(args: {
     note: note === "" ? null : note,
   };
   if (choices) line.choices = choices;
+  if (args.editing && args.editing.houseGlass !== undefined) line.houseGlass = args.editing.houseGlass;
   return line;
 }
 

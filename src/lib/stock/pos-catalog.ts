@@ -25,7 +25,7 @@ export async function loadPosStockRows(
   optionIds: string[]
 ): Promise<StockCatalogRows | null> {
   try {
-    const [materials, recipes, groups, members, levels, productSweetness, effects] = await Promise.all([
+    const [materials, recipes, groups, members, levels, productSweetness, effects, products, packagingSets, packagingItems] = await Promise.all([
       supabase.from("raw_materials").select("id, archived_at").eq("tenant_id", tenantId).is("archived_at", null).order("id"),
       supabase
         .from("product_recipes")
@@ -57,9 +57,13 @@ export async function loadPosStockRows(
         .eq("tenant_id", tenantId)
         .eq("kind", "slot_add")
         .order("id"),
+      // packaging: no cost anywhere here; Staff may read these columns
+      supabase.from("products").select("id, packaging_set_id, house_glass_default").eq("tenant_id", tenantId),
+      supabase.from("packaging_sets").select("id, name").eq("tenant_id", tenantId).is("archived_at", null).order("id"),
+      supabase.from("packaging_set_items").select("set_id, raw_material_id, qty").eq("tenant_id", tenantId).order("set_id"),
     ]);
 
-    const failed = [materials, recipes, groups, members, levels, productSweetness, effects].find((r) => r.error);
+    const failed = [materials, recipes, groups, members, levels, productSweetness, effects, products, packagingSets, packagingItems].find((r) => r.error);
     if (failed?.error) {
       console.error("[loadPosStockRows] query failed:", failed.error.message);
       return null;
@@ -74,6 +78,11 @@ export async function loadPosStockRows(
       amounts: [],
       productSweetness: productSweetness.data ?? [],
       optionEffects: effects.data ?? [],
+      productPackaging: (products.data ?? []).map((p) => ({
+        product_id: p.id, packaging_set_id: p.packaging_set_id, house_glass_default: p.house_glass_default,
+      })),
+      packagingSets: packagingSets.data ?? [],
+      packagingItems: packagingItems.data ?? [],
     } as StockCatalogRows; // line_kind / kind / tier are text columns whose check constraints narrow them
     return posStockRows(rows, productIds, optionIds);
   } catch (e) {

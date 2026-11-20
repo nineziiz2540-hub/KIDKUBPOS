@@ -2,7 +2,7 @@
 // it (tenant-scoped, see src/lib/order-pricing.ts), recompute every line in integer satang and
 // enforce option links and required/single-select rules. No database access here, so the rules
 // can be unit-tested.
-import type { CartChoices, CartItem } from "../types/app.ts";
+import type { CartItem } from "../types/app.ts";
 import { toSatang } from "./cash.ts";
 import { MAX_NOTE_LENGTH, normalizeNote } from "./notes.ts";
 import {
@@ -92,9 +92,12 @@ export function isValidCartChoices(value: unknown): boolean {
  * Keeps only the ids from the client's choices (plus a doubled special's count 2 and the extra shot's
  * house member id): its labels and prices are never trusted.
  */
-export function toLineChoices(choices?: CartChoices): LineChoices | undefined {
-  if (!choices) return undefined;
+export function toLineChoices(item: Pick<CartItem, "choices" | "houseGlass">): LineChoices | undefined {
+  const { choices } = item;
+  const glass = item.houseGlass === undefined ? {} : { houseGlass: item.houseGlass };
+  if (!choices) return item.houseGlass === undefined ? undefined : glass;
   return {
+    ...glass,
     slots: (choices.slots ?? []).map((s) => ({
       groupId: s.groupId,
       memberId: s.memberId,
@@ -154,7 +157,7 @@ function catalogLine(
     if (!modifier.is_multi_select && count > 1) return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
   }
 
-  const resolved = resolveLine(product.id, item.quantity, toLineChoices(item.choices), [...seen], catalog.stock);
+  const resolved = resolveLine(product.id, item.quantity, toLineChoices(item), [...seen], catalog.stock);
   if ("error" in resolved) return { error: STALE };
   unitSatang += resolved.priceDeltaSatang;
 
@@ -230,7 +233,7 @@ export function priceLinesAsCharged(
     const server = catalogLine(item, catalog);
     // Stock still comes from the catalog even when the price is as charged; a line that still can't
     // be resolved deducts nothing rather than blocking the bill.
-    const lineChoices = toLineChoices(item.choices);
+    const lineChoices = toLineChoices(item);
     const optionIds = item.selectedModifiers.map((s) => s.optionId);
     let resolved = resolveLine(product.id, item.quantity, lineChoices, optionIds, catalog.stock);
     // A special bean the menu no longer allows: keep the default bean, fixed materials and sweetener.

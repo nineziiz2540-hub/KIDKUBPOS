@@ -63,6 +63,7 @@ function fullRows(): StockCatalogRows {
       { product_id: "thai_tea", group_id: "g_sweet", default_member_id: "s_condensed", allowed_member_ids: ["s_mix"], default_level_id: "lv_more", use_custom: true },
       { product_id: "retired", group_id: "g_sweet", default_member_id: "s_syrup", allowed_member_ids: [], default_level_id: null, use_custom: false },
     ],
+    productPackaging: [], packagingSets: [], packagingItems: [],
     optionEffects: [
       { option_id: "o_shot", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 9 },
       { option_id: "o_oat", kind: "material_add", group_id: null, raw_material_id: "oat", amount: 180 },
@@ -111,8 +112,8 @@ test("INVARIANT: the client catalog (POS rows) prices and resolves every pick li
   for (const [name, product, state, options] of cases) {
     const choices = choicesFromWindow(product, client, state, options);
     // what the server receives: the ids plus count 2 and the shot's member (toLineChoices)
-    const s = resolveLine(product, 2, toLineChoices(choices), options, server);
-    const c = resolveLine(product, 2, toLineChoices(choices), options, client);
+    const s = resolveLine(product, 2, toLineChoices({ choices }), options, server);
+    const c = resolveLine(product, 2, toLineChoices({ choices }), options, client);
     assert.ok(!("error" in s) && !("error" in c), name);
     assert.equal(cupPriceDeltaSatang(choices.slots), s.priceDeltaSatang, `${name}: cart price`);
     assert.equal(c.priceDeltaSatang, s.priceDeltaSatang, `${name}: client resolve price`);

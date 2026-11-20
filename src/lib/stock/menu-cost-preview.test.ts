@@ -214,3 +214,14 @@ test("เพิ่มช็อต (+9 g in the bean group) adds to the house bea
   assert.equal(kenya.stock.find((l) => l.materialId === "bean-house")!.qty, 18); // the shot: 9 × 2 cups, house bean
   assert.equal(kenya.priceDeltaSatang, 2000); // specialty +20 once for the cup; the shot adds only its option price
 });
+
+test("menu cost preview includes packaging cost", () => {
+  const cup = { id: "cup16", name: "แก้ว 16oz", unit: "pcs", costPerUnit: 2.5, archived: false };
+  const lid = { id: "lid", name: "ฝา", unit: "pcs", costPerUnit: 0.75, archived: false };
+  const base = menuCostPreview(input());
+  const withSet = menuCostPreview({
+    ...input(), materials: [...materials, cup, lid],
+    packaging: { name: "แก้วเย็น", items: [{ materialId: "cup16", qty: 1 }, { materialId: "lid", qty: 1 }] },
+  });
+  assert.deepEqual(withSet.cups.map((c) => c.costSatang), base.cups.map((c) => c.costSatang + 325));
+});

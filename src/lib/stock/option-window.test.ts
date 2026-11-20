@@ -87,6 +87,7 @@ function rows(): StockCatalogRows {
       sweet("thai_tea", "s_condensed", [], "lv_more"),
       sweet("unsweet", "s_syrup", ["s_mix"], "lv_none"),
     ],
+    productPackaging: [], packagingSets: [], packagingItems: [],
     optionEffects: [
       { option_id: "o_shot", kind: "slot_add", group_id: "g_bean", raw_material_id: null, amount: 18 },
       { option_id: "o_matcha_shot", kind: "slot_add", group_id: "g_matcha", raw_material_id: null, amount: 4 },
@@ -290,7 +291,7 @@ test("INVARIANT: the cart's specialty price equals the server's for every pick",
   ];
   for (const [p, state, options] of picks) {
     const c = choicesFromWindow(p, catalog, state, options);
-    const server = resolveLine(p, 1, toLineChoices(c), options, catalog);
+    const server = resolveLine(p, 1, toLineChoices({ choices: c }), options, catalog);
     assert.ok(!("error" in server), p);
     assert.equal(cupPriceDeltaSatang(c.slots), server.priceDeltaSatang, `${p} ${JSON.stringify(state.slots)}`);
     assert.deepEqual(c.slots.map((x) => [x.memberId, x.count, x.shot?.memberId, x.shot?.optionIds]),
@@ -333,7 +334,7 @@ test("×2 stays only on the chosen member: a parked Ethiopia ×2 whose bean is g
   assert.deepEqual(back.slots, [{ groupId: "g_bean", memberId: "m_kenya", label: "เคนยา", tier: "special", priceDelta: 20 }]);
   assert.equal(lineTotal(65, [], 1, back), 85);
   // the server agrees on what it receives
-  const server = resolveLine("kenya_default", 1, toLineChoices(back), [], noEth);
+  const server = resolveLine("kenya_default", 1, toLineChoices({ choices: back }), [], noEth);
   assert.ok(!("error" in server));
   assert.equal(server.priceDeltaSatang, 2000);
   // a state pick the menu does not know (or a special the menu forbids) keeps no ×2 on the fallback
@@ -365,7 +366,7 @@ test("an option adding to two special slots names every shot bean, in slot order
   const line = buildLine({ product: { id: "dirty", name: "เดอร์ตี้", price: 90 }, modifiers: [both], catalog: c, state: s, note: "", quantity: 1, key: "d" });
   const words = "เคนยา (+20) · Ceremonial (+40) · เพิ่มทั้งคู่ คั่วกลาง/อุจิ (+60)";
   assert.equal(cartLineParts(line, null).map((p) => p.text).join(" · "), words);
-  const server = resolveLine("dirty", 1, toLineChoices(line.choices), ["o_both"], c);
+  const server = resolveLine("dirty", 1, toLineChoices(line), ["o_both"], c);
   assert.ok(!("error" in server));
   assert.equal(billLineDetail(server.snapshot, [{ option: "เพิ่มทั้งคู่", priceDelta: 60, optionId: "o_both" }]), words);
   assert.equal(line.totalPrice, 90 + 20 + 40 + 60);
@@ -459,7 +460,7 @@ test("shotRows: the row follows the FIRST modifier row holding a shot option; no
   assert.equal(ml.choices!.slots[0]!.shot?.memberId, "t_cer");
   assert.equal(ml.totalPrice, 90 + 40 + 50);
   assert.deepEqual(shotRows(optionRows("ceremony_only", onlySpecial), ml), []);
-  const server = resolveLine("ceremony_only", 1, toLineChoices(ml.choices), ["o_matcha_shot"], onlySpecial);
+  const server = resolveLine("ceremony_only", 1, toLineChoices(ml), ["o_matcha_shot"], onlySpecial);
   assert.ok(!("error" in server));
   assert.equal(server.priceDeltaSatang, 4000);
   assert.deepEqual(server.stock, [{ materialId: "ceremony", qty: 8 }]);
@@ -762,7 +763,7 @@ const shotOnDark = (s: WindowState) => pickShot(s, "g_bean", "m_dark");
 
 /** The server's view of the window's line: the ids it receives (toLineChoices) resolved from the catalog. */
 function serverOf(line: CartItem): ResolvedLine {
-  const r = resolveLine("latte", line.quantity, toLineChoices(line.choices), line.selectedModifiers.map((m) => m.optionId), catalog);
+  const r = resolveLine("latte", line.quantity, toLineChoices(line), line.selectedModifiers.map((m) => m.optionId), catalog);
   assert.ok(!("error" in r));
   return r;
 }
@@ -870,4 +871,12 @@ test("a pre-D1 line without choices is unchanged apart from option prices", () =
   delete legacy.choices;
   assert.deepEqual(cartLineParts(legacy, null), [{ text: "เพิ่มช็อต (+15)", changed: true }]);
   assert.equal(billLineDetail(null, [{ option: "เพิ่มช็อต", priceDelta: 15, optionId: "o_shot" }, { option: "ร้อน", priceDelta: 0 }]), "เพิ่มช็อต (+15), ร้อน");
+});
+
+test("editing a line keeps its houseGlass", () => {
+  const args = { product: latte, modifiers: [], catalog, state: initialWindowState("latte", catalog, []), note: "", quantity: 2, key: "k" };
+  assert.ok(!("houseGlass" in buildLine(args)), "a new line never gets houseGlass");
+  assert.ok(!("houseGlass" in buildLine({ ...args, editing: {} })), "absent stays absent");
+  assert.equal(buildLine({ ...args, editing: { houseGlass: true } }).houseGlass, true);
+  assert.equal(buildLine({ ...args, editing: { houseGlass: false } }).houseGlass, false);
 });

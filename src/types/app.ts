@@ -39,6 +39,8 @@ export type CartItem = {
   note: string | null; // per-cup note, see src/lib/notes.ts
   /** Absent on carts and offline outbox entries saved before round D1. */
   choices?: CartChoices;
+  /** House glass for this line; absent = the menu's default. Written only when the cashier toggled it. */
+  houseGlass?: boolean;
 };
 
 export type CreateOrderInput = {
