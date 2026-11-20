@@ -1662,10 +1662,6 @@ export type Database = {
         }
         Returns: string
       }
-      deduct_stock_for_order: {
-        Args: { p_order_id: string }
-        Returns: undefined
-      }
       generate_order_number: { Args: { p_tenant_id: string }; Returns: string }
       next_queue_number: { Args: { p_tenant_id: string }; Returns: number }
       order_change_payment_method: {
@@ -1871,10 +1867,6 @@ export type Database = {
       }
       save_option_effects: {
         Args: { p_effects: Json; p_option_id: string }
-        Returns: undefined
-      }
-      restock_for_voided_order: {
-        Args: { p_order_id: string }
         Returns: undefined
       }
     }
