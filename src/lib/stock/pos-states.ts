@@ -6,6 +6,7 @@ import { menuAvailability, needsAvailability, type Availability, type Levels } f
 import type { LiveStock } from "./live-stock.ts";
 import type { StockCatalog } from "./stock-core.ts";
 import { HEARTBEAT_TIMEOUT_MS } from "../connectivity.ts";
+import { withDeadline } from "../payment-attempt.ts";
 
 export type TileState = { kind: "paused" } | { kind: "out"; materialId: string } | { kind: "low"; cupsLeft: number } | { kind: "ok" };
 
@@ -107,6 +108,23 @@ export function suppressMaterial(store: SuppressedStore, materialId: string, lev
 }
 
 /**
+ * The map without the suppressions that have ended, so an ended one stays ended: a material whose
+ * level is above its stored level (a receive, a count up, an adjust up), and entries of an earlier
+ * day. A material missing from `levels` is kept (nothing known). An entry dated after `today` is kept
+ * too (`today` may come from a page rendered yesterday). Nothing ended → the same map back.
+ */
+export function pruneSuppressed(store: SuppressedStore, levels: Levels, today: string): SuppressedStore {
+  const out: SuppressedStore = {};
+  let dropped = false;
+  for (const [id, e] of Object.entries(store)) {
+    const level = levels.get(id);
+    if (e.date < today || (level !== undefined && level > e.level)) dropped = true;
+    else out[id] = e;
+  }
+  return dropped ? out : store;
+}
+
+/**
  * The materials this iPad does not ask about: stored today, and the level has not risen above the
  * stored one. Sales only lower it, so they never end it; a receive, a count up or an adjust up does,
  * and so does a new business day.
@@ -139,4 +157,40 @@ export function pausedMenus(live: LiveStock | null, overrides: Record<string, Pa
     else out.delete(productId);
   }
   return out;
+}
+
+/** How long "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง" wait for the server before counting as no answer. */
+export const PAUSE_DEADLINE_MS = 5_000;
+
+/** What a pause/reopen call came back with: done, the server's Thai error, or no answer (network or too slow). */
+export type PauseResult = { ok: true } | { error: string } | { offline: true };
+
+/**
+ * The pause/reopen call, bounded: server actions run one at a time, so it can sit behind a stalled
+ * payment or the outbox catching up while the heartbeat still says online. After PAUSE_DEADLINE_MS it
+ * counts as offline (the dialog then offers "ขายแก้วนี้"), so the POS is never stuck in a dialog.
+ */
+export async function settlePauseCall(call: Promise<{ error?: string }>, ms = PAUSE_DEADLINE_MS): Promise<PauseResult> {
+  try {
+    const res = await withDeadline(call, ms);
+    return res.error ? { error: res.error } : { ok: true };
+  } catch {
+    return { offline: true };
+  }
+}
+
+/**
+ * Every material that makes the menu "หมด?" now (paused or not), the scarcest first: after
+ * "เปิดขายแล้วสั่ง" / "ขายแก้วนี้" they are all treated as "ยังมีของ ขายต่อ" (R-D2a-23), so the cashier
+ * is asked once, not twice. Each found material is set aside before looking again, so it ends.
+ */
+export function outMaterials(productId: string, catalog: StockCatalog, levels: Levels, suppressed: Set<string>): string[] {
+  const aside = new Set(suppressed);
+  const found: string[] = [];
+  for (;;) {
+    const a = menuAvailability(productId, catalog, withoutSuppressed(levels, aside));
+    if (a.state !== "out" || a.limitingMaterialId === null || aside.has(a.limitingMaterialId)) return found;
+    found.push(a.limitingMaterialId);
+    aside.add(a.limitingMaterialId);
+  }
 }

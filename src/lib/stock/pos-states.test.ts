@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  asksFirst, lowWord, materialLabel, parseSuppressed, pausedMenus, suppressedMaterials, suppressionStorageKey,
-  suppressMaterial, tileState,
+  asksFirst, lowWord, materialLabel, outMaterials, parseSuppressed, pausedMenus, pruneSuppressed, settlePauseCall,
+  suppressedMaterials, suppressionStorageKey, suppressMaterial, tileState,
 } from "./pos-states.ts";
 import type { Levels } from "./availability.ts";
 import type { LiveStock } from "./live-stock.ts";
@@ -165,4 +165,57 @@ test("the dialog names a material by its chip word, else its stock name", () => 
   assert.equal(materialLabel("med", { med: "เมล็ดคั่วกลาง" }, cat), "คั่วกลาง");
   assert.equal(materialLabel("milk", { milk: "นมสด" }, cat), "นมสด");
   assert.equal(materialLabel("unknown", {}, cat), "วัตถุดิบ");
+});
+
+// ── fix round 1 ──────────────────────────────────────────────────────────
+
+test("an ended suppression does not come back when the level falls again", () => {
+  let store = suppressMaterial({}, "milk", 150, TODAY);
+  store = { ...store, ice: { level: 0, date: TODAY }, old: { level: 0, date: "2026-11-20" } };
+  // a receive of 2,000 ml: milk's suppression ends and is dropped; ice (no change) and a material
+  // missing from the levels stay; yesterday's entry goes
+  const pruned = pruneSuppressed(store, new Map([["milk", 2150], ["ice", -150]]), TODAY);
+  assert.deepEqual(pruned, { ice: { level: 0, date: TODAY } });
+  // the same day, sales bring milk back under 150: "หมด?" asks again
+  assert.equal(suppressedMaterials(pruned, new Map([["milk", 100]]), TODAY).has("milk"), false);
+  // nothing ended: the same map back (the POS then writes nothing)
+  const kept = suppressMaterial({}, "milk", 150, TODAY);
+  assert.equal(pruneSuppressed(kept, new Map([["milk", 150]]), TODAY), kept);
+  // an entry dated after a stale "today" (a page rendered yesterday) is never thrown away
+  assert.deepEqual(pruneSuppressed(kept, new Map([["milk", 0]]), "2026-11-20"), kept);
+});
+
+test("reopening a paused menu that is out suppresses every out material", () => {
+  const levels = plenty();
+  levels.set("milk", 150);
+  levels.set("lid", 0);
+  const cat = build();
+  // paused + out: "เปิดขายแล้วสั่ง" names every material that makes it "หมด?", not only the scarcest
+  assert.deepEqual(tileState("latte", cat, live(levels, ["latte"]), new Set()), { kind: "paused" });
+  const out = outMaterials("latte", cat, levels, new Set());
+  assert.deepEqual([...out].sort(), ["lid", "milk"]);
+  // once suppressed the menu goes straight on: no second question
+  let store = {};
+  for (const id of out) store = suppressMaterial(store, id, levels.get(id)!, TODAY);
+  assert.deepEqual(tileState("latte", cat, live(levels), suppressedMaterials(store, levels, TODAY)), { kind: "ok" });
+  // already suppressed, or nothing out: nothing more to suppress
+  assert.deepEqual(outMaterials("latte", cat, levels, new Set(["milk", "lid"])), []);
+  assert.deepEqual(outMaterials("latte", cat, plenty(), new Set()), []);
+  // every house roast out: one is named (the window then starts on it), and the menu is ok after
+  const beansOut = plenty();
+  for (const id of ["light", "med", "dark"]) beansOut.set(id, 0);
+  const beans = outMaterials("latte", cat, beansOut, new Set());
+  assert.equal(beans.length, 1);
+  assert.deepEqual(tileState("latte", cat, live(beansOut), new Set(beans)), { kind: "ok" });
+});
+
+test("a pause or reopen with no answer in time counts as offline", async () => {
+  assert.deepEqual(await settlePauseCall(Promise.resolve({}), 50), { ok: true });
+  assert.deepEqual(await settlePauseCall(Promise.resolve({ error: "ไม่พบเมนูนี้" }), 50), { error: "ไม่พบเมนูนี้" });
+  assert.deepEqual(await settlePauseCall(Promise.reject(new TypeError("Failed to fetch")), 50), { offline: true });
+  // stuck behind another server action: given up after the deadline, never a dead end
+  const never = new Promise<{ error?: string }>(() => {});
+  const started = Date.now();
+  assert.deepEqual(await settlePauseCall(never, 20), { offline: true });
+  assert.ok(Date.now() - started < 1000);
 });

@@ -4,10 +4,8 @@
 // go on with one tap. A base-ui Dialog, so opened from the option window it nests above it.
 import { useRef, useState, type ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
+import type { PauseResult } from "@/lib/stock/pos-states";
 import { DisabledReason } from "./disabled-reason";
-
-/** What a pause/reopen call came back with: done, the server's Thai error, or no answer (network). */
-export type PauseResult = { ok: true } | { error: string } | { offline: true };
 
 const OFFLINE_REOPEN = "เปิดขายได้เมื่อต่อเน็ต";
 const OFFLINE_PAUSE = "ปิดขายได้เมื่อต่อเน็ต";
@@ -51,7 +49,11 @@ export function StockStateDialog(props: Props) {
     action();
   }
 
-  /** Runs the pause/reopen call; on success the caller has already closed the dialog. */
+  /**
+   * Runs the pause/reopen call. The caller bounds it (settlePauseCall, PAUSE_DEADLINE_MS), so the
+   * buttons are off for a few seconds at most. On success the caller has already closed the dialog;
+   * a pause with no answer is closed by the caller too, with a toast.
+   */
   async function run(kind: "pause" | "reopen", call: () => Promise<PauseResult>, onFail: (message: string) => void) {
     if (doneRef.current || busyRef.current) return;
     busyRef.current = true;

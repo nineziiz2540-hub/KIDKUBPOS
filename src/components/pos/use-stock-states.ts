@@ -6,15 +6,19 @@
 // Bangkok date, and the optimistic pause changes.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { bangkokToday } from "@/lib/bangkok-time";
+import { HEARTBEAT_INTERVAL_MS } from "@/lib/connectivity";
 import type { LiveStock } from "@/lib/stock/live-stock";
 import type { StockCatalog } from "@/lib/stock/stock-core";
 import {
-  parseSuppressed, pausedMenus, suppressedMaterials, suppressionStorageKey, suppressMaterial, tileState,
+  outMaterials, parseSuppressed, pausedMenus, pruneSuppressed, suppressedMaterials, suppressionStorageKey,
+  suppressMaterial, tileState,
   type PauseOverride, type StockView, type TileState,
 } from "@/lib/stock/pos-states";
 
 /** How often the business date is re-read, so a page left open past midnight stops suppressing. */
 const TODAY_CHECK_MS = 60_000;
+/** Levels read within this long (two heartbeats) may end a suppression for good. */
+const FRESH_LEVELS_MS = 2 * HEARTBEAT_INTERVAL_MS;
 
 // The stored map per key. `memory` holds what this page wrote last (also when localStorage refuses it:
 // private mode, quota, blocked site data), so a write always takes effect on this page.
@@ -65,12 +69,12 @@ export function useStockStates({
 }): {
   /** Each menu's state; a menu missing here is "ok". */
   tileStates: Map<string, TileState>;
-  /** A menu's state as if it were not paused (after "เปิดขายแล้วสั่ง" / "ขายแก้วนี้"). */
-  stateIgnoringPause: (productId: string) => TileState;
+  /** Every material that makes this menu "หมด?" now, paused or not (for "เปิดขายแล้วสั่ง" / "ขายแก้วนี้", R-D2a-23). */
+  outMaterialsOf: (productId: string) => string[];
   /** What the option window's chips read; null = no stock data (every chip looks as before). */
   view: StockView | null;
-  /** "ยังมีของ ขายต่อ": stop asking about this material on this iPad until its level rises or the day ends. */
-  suppress: (materialId: string) => void;
+  /** "ยังมีของ ขายต่อ": stop asking about these materials on this iPad until their level rises or the day ends. */
+  suppress: (materialIds: string[]) => void;
   /** The server accepted a pause or reopen made on this iPad: show it now, before the heartbeat does. */
   markPaused: (productId: string, paused: boolean) => void;
 } {
@@ -100,17 +104,34 @@ export function useStockStates({
     () => new Map(productIds.map((id) => [id, tileState(id, catalog, shown, suppressed)])),
     [productIds, catalog, shown, suppressed]
   );
-  const stateIgnoringPause = useCallback(
-    (productId: string) => tileState(productId, catalog, { ...shown, paused: new Set() }, suppressed),
+  const outMaterialsOf = useCallback(
+    (productId: string) => outMaterials(productId, catalog, shown.levels, suppressed),
     [catalog, shown, suppressed]
   );
   const view = useMemo(() => (levels ? { levels, suppressed } : null), [levels, suppressed]);
 
+  // An ended suppression stays ended (R-D2a-21): once a level rises above its stored level, or the day
+  // has passed, the entry is dropped from the device, so selling back down never silences it again.
+  // Dropping is for good, so only on levels read moments ago: a /pos page the service worker serves
+  // from its cache offline carries the old (higher) levels of when it was cached.
+  const liveAt = liveStock?.at;
+  useEffect(() => {
+    if (!levels || liveAt === undefined || Date.now() - liveAt > FRESH_LEVELS_MS) return;
+    const pruned = pruneSuppressed(store, levels, today);
+    if (pruned !== store) writeRaw(key, JSON.stringify(pruned));
+  }, [key, store, levels, liveAt, today]);
+
   const suppress = useCallback(
-    (materialId: string) => {
-      const level = levels?.get(materialId);
-      if (level === undefined) return; // untracked: never "หมด?" in the first place
-      writeRaw(key, JSON.stringify(suppressMaterial(parseSuppressed(readRaw(key)), materialId, level, today)));
+    (materialIds: string[]) => {
+      let next = parseSuppressed(readRaw(key));
+      let changed = false;
+      for (const id of materialIds) {
+        const level = levels?.get(id);
+        if (level === undefined) continue; // untracked: never "หมด?" in the first place
+        next = suppressMaterial(next, id, level, today);
+        changed = true;
+      }
+      if (changed) writeRaw(key, JSON.stringify(next));
     },
     [key, levels, today]
   );
@@ -120,5 +141,5 @@ export function useStockStates({
     setOverrides((prev) => ({ ...prev, [productId]: { paused, at } }));
   }, []);
 
-  return { tileStates, stateIgnoringPause, view, suppress, markPaused };
+  return { tileStates, outMaterialsOf, view, suppress, markPaused };
 }

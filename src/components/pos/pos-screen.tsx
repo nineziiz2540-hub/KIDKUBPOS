@@ -58,9 +58,9 @@ import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
 import { effectiveLevels, type LiveStock, type StockAnswer } from "@/lib/stock/live-stock";
-import { asksFirst, materialLabel, type TileState } from "@/lib/stock/pos-states";
+import { asksFirst, materialLabel, settlePauseCall, type PauseResult, type TileState } from "@/lib/stock/pos-states";
 import { flagSoldWhileOut, setMenuPaused } from "@/app/actions/stock-pos";
-import { StockStateDialog, type PauseResult } from "./stock-state-dialog";
+import { StockStateDialog } from "./stock-state-dialog";
 import { useStockStates } from "./use-stock-states";
 import { useHeartbeat } from "./use-heartbeat";
 import { useDeviceSnapshot } from "./use-device-snapshot";
@@ -446,36 +446,46 @@ export function PosScreen({
   }
 
   /** "ยังมีของ ขายต่อ" (tile or chip): stop asking on this iPad, and flag it once without waiting. */
-  function confirmOut(materialId: string, productId: string) {
-    stockStates.suppress(materialId);
+  function confirmOut(materialIds: string[], productId: string) {
+    if (materialIds.length === 0) return;
+    stockStates.suppress(materialIds);
     // Fire and forget (R-D2a-22). Not sent offline: server actions run one at a time, so a request
     // hanging on a dead network would hold up the next sale's createOrder.
     if (online) {
-      void flagSoldWhileOut([materialId], productId).catch((e) => console.error("[pos] stock flag failed:", e));
+      void flagSoldWhileOut(materialIds, productId).catch((e) => console.error("[pos] stock flag failed:", e));
     }
   }
 
-  /** "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง". On success: shown at once, a toast, fresh levels now. */
+  /**
+   * "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง", given up after PAUSE_DEADLINE_MS (it may sit behind another
+   * server action): no answer counts as offline, never a dead end. On success: shown at once, a toast,
+   * fresh levels now. A late success only asks for fresh levels (the heartbeat shows it).
+   */
   async function changePause(product: PosProduct, paused: boolean): Promise<PauseResult> {
-    let res: { error?: string };
-    try {
-      res = await setMenuPaused(product.id, paused);
-    } catch (e) {
-      console.error("[pos] setMenuPaused failed:", e);
-      return { offline: true };
+    const call = setMenuPaused(product.id, paused);
+    const res = await settlePauseCall(call);
+    if ("offline" in res) {
+      call.then((late) => {
+        if (!late.error) heartbeat.checkNow();
+      }, (e) => console.error("[pos] setMenuPaused failed:", e));
+      return res;
     }
-    if (res.error) return { error: res.error };
+    if ("error" in res) return res;
     stockStates.markPaused(product.id, paused);
     toast.add({ title: `${paused ? "ปิดขาย" : "เปิดขาย"}: ${product.name}`, type: "success" });
     heartbeat.checkNow();
-    return { ok: true };
+    return res;
   }
 
   function renderStockAsk() {
     if (stockAsk === null) return null;
     const { product, state } = stockAsk;
-    // after "เปิดขายแล้วสั่ง" / "ขายแก้วนี้": the tap goes on as on a tile that is not paused
-    const goOnUnpaused = () => tapTile(product, stockStates.stateIgnoringPause(product.id));
+    // After "เปิดขายแล้วสั่ง" / "ขายแก้วนี้" the cashier has said the cup can be made: whatever makes it
+    // "หมด?" counts as "ยังมีของ ขายต่อ" (R-D2a-23), so it goes straight on, asked once, not twice.
+    const goOnUnpaused = () => {
+      confirmOut(stockStates.outMaterialsOf(product.id), product.id);
+      openProduct(product);
+    };
     if (state.kind === "out") {
       const materialId = state.materialId;
       return (
@@ -485,7 +495,7 @@ export function PosScreen({
           menuName={product.name}
           materialName={materialLabel(materialId, materialNames, stockCatalog)}
           onSell={() => {
-            confirmOut(materialId, product.id);
+            confirmOut([materialId], product.id);
             setStockAsk(null);
             openProduct(product);
           }}
@@ -493,6 +503,11 @@ export function PosScreen({
             run: async () => {
               const res = await changePause(product, true);
               if ("ok" in res) setStockAsk(null);
+              if ("offline" in res) {
+                // no answer in time: say so and let the cashier go on (the menu stays on sale)
+                setStockAsk(null);
+                toast.add({ title: `ปิดขาย ${product.name} ไม่สำเร็จ · เน็ตไม่ตอบ ลองใหม่อีกครั้ง`, type: "error" });
+              }
               return res;
             },
             disabledReason: online ? null : "ใช้ไม่ได้ตอนเน็ตหลุด",
@@ -1753,7 +1768,7 @@ export function PosScreen({
           editing={optionWindow.editing}
           stock={stockStates.view}
           materialName={(id) => materialLabel(id, materialNames, stockCatalog)}
-          onConfirmOut={(materialId) => confirmOut(materialId, optionWindow.product.id)}
+          onConfirmOut={(materialId) => confirmOut([materialId], optionWindow.product.id)}
           onSave={handleSaveFromWindow}
           onClose={() => setOptionWindow(null)}
         />
