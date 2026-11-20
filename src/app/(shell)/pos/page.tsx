@@ -125,7 +125,7 @@ export default async function PosPage() {
   // Today's queue counter, for the device snapshot. tenant_queue_counters has no member RLS policy,
   // so it is read with the admin client, scoped to this shop. No row yet means 0.
   const todayQueueDate = bangkokToday(new Date());
-  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId, stockRows, liveStockRows, bagRule] = await Promise.all([
+  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId, stockRows, liveStockRows, bagRule, materialRows] = await Promise.all([
     createAdminClient()
       .from("tenant_queue_counters")
       .select("last_number")
@@ -141,7 +141,18 @@ export default async function PosPage() {
     readLiveStock(supabase, profile.tenant_id),
     // The bag counter: only whether the shop counts bags and its one-per-N rule. No cost column.
     supabase.from("tenants").select("bag_material_id, bags_per_cups").eq("id", profile.tenant_id).single(),
+    // Names for "ระบบคิดว่า…หมด" (round D2a): only materials that can be out. A staff-readable column, no cost.
+    supabase
+      .from("raw_materials")
+      .select("id, name")
+      .eq("tenant_id", profile.tenant_id)
+      .eq("track_stock", true)
+      .is("archived_at", null),
   ]);
+  // A failed read only loses the words: the dialog then says "วัตถุดิบ".
+  const materialNames: Record<string, string> = Object.fromEntries(
+    (materialRows.data ?? []).map((m) => [m.id, m.name])
+  );
 
   return (
     <PosScreen
@@ -151,6 +162,7 @@ export default async function PosPage() {
       allModifiers={allModifiers}
       stockRows={stockRows}
       liveStockRows={liveStockRows}
+      materialNames={materialNames}
       bagsEnabled={bagRule.data?.bag_material_id != null}
       bagsPerCups={bagRule.data?.bags_per_cups ?? null}
       userName={profile.full_name ?? "ผู้ใช้"}

@@ -3,11 +3,15 @@
 // matcha (house row + special row, one pick), ความหวาน, หวานด้วย, the menu's other options, then a
 // folded "+ หมายเหตุ". Every row starts on its default, so a plain cup is menu → เพิ่มลงตะกร้า.
 // Opened on a cart line it starts on that line's picks and saving replaces the line.
+// Round D2a: a chip whose material is out stays, faded and dashed with "หมด?"; its first tap asks
+// (without "ปิดขาย") and "ยังมีของ ขายต่อ" then picks it. A new cup starts on the next house bean when
+// the menu's default is out.
 // The rules live in src/lib/stock/option-window.ts (pure, tested); this file only draws them.
 import { Fragment, useId, useMemo, useState, type ReactNode } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { formatPrice } from "@/lib/cash";
 import type { StockCatalog } from "@/lib/stock/stock-core";
+import { lowWord, OUT_WORD, type ChipStock, type StockView } from "@/lib/stock/pos-states";
 import {
   buildLine,
   footerText,
@@ -16,6 +20,7 @@ import {
   missingRequired,
   modifierHint,
   optionRows,
+  optionStock,
   pickLevel,
   pickShot,
   pickSlot,
@@ -25,12 +30,14 @@ import {
   shownSweetener,
   sweetenerHint,
   sweetenerLocked,
+  sweetenerStock,
   tapSpecial,
   toggleOption,
   type WindowState,
 } from "@/lib/stock/option-window";
 import type { CartItem, ModifierWithOptions, PosProduct } from "@/types/app";
 import { NoteEditor } from "./note-editor";
+import { StockStateDialog } from "./stock-state-dialog";
 
 type Props = {
   product: PosProduct;
@@ -38,16 +45,26 @@ type Props = {
   catalog: StockCatalog;
   /** The cart line being edited: the window opens on its picks and saving replaces it. */
   editing?: CartItem | null;
+  /** Levels and what this iPad stopped asking about (round D2a); null = no stock words on the chips. */
+  stock?: StockView | null;
+  /** The material's word in "ระบบคิดว่า…หมด". */
+  materialName?: (materialId: string) => string;
+  /** "ยังมีของ ขายต่อ" on a chip: stop asking about the material on this iPad and flag it. */
+  onConfirmOut?: (materialId: string) => void;
   /** The line to add (its cartItemKey is "" — the cart gives it one) or the edited line (its own key). */
   onSave: (item: CartItem) => void;
   onClose: () => void;
 };
 
-export function OptionWindow({ product, modifiers, catalog, editing = null, onSave, onClose }: Props) {
-  const rows = useMemo(() => optionRows(product.id, catalog), [product.id, catalog]);
+export function OptionWindow({
+  product, modifiers, catalog, editing = null, stock = null, materialName, onConfirmOut, onSave, onClose,
+}: Props) {
+  const rows = useMemo(() => optionRows(product.id, catalog, stock), [product.id, catalog, stock]);
   const [state, setState] = useState<WindowState>(() =>
-    initialWindowState(product.id, catalog, modifiers, editing ?? undefined)
+    initialWindowState(product.id, catalog, modifiers, editing ?? undefined, stock)
   );
+  // A "หมด?" chip tapped: the question, and the pick it makes once the cashier says there is some.
+  const [ask, setAsk] = useState<{ materialId: string; apply: (s: WindowState) => WindowState } | null>(null);
   const [note, setNote] = useState(editing?.note ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
   const noteId = useId();
@@ -72,6 +89,12 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
   function handleSave() {
     if (missing.length > 0) return;
     onSave(line);
+  }
+
+  /** A chip tap: one that would pick a "หมด?" chip asks first; anything else (incl. un-picking) goes on. */
+  function tap(chipStock: ChipStock | undefined, selected: boolean, apply: (s: WindowState) => WindowState) {
+    if (!selected && chipStock?.kind === "out") setAsk({ materialId: chipStock.materialId, apply });
+    else setState(apply);
   }
 
   return (
@@ -107,15 +130,19 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                 <Fragment key={slot.groupId}>
                   {slot.house.length > 0 && (
                     <ChipRow title={slot.houseTitle}>
-                      {slot.house.map((c) => (
-                        <ChoiceChip
-                          key={c.id}
-                          label={c.label}
-                          price={priceTag(c.priceDelta)}
-                          selected={state.slots[slot.groupId] === c.id}
-                          onClick={() => setState((s) => pickSlot(s, slot.groupId, c.id))}
-                        />
-                      ))}
+                      {slot.house.map((c) => {
+                        const selected = state.slots[slot.groupId] === c.id;
+                        return (
+                          <ChoiceChip
+                            key={c.id}
+                            label={c.label}
+                            price={priceTag(c.priceDelta)}
+                            selected={selected}
+                            stock={c.stock}
+                            onClick={() => tap(c.stock, selected, (s) => pickSlot(s, slot.groupId, c.id))}
+                          />
+                        );
+                      })}
                     </ChipRow>
                   )}
                   {slot.special.length > 0 && (
@@ -129,9 +156,10 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                             price={priceTag(c.priceDelta)}
                             special
                             selected={selected}
+                            stock={c.stock}
                             // tap again = ×2 (one more dose), a third tap = ×1
                             count={selected && state.counts[slot.groupId] === 2 ? 2 : null}
-                            onClick={() => setState((s) => tapSpecial(s, slot.groupId, c.id))}
+                            onClick={() => tap(c.stock, selected, (s) => tapSpecial(s, slot.groupId, c.id))}
                           />
                         );
                       })}
@@ -155,31 +183,40 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
               )}
               {rows.sweetness && rows.sweetness.sweeteners.length > 0 && (
                 <ChipRow title="หวานด้วย" hint={sweetenerHint(state, rows)} reserveHint>
-                  {rows.sweetness.sweeteners.map((c) => (
-                    <ChoiceChip
-                      key={c.id}
-                      label={c.label}
-                      price={null}
-                      selected={sweetener === c.id}
-                      disabled={locked}
-                      onClick={() => setState((s) => pickSweetener(s, rows, c.id))}
-                    />
-                  ))}
+                  {rows.sweetness.sweeteners.map((c) => {
+                    const chipStock = sweetenerStock(product.id, catalog, c.id, state.levelId, stock);
+                    return (
+                      <ChoiceChip
+                        key={c.id}
+                        label={c.label}
+                        price={null}
+                        selected={sweetener === c.id}
+                        disabled={locked}
+                        stock={chipStock}
+                        onClick={() => tap(chipStock, sweetener === c.id, (s) => pickSweetener(s, rows, c.id))}
+                      />
+                    );
+                  })}
                 </ChipRow>
               )}
 
               {modifiers.map((modifier) => (
                 <Fragment key={modifier.id}>
                   <ChipRow title={modifier.name} hint={modifierHint(modifier)}>
-                    {modifier.options.map((option) => (
-                      <ChoiceChip
-                        key={option.id}
-                        label={option.name}
-                        price={priceTag(option.priceDelta)}
-                        selected={(state.options[modifier.id] ?? []).includes(option.id)}
-                        onClick={() => setState((s) => toggleOption(s, modifier, option.id))}
-                      />
-                    ))}
+                    {modifier.options.map((option) => {
+                      const selected = (state.options[modifier.id] ?? []).includes(option.id);
+                      const chipStock = optionStock(option.id, catalog, stock);
+                      return (
+                        <ChoiceChip
+                          key={option.id}
+                          label={option.name}
+                          price={priceTag(option.priceDelta)}
+                          selected={selected}
+                          stock={chipStock}
+                          onClick={() => tap(chipStock, selected, (s) => toggleOption(s, modifier, option.id))}
+                        />
+                      );
+                    })}
                   </ChipRow>
                   {shots
                     .filter((row) => row.afterModifierId === modifier.id)
@@ -191,7 +228,8 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
                             label={c.label}
                             price={null}
                             selected={row.selectedId === c.id}
-                            onClick={() => setState((s) => pickShot(s, row.groupId, c.id))}
+                            stock={c.stock}
+                            onClick={() => tap(c.stock, row.selectedId === c.id, (s) => pickShot(s, row.groupId, c.id))}
                           />
                         ))}
                       </ChipRow>
@@ -245,6 +283,20 @@ export function OptionWindow({ product, modifiers, catalog, editing = null, onSa
               </div>
             </div>
           </div>
+          {/* Inside this popup, so it nests above the window (base-ui) and the window stays put. */}
+          {ask !== null && (
+            <StockStateDialog
+              kind="out"
+              menuName={product.name}
+              materialName={materialName?.(ask.materialId) ?? "วัตถุดิบ"}
+              onSell={() => {
+                onConfirmOut?.(ask.materialId);
+                setState(ask.apply);
+                setAsk(null);
+              }}
+              onCancel={() => setAsk(null)}
+            />
+          )}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -285,7 +337,8 @@ function ChipRow({
 /**
  * 56 px tall, 18 px text. Selected = solid accent, white text and a corner ✓ (seen from arm's length). A
  * special bean/matcha has an accent frame and an accent "+20"; doubled it reads "เคนยา +20 ×2". Disabled =
- * faded and untappable, never hidden.
+ * faded and untappable, never hidden. Stock (round D2a): out = grey, dashed, "หมด?" after the label (still
+ * tappable); low = "เหลือ ~N แก้ว" on a warning chip under the label.
  */
 function ChoiceChip({
   label,
@@ -294,6 +347,7 @@ function ChoiceChip({
   count = null,
   disabled = false,
   special = false,
+  stock,
   onClick,
 }: {
   label: string;
@@ -303,15 +357,19 @@ function ChoiceChip({
   count?: 2 | null;
   disabled?: boolean;
   special?: boolean;
+  stock?: ChipStock;
   onClick: () => void;
 }) {
+  const out = stock?.kind === "out";
   const look = selected
     ? "border-accent bg-accent text-white"
     : disabled
       ? "border-input bg-white text-sidebar opacity-40 cursor-not-allowed"
-      : special
-        ? "border-accent bg-white text-sidebar hover:bg-accent/5"
-        : "border-input bg-white text-sidebar hover:border-accent";
+      : out
+        ? "border-dashed border-muted-foreground/60 bg-muted text-muted-foreground"
+        : special
+          ? "border-accent bg-white text-sidebar hover:bg-accent/5"
+          : "border-input bg-white text-sidebar hover:border-accent";
   return (
     <button
       type="button"
@@ -331,9 +389,15 @@ function ChoiceChip({
         </span>
       )}
       <span className="min-w-0 break-words">{label}</span>
+      {out && <span className="shrink-0 whitespace-nowrap">{OUT_WORD}</span>}
       {(price || count === 2) && (
-        <span className={`shrink-0 whitespace-nowrap tabular-nums ${selected ? "text-white" : "text-accent"}`}>
+        <span className={`shrink-0 whitespace-nowrap tabular-nums ${selected ? "text-white" : out ? "" : "text-accent"}`}>
           {[price, count === 2 ? "×2" : null].filter((w) => w !== null).join(" ")}
+        </span>
+      )}
+      {stock?.kind === "low" && (
+        <span className="basis-full">
+          <span className="rounded bg-warning px-1.5 text-sm font-semibold text-sidebar">{lowWord(stock.cupsLeft)}</span>
         </span>
       )}
     </button>

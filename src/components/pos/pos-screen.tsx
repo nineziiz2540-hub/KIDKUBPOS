@@ -58,6 +58,10 @@ import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
 import { effectiveLevels, type LiveStock, type StockAnswer } from "@/lib/stock/live-stock";
+import { asksFirst, materialLabel, type TileState } from "@/lib/stock/pos-states";
+import { flagSoldWhileOut, setMenuPaused } from "@/app/actions/stock-pos";
+import { StockStateDialog, type PauseResult } from "./stock-state-dialog";
+import { useStockStates } from "./use-stock-states";
 import { useHeartbeat } from "./use-heartbeat";
 import { useDeviceSnapshot } from "./use-device-snapshot";
 import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
@@ -102,6 +106,8 @@ type Props = {
   stockRows: StockCatalogRows | null;
   /** Levels and paused menus as the page read them (round D2a); null = the read failed. */
   liveStockRows: StockAnswer | null;
+  /** Tracked materials' names, for "ระบบคิดว่า…หมด" (round D2a). No cost. */
+  materialNames: Record<string, string>;
   /** The shop counts carry-out bags (tenants.bag_material_id is set): the counter shows (round D2a). */
   bagsEnabled: boolean;
   /** One bag per this many cups for the automatic count; null = no rule (starts at 0). */
@@ -132,6 +138,7 @@ export function PosScreen({
   allModifiers,
   stockRows,
   liveStockRows,
+  materialNames,
   bagsEnabled,
   bagsPerCups,
   userName,
@@ -156,6 +163,8 @@ export function PosScreen({
   const [optionWindow, setOptionWindow] = useState<
     { product: PosProduct; editing: CartItem | null } | null
   >(null);
+  // A "หมด?" or "ปิดขาย" tile just tapped: its one question before the cup goes on (round D2a).
+  const [stockAsk, setStockAsk] = useState<{ product: PosProduct; state: TileState } | null>(null);
   // null = automatic (defaultBags of the cups); set once the cashier taps − or + (this bill only).
   const [manualBags, setManualBags] = useState<number | null>(null);
   const [orderType, setOrderType] = useState<"dine_in" | "take_away">("dine_in");
@@ -335,7 +344,6 @@ export function PosScreen({
   // Live stock (round D2a): the heartbeat's levels and paused menus, minus what this device's queued
   // bills will take once they are sent. Online the server's levels already include every synced bill;
   // offline it is the last known levels. Hints only — nothing here ever blocks a sale.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by the menu tiles in the next task (D2a T10)
   const liveStock: LiveStock | null = useMemo(
     () =>
       snapshot.stock
@@ -343,6 +351,9 @@ export function PosScreen({
         : null,
     [snapshot.stock, outbox.entries, tenantId, stockCatalog]
   );
+  const productIds = useMemo(() => products.map((p) => p.id), [products]);
+  // Each tile's "ปิดขาย / หมด? / เหลือ ~N แก้ว", and what this iPad stopped asking about (R-D2a-21).
+  const stockStates = useStockStates({ tenantId, renderedAt, liveStock, catalog: stockCatalog, productIds });
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
@@ -414,12 +425,104 @@ export function PosScreen({
     setApprovedForAmount(discountAmount);
   }
 
+  // A tap on a menu tile: "หมด?" and "ปิดขาย" ask once first (never refuse); "ok" and "เหลือ ~N แก้ว"
+  // go on exactly as before, with no extra tap.
   function handleProductClick(product: PosProduct) {
+    tapTile(product, stockStates.tileStates.get(product.id));
+  }
+
+  function tapTile(product: PosProduct, state: TileState | undefined) {
+    if (state && asksFirst(state)) setStockAsk({ product, state });
+    else openProduct(product);
+  }
+
+  /** The cup goes on: the option window, or straight into the cart for a menu without one. */
+  function openProduct(product: PosProduct) {
     if (productsWithOptions.has(product.id)) {
       setOptionWindow({ product, editing: null });
     } else {
       addDirectToCart(product);
     }
+  }
+
+  /** "ยังมีของ ขายต่อ" (tile or chip): stop asking on this iPad, and flag it once without waiting. */
+  function confirmOut(materialId: string, productId: string) {
+    stockStates.suppress(materialId);
+    // Fire and forget (R-D2a-22). Not sent offline: server actions run one at a time, so a request
+    // hanging on a dead network would hold up the next sale's createOrder.
+    if (online) {
+      void flagSoldWhileOut([materialId], productId).catch((e) => console.error("[pos] stock flag failed:", e));
+    }
+  }
+
+  /** "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง". On success: shown at once, a toast, fresh levels now. */
+  async function changePause(product: PosProduct, paused: boolean): Promise<PauseResult> {
+    let res: { error?: string };
+    try {
+      res = await setMenuPaused(product.id, paused);
+    } catch (e) {
+      console.error("[pos] setMenuPaused failed:", e);
+      return { offline: true };
+    }
+    if (res.error) return { error: res.error };
+    stockStates.markPaused(product.id, paused);
+    toast.add({ title: `${paused ? "ปิดขาย" : "เปิดขาย"}: ${product.name}`, type: "success" });
+    heartbeat.checkNow();
+    return { ok: true };
+  }
+
+  function renderStockAsk() {
+    if (stockAsk === null) return null;
+    const { product, state } = stockAsk;
+    // after "เปิดขายแล้วสั่ง" / "ขายแก้วนี้": the tap goes on as on a tile that is not paused
+    const goOnUnpaused = () => tapTile(product, stockStates.stateIgnoringPause(product.id));
+    if (state.kind === "out") {
+      const materialId = state.materialId;
+      return (
+        <StockStateDialog
+          key={`out-${product.id}`}
+          kind="out"
+          menuName={product.name}
+          materialName={materialLabel(materialId, materialNames, stockCatalog)}
+          onSell={() => {
+            confirmOut(materialId, product.id);
+            setStockAsk(null);
+            openProduct(product);
+          }}
+          pause={{
+            run: async () => {
+              const res = await changePause(product, true);
+              if ("ok" in res) setStockAsk(null);
+              return res;
+            },
+            disabledReason: online ? null : "ใช้ไม่ได้ตอนเน็ตหลุด",
+          }}
+          onCancel={() => setStockAsk(null)}
+        />
+      );
+    }
+    if (state.kind !== "paused") return null;
+    return (
+      <StockStateDialog
+        key={`paused-${product.id}`}
+        kind="paused"
+        menuName={product.name}
+        online={online}
+        onReopen={async () => {
+          const res = await changePause(product, false);
+          if ("ok" in res) {
+            setStockAsk(null);
+            goOnUnpaused();
+          }
+          return res;
+        }}
+        onSellOnce={() => {
+          setStockAsk(null);
+          goOnUnpaused();
+        }}
+        onCancel={() => setStockAsk(null)}
+      />
+    );
   }
 
   // A plain tap adds to the identical plain line if there is one (same rule as the option window).
@@ -1402,7 +1505,8 @@ export function PosScreen({
     showNoShift ||
     showMobileCart ||
     showReview ||
-    optionWindow !== null;
+    optionWindow !== null ||
+    stockAsk !== null;
   const paymentUnresolved = uncertain || checkoutPending || unresolvedRef !== null;
   const cartGates = { pinDiscount: pinDiscountGate, hold: holdGate, member: memberGate };
   // บันทึกไว้ในเครื่อง: only after a try got no answer, and never for a PIN discount (spec 6b).
@@ -1503,6 +1607,7 @@ export function PosScreen({
             products={products}
             categories={categories}
             productsWithModifiers={productsWithOptions}
+            tileStates={stockStates.tileStates}
             onProductClick={handleProductClick}
           />
         </div>
@@ -1646,10 +1751,14 @@ export function PosScreen({
           modifiers={optionWindowModifiers}
           catalog={stockCatalog}
           editing={optionWindow.editing}
+          stock={stockStates.view}
+          materialName={(id) => materialLabel(id, materialNames, stockCatalog)}
+          onConfirmOut={(materialId) => confirmOut(materialId, optionWindow.product.id)}
           onSave={handleSaveFromWindow}
           onClose={() => setOptionWindow(null)}
         />
       )}
+      {renderStockAsk()}
       {showQrModal && (
         <QrPaymentModal
           total={total}

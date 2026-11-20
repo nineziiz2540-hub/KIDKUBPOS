@@ -15,6 +15,7 @@ import {
   missingRequired,
   modifierHint,
   optionRows,
+  optionStock,
   pickLevel,
   pickShot,
   pickSlot,
@@ -25,10 +26,12 @@ import {
   shownSweetener,
   snapshotParts,
   sweetenerHint,
+  sweetenerStock,
   tapSpecial,
   toggleOption,
   type WindowState,
 } from "./option-window.ts";
+import { asksFirst, suppressedMaterials, suppressMaterial, tileState } from "./pos-states.ts";
 import { defaultChoices } from "./pos-choices.ts";
 import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
 import { cupPriceDeltaSatang, emptyStockCatalog, resolveLine, type ChoiceSnapshot, type ResolvedLine, type StockCatalog } from "./stock-core.ts";
@@ -944,4 +947,82 @@ test("houseGlassToggle shows only for a menu with packaging or a house-glass def
   assert.deepEqual(houseGlassToggle(plainLine(true), packagingCatalog(false)), { shown: true, on: true });
   assert.deepEqual(houseGlassToggle(plainLine(), packagingCatalog(true)), { shown: true, on: true });
   assert.deepEqual(houseGlassToggle(plainLine(false), packagingCatalog(true)), { shown: true, on: false });
+});
+
+// ── stock states on the chips (round D2a) ─────────────────────────────────
+
+const beanLevels = (o: Record<string, number> = {}) =>
+  new Map(Object.entries({ light: 5000, med: 5000, dark: 5000, kenya: 5000, ethiopia: 5000, ...o }));
+
+test("window starts on the next house member when the default is out", () => {
+  const view = { levels: beanLevels({ med: 0 }), suppressed: new Set<string>() };
+  const s = initialWindowState("latte", catalog, [extras], undefined, view);
+  assert.equal(s.slots.g_bean, "m_light");
+  // the cart shows the starting member like any choice, bold because it is not the menu default
+  const line = buildLine({ product: latte, modifiers: [extras], catalog, state: s, note: "", quantity: 1, key: "k" });
+  assert.equal(line.choices?.slots[0]?.memberId, "m_light");
+  assert.deepEqual(cartLineParts(line, defaultChoices("latte", catalog))[0], { text: "คั่วอ่อน", changed: true });
+  // the default chip itself shows "หมด?"
+  const rows = optionRows("latte", catalog, view);
+  assert.deepEqual(rows.slots[0]!.house.find((c) => c.id === "m_med")!.stock, { kind: "out", materialId: "med" });
+  // no stock data, a suppressed default, or a cart line being edited: the window starts as before
+  assert.equal(initialWindowState("latte", catalog, [extras]).slots.g_bean, "m_med");
+  assert.equal(initialWindowState("latte", catalog, [extras], undefined, { ...view, suppressed: new Set(["med"]) }).slots.g_bean, "m_med");
+  const editing = { selectedModifiers: [], choices: defaultChoices("latte", catalog) };
+  assert.equal(initialWindowState("latte", catalog, [extras], editing, view).slots.g_bean, "m_med");
+  // a menu sold on a special bean keeps it (its chip says "หมด?"): never a cheaper cup by itself
+  const noKenya = { levels: beanLevels({ kenya: 0 }), suppressed: new Set<string>() };
+  assert.equal(initialWindowState("kenya_default", catalog, [], undefined, noKenya).slots.g_bean, "m_kenya");
+});
+
+test("special chip out keeps the menu ok", () => {
+  const levels = beanLevels({ kenya: 0, ethiopia: 100 });
+  const view = { levels, suppressed: new Set<string>() };
+  const bean = optionRows("latte", catalog, view).slots[0]!;
+  assert.deepEqual(bean.special.find((c) => c.id === "m_kenya")!.stock, { kind: "out", materialId: "kenya" });
+  // 100 g at 18 g a cup
+  assert.deepEqual(bean.special.find((c) => c.id === "m_eth")!.stock, { kind: "low", cupsLeft: 5 });
+  assert.ok(bean.house.every((c) => c.stock === undefined));
+  assert.deepEqual(tileState("latte", catalog, { levels, paused: new Set(), at: 1 }, new Set()), { kind: "ok" });
+  // the window still starts on the menu default
+  assert.equal(initialWindowState("latte", catalog, [], undefined, view).slots.g_bean, "m_med");
+});
+
+test("out chip becomes selectable after the cashier confirms", () => {
+  const today = "2026-11-21";
+  const levels = beanLevels({ kenya: 0 });
+  const before = optionRows("latte", catalog, { levels, suppressed: new Set() }).slots[0]!.special.find((c) => c.id === "m_kenya")!;
+  assert.equal(asksFirst(before.stock), true);
+  // "ยังมีของ ขายต่อ": this iPad stops asking about kenya, then the chip is picked
+  const store = suppressMaterial({}, "kenya", levels.get("kenya")!, today);
+  const view = { levels, suppressed: suppressedMaterials(store, levels, today) };
+  const after = optionRows("latte", catalog, view).slots[0]!.special.find((c) => c.id === "m_kenya")!;
+  assert.equal(after.stock, undefined);
+  assert.equal(asksFirst(after.stock), false);
+  const picked = tapSpecial(initialWindowState("latte", catalog, [], undefined, view), "g_bean", "m_kenya");
+  assert.equal(picked.slots.g_bean, "m_kenya");
+});
+
+test("sweetener and option chips show their own stock", () => {
+  const c = buildStockCatalog({
+    ...rows(),
+    amounts: [
+      { product_id: null, member_id: "s_syrup", level_id: "lv_normal", amount: 20 },
+      { product_id: null, member_id: "s_condensed", level_id: "lv_normal", amount: 30 },
+      { product_id: null, member_id: "s_condensed", level_id: "lv_less", amount: 10 },
+    ],
+    optionEffects: [...rows().optionEffects, { option_id: "o_oat", kind: "material_add", group_id: null, raw_material_id: "mix", amount: 180 }],
+  });
+  const levels = new Map([["syrup", 5000], ["condensed", 25], ["mix", 100]]);
+  const view = { levels, suppressed: new Set<string>() };
+  // 25 ml of condensed milk: out at หวานปกติ (30), enough for 2 cups at หวานน้อย (10)
+  assert.deepEqual(sweetenerStock("latte", c, "s_condensed", "lv_normal", view), { kind: "out", materialId: "condensed" });
+  assert.deepEqual(sweetenerStock("latte", c, "s_condensed", "lv_less", view), { kind: "low", cupsLeft: 2 });
+  assert.equal(sweetenerStock("latte", c, "s_syrup", "lv_normal", view), undefined);
+  assert.equal(sweetenerStock("latte", c, "s_condensed", "lv_none", view), undefined);
+  assert.equal(sweetenerStock("latte", c, "s_condensed", "lv_normal", null), undefined);
+  // an option that adds a material: out under one cup; a slot_add option has no stock word of its own
+  assert.deepEqual(optionStock("o_oat", c, view), { kind: "out", materialId: "mix" });
+  assert.equal(optionStock("o_shot", c, view), undefined);
+  assert.equal(optionStock("o_oat", c, { levels, suppressed: new Set(["mix"]) }), undefined);
 });

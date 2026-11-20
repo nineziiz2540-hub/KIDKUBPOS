@@ -6,12 +6,15 @@ import type { CartChoices, CartItem, ModifierWithOptions, PosProduct, SelectedMo
 import { formatPrice } from "../cash.ts";
 import { lineTotal } from "../cart-math.ts";
 import { defaultChoices, isDefaultChoice } from "./pos-choices.ts";
+import { fallbackDefaults } from "./availability.ts";
+import { needsStock, type ChipStock, type StockView } from "./pos-states.ts";
 import {
   defaultLevel, defaultSlotMember, effectiveHouseGlass, slotAdds, slotCount,
   type ChoiceGroup, type ChoiceSnapshot, type GroupMember, type SlotForAdds, type StockCatalog,
 } from "./stock-core.ts";
 
-export type Chip = { id: string; label: string; priceDelta: number };
+/** `stock` (round D2a) only when the chip has a word to show: "หมด?" or "เหลือ ~N แก้ว". */
+export type Chip = { id: string; label: string; priceDelta: number; stock?: ChipStock };
 
 /** One bean/matcha choice: the house row and the special row share a single pick. */
 export type SlotRows = {
@@ -51,7 +54,7 @@ export type WindowState = {
   options: Record<string, string[]>;
 };
 
-type SlotLine = { groupId: string; defaultMemberId: string | null; allowSpecial: boolean };
+type SlotLine = { groupId: string; qty: number; defaultMemberId: string | null; allowSpecial: boolean };
 
 /** The menu's slot lines with a usable default: one per group, first line wins (as defaultChoices). */
 function slotLines(productId: string, catalog: StockCatalog): { line: SlotLine; group: ChoiceGroup; fallback: GroupMember }[] {
@@ -69,7 +72,13 @@ function slotLines(productId: string, catalog: StockCatalog): { line: SlotLine; 
   return out;
 }
 
-const chip = (m: GroupMember): Chip => ({ id: m.id, label: m.label, priceDelta: m.priceDelta });
+/** A member's chip; its stock word is for one dose of the menu's recipe (the slot line's qty). */
+function chip(m: GroupMember, qty: number, view: StockView | null | undefined): Chip {
+  const c: Chip = { id: m.id, label: m.label, priceDelta: m.priceDelta };
+  const stock = needsStock([{ materialId: m.materialId, qty }], view);
+  if (stock) c.stock = stock;
+  return c;
+}
 
 /** Screen words from spec §8.1 (bean / matcha); any other group goes by the name the owner gave it. */
 function titles(group: ChoiceGroup): { house: string; special: string; shot: string } {
@@ -78,17 +87,23 @@ function titles(group: ChoiceGroup): { house: string; special: string; shot: str
   return { house: group.name, special: `${group.name} พิเศษ`, shot: `ช็อตเพิ่มใช้${group.name}` };
 }
 
-/** The bean/matcha and sweetness rows this menu shows, in screen order. */
-export function optionRows(productId: string, catalog: StockCatalog): OptionRows {
+/**
+ * The bean/matcha and sweetness rows this menu shows, in screen order. With `view` (round D2a) each
+ * bean/matcha chip carries its stock word; a chip that is out stays on screen (spec decision 17).
+ * Sweetener chips get theirs from sweetenerStock (it depends on the level picked).
+ */
+export function optionRows(productId: string, catalog: StockCatalog, view?: StockView | null): OptionRows {
   const slots = slotLines(productId, catalog).map(({ line, group }): SlotRows => {
     const t = titles(group);
+    const chips = (tier: "house" | "special") =>
+      group.members.filter((m) => m.tier === tier).map((m) => chip(m, line.qty, view));
     return {
       groupId: group.id,
       houseTitle: t.house,
       specialTitle: t.special,
       shotTitle: t.shot,
-      house: group.members.filter((m) => m.tier === "house").map(chip),
-      special: line.allowSpecial ? group.members.filter((m) => m.tier === "special").map(chip) : [],
+      house: chips("house"),
+      special: line.allowSpecial ? chips("special") : [],
     };
   });
 
@@ -100,7 +115,7 @@ export function optionRows(productId: string, catalog: StockCatalog): OptionRows
     sweetness = {
       levels: catalog.levels.map((l) => ({ id: l.id, name: l.name, isNone: l.isNone })),
       // nothing to change to (spec 6.2.1: no ticks) → no row
-      sweeteners: offered.length > 1 ? offered.map(chip) : [],
+      sweeteners: offered.length > 1 ? offered.map((m) => ({ id: m.id, label: m.label, priceDelta: m.priceDelta })) : [],
     };
   }
   return { slots, sweetness };
@@ -196,12 +211,17 @@ export function refreshChoices(productId: string, catalog: StockCatalog, choices
   return settle(productId, catalog, picksOf(choices), optionIds);
 }
 
-/** Where the window starts: the menu defaults, or (editing) the line's own picks. */
+/**
+ * Where the window starts: the menu defaults, or (editing) the line's own picks. A new cup with stock
+ * data (round D2a, D2-4) starts each bean/matcha on fallbackDefaults: the next house member that is
+ * not out when the menu default is. A material the cashier said is still there counts as not out.
+ */
 export function initialWindowState(
   productId: string,
   catalog: StockCatalog,
   modifiers: ModifierWithOptions[],
-  from?: Pick<CartItem, "selectedModifiers" | "choices">
+  from?: Pick<CartItem, "selectedModifiers" | "choices">,
+  view?: StockView | null
 ): WindowState {
   const optionIds = from?.selectedModifiers.map((m) => m.optionId) ?? [];
   const start = from?.choices ? refreshChoices(productId, catalog, from.choices, optionIds) : defaultChoices(productId, catalog);
@@ -210,8 +230,15 @@ export function initialWindowState(
     const chosen = m.options.filter((o) => optionIds.includes(o.id)).map((o) => o.id);
     if (chosen.length > 0) options[m.id] = m.isMultiSelect ? chosen : chosen.slice(0, 1);
   }
+  const slots: Record<string, string> = Object.fromEntries(start.slots.map((s) => [s.groupId, s.memberId]));
+  if (!from && view) {
+    const levels = new Map([...view.levels].filter(([id]) => !view.suppressed.has(id)));
+    const fallback = fallbackDefaults(productId, catalog, levels, (id) => view.suppressed.has(id));
+    // only a HOUSE default moves (D2-4): a menu sold on a special bean never turns into a cheaper cup
+    for (const s of start.slots) if (s.tier === "house" && fallback[s.groupId]) slots[s.groupId] = fallback[s.groupId]!;
+  }
   return {
-    slots: Object.fromEntries(start.slots.map((s) => [s.groupId, s.memberId])),
+    slots,
     counts: countsOf(start),
     shots: shotsOf(start),
     levelId: start.sweetness?.levelId ?? null,
@@ -542,4 +569,30 @@ export function cartLineParts(
       changed: true,
     })),
   ];
+}
+
+/**
+ * A "หวานด้วย" chip's stock word at the level picked in the window (the amount differs per level).
+ * Nothing at "ไม่หวาน" (the row is locked), for an untracked sweetener, or without stock data.
+ */
+export function sweetenerStock(
+  productId: string, catalog: StockCatalog, memberId: string, levelId: string | null, view: StockView | null | undefined
+): ChipStock | undefined {
+  const ps = catalog.productSweetness.get(productId);
+  const member = ps ? catalog.groups.get(ps.groupId)?.members.find((m) => m.id === memberId) : undefined;
+  const level = catalog.levels.find((l) => l.id === levelId);
+  if (!ps || !member || !level || level.isNone) return undefined;
+  const qty = (ps.custom ?? catalog.standardSweetness).get(`${member.id}:${level.id}`) ?? 0;
+  return needsStock([{ materialId: member.materialId, qty }], view);
+}
+
+/**
+ * A modifier option's stock word from the materials it adds (material_add, e.g. นมโอ๊ต). An extra
+ * shot (slot_add) has none of its own: its bean chip already shows it.
+ */
+export function optionStock(optionId: string, catalog: StockCatalog, view: StockView | null | undefined): ChipStock | undefined {
+  const needs = (catalog.optionEffects.get(optionId) ?? []).flatMap((e) =>
+    e.kind === "material_add" ? [{ materialId: e.materialId, qty: e.qty }] : []
+  );
+  return needsStock(needs, view);
 }
