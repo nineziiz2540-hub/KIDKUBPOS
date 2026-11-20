@@ -8,8 +8,10 @@ import {
   updateBusinessSettings,
   updatePromptPayId,
   updateCashFloatDefault,
+  updateBagSettings,
 } from "@/app/actions/settings";
 import { CashFloatForm } from "@/components/settings/cash-float-form";
+import { BagSettingsForm } from "@/components/settings/bag-settings-form";
 import { StoreNameForm } from "@/components/settings/store-name-form";
 import { BusinessSettingsForm } from "@/components/settings/business-settings-form";
 import { PromptPayForm } from "@/components/settings/promptpay-form";
@@ -21,11 +23,35 @@ export default async function SettingsPage() {
   if (profile.role !== "owner") redirect("/");
 
   const supabase = await createClient();
-  const { data: tenant } = await supabase
-    .from("tenants")
-    .select("name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id, cash_float_default")
-    .eq("id", profile.tenant_id)
-    .single();
+  const [{ data: tenant }, { data: bagMaterials }] = await Promise.all([
+    supabase
+      .from("tenants")
+      .select(
+        "name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id, cash_float_default, bag_material_id, bags_per_cups"
+      )
+      .eq("id", profile.tenant_id)
+      .single(),
+    // "วัตถุดิบถุง": only the shop's counted (track_stock) materials that are in use (R-D2a-11). No cost column.
+    supabase
+      .from("raw_materials")
+      .select("id, name, unit, category")
+      .eq("tenant_id", profile.tenant_id)
+      .is("archived_at", null)
+      .eq("track_stock", true)
+      .order("name"),
+  ]);
+  const bagMaterialId = tenant?.bag_material_id ?? null;
+  // The saved bag material may have been archived or stopped being counted since: name it so the owner re-picks.
+  let staleBagName: string | null = null;
+  if (bagMaterialId !== null && !(bagMaterials ?? []).some((m) => m.id === bagMaterialId)) {
+    const { data: stale } = await supabase
+      .from("raw_materials")
+      .select("name")
+      .eq("id", bagMaterialId)
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle();
+    staleBagName = stale?.name ?? "วัตถุดิบเดิม";
+  }
 
   const { data: mfaFactors } = await supabase.auth.mfa.listFactors();
   const hasMfaEnabled = mfaFactors?.totp.some((f) => f.status === "verified") ?? false;
@@ -71,6 +97,17 @@ export default async function SettingsPage() {
         <CashFloatForm
           action={updateCashFloatDefault}
           defaultValue={Number(tenant?.cash_float_default ?? 1000)}
+        />
+      </div>
+
+      {/* Carry-out bags (round D2a) */}
+      <div className="rounded-lg border bg-white p-5 space-y-4">
+        <h2 className="text-base font-semibold text-sidebar">ถุงหิ้ว</h2>
+        <BagSettingsForm
+          action={updateBagSettings}
+          materials={bagMaterials ?? []}
+          defaults={{ materialId: bagMaterialId, bagsPerCups: tenant?.bags_per_cups ?? null }}
+          staleMaterialName={staleBagName}
         />
       </div>
 

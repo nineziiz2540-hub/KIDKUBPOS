@@ -1,8 +1,10 @@
 -- Menu editor saves (round D1, Task 12) — DB test for save_menu / replace_product_recipes with
 -- bean/matcha slot lines and the menu's sweetness, and save_option_effects ("ผลต่อสต๊อก").
--- EXPECTS 20261118170000_save_menu_slots.sql TO BE APPLIED.
+-- Round D2a, Task 8 adds the menu's packaging ("ภาชนะ": packaging_set_id, house_glass_default).
+-- EXPECTS 20261118170000_save_menu_slots.sql AND 20261123150000_save_menu_packaging.sql TO BE APPLIED.
 -- (Dry run: send the migration text + this file in ONE execute_sql call; alone, before the migration,
---  the slot / sweetness keys come back false.)
+--  the slot / sweetness keys — and since D2a the packaging keys — come back false.)
+-- `_save_menu_md5` is a diagnostic (md5 of save_menu's prosrc), not a check.
 -- It never commits: it ends with raise exception 'RESULT <json>', so every row it creates is rolled back.
 -- Every key must be true. Sessions are simulated with `set local role` + request.jwt.claims, as PostgREST does.
 do $$
@@ -19,6 +21,8 @@ declare
   p1 uuid; p2 uuid; p3 uuid; p4 uuid; p5 uuid;
   mArch uuid;
   modA uuid; optA uuid; modB uuid; optB uuid;
+  pkA uuid; pkA2 uuid; pkArch uuid; pkB uuid;  -- packaging sets (D2a)
+  p6 uuid; p7 uuid; p8 uuid;
   err text;
   ok boolean;
   menu jsonb;
@@ -615,6 +619,152 @@ begin
     err is null and (select count(*) = 0 from public.modifier_option_effects where option_id = optA)
     and (select count(*) = 1 from public.modifier_option_effects where option_id = optB));
 
+  -- ── packaging (round D2a, Task 8): the menu's "ภาชนะ" ───────────────────
+  -- fixtures (as the default role): two live sets and an archived one in shop A, one set in shop B
+  insert into public.packaging_sets (tenant_id, name) values (ta, 'แก้วเย็น 16oz') returning id into pkA;
+  insert into public.packaging_sets (tenant_id, name) values (ta, 'แก้วร้อน 8oz') returning id into pkA2;
+  insert into public.packaging_sets (tenant_id, name, archived_at) values (ta, 'ชุดเก่า', now()) returning id into pkArch;
+  insert into public.packaging_sets (tenant_id, name) values (tb, 'ชุดร้าน B') returning id into pkB;
+
+  -- the editor's keys are written: a new menu with a set + house glass, an existing menu switched to another set
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    p6 := public.save_menu(null, jsonb_build_object('name', 'ชาเย็น', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', pkA, 'house_glass_default', true),
+                           '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null and p6 is not null;
+  err := null;
+  begin
+    perform public.save_menu(p2, jsonb_build_object('name', 'เดอร์ตี้มัทฉะ', 'price', 75, 'is_active', true,
+                                                    'packaging_set_id', pkA2, 'house_glass_default', true),
+      (select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('line_kind', line_kind, 'raw_material_id', raw_material_id,
+                 'group_id', group_id, 'quantity_used', quantity_used, 'default_member_id', default_member_id,
+                 'allow_special', allow_special)))
+         from public.product_recipes where product_id = p2),
+      '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null;
+  reset role;
+  r := r || jsonb_build_object('save_menu_writes_packaging',
+    ok
+    and (select packaging_set_id = pkA and house_glass_default from public.products where id = p6)
+    and (select packaging_set_id = pkA2 and house_glass_default from public.products where id = p2)
+    and (select count(*) = 3 from public.product_recipes where product_id = p2));
+  r := r || jsonb_build_object('_packaging_err', coalesce(err, 'none'));
+
+  -- R-D2a-18: the deployed D1 editor sends neither key. An existing menu keeps its set and its house-glass
+  -- default; a new menu gets no set and no house glass.
+  update public.products set packaging_set_id = pkA2, house_glass_default = true where id = p1;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_menu(p1, jsonb_build_object('name', 'ลาเต้ (D1)', 'price', 60, 'is_active', true),
+      jsonb_build_array(jsonb_build_object('raw_material_id', mMilk, 'quantity_used', 200)),
+      '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null;
+  err := null;
+  begin
+    p7 := public.save_menu(null, jsonb_build_object('name', 'น้ำส้ม', 'price', 40, 'is_active', true), '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null and p7 is not null;
+  reset role;
+  r := r || jsonb_build_object('save_menu_without_packaging_keys_unchanged',
+    ok
+    and (select name = 'ลาเต้ (D1)' and price = 60 and packaging_set_id = pkA2 and house_glass_default
+           from public.products where id = p1)
+    and (select packaging_set_id is null and not house_glass_default from public.products where id = p7));
+
+  -- a present null clears the set ("ไม่หักภาชนะ"); the house-glass key absent leaves it as it is
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_menu(p1, jsonb_build_object('name', 'ลาเต้ (D1)', 'price', 60, 'is_active', true,
+                                                    'packaging_set_id', null),
+      jsonb_build_array(jsonb_build_object('raw_material_id', mMilk, 'quantity_used', 200)), '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null
+    and (select packaging_set_id is null and house_glass_default from public.products where id = p1);
+  err := null;
+  begin
+    perform public.save_menu(p1, jsonb_build_object('name', 'ลาเต้ (D1)', 'price', 60, 'is_active', true,
+                                                    'house_glass_default', false),
+      jsonb_build_array(jsonb_build_object('raw_material_id', mMilk, 'quantity_used', 200)), '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err is null
+    and (select packaging_set_id is null and not house_glass_default from public.products where id = p1);
+  reset role;
+  r := r || jsonb_build_object('save_menu_null_clears_packaging', ok);
+
+  -- another shop's set, or a set that does not exist, is refused; nothing changes (edit and create)
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_menu(p6, jsonb_build_object('name', 'ชาเย็น (ไม่ควรติด)', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', pkB, 'house_glass_default', false),
+      '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'packaging_set_not_found';
+  err := null;
+  begin
+    p8 := public.save_menu(null, jsonb_build_object('name', 'ห้ามสร้าง', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', pkB),
+      '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'packaging_set_not_found' and p8 is null;
+  err := null;
+  begin
+    perform public.save_menu(p6, jsonb_build_object('name', 'ชาเย็น (ไม่ควรติด)', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', gen_random_uuid()),
+      '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'packaging_set_not_found';
+  reset role;
+  r := r || jsonb_build_object('save_menu_refuses_foreign_set',
+    ok
+    and (select name = 'ชาเย็น' and packaging_set_id = pkA and house_glass_default from public.products where id = p6)
+    and (select count(*) = 0 from public.products where name = 'ห้ามสร้าง'));
+
+  -- an archived set of the shop is refused too (it would deduct nothing at the till); nothing changes
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  ok := true;
+  err := null;
+  begin
+    perform public.save_menu(p6, jsonb_build_object('name', 'ชาเย็น (ไม่ควรติด)', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', pkArch),
+      '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'packaging_set_not_found';
+  err := null;
+  begin
+    p8 := public.save_menu(null, jsonb_build_object('name', 'ห้ามสร้าง', 'price', 50, 'is_active', true,
+                                                    'packaging_set_id', pkArch),
+      '[]'::jsonb, '{}'::uuid[]);
+  exception when others then err := sqlerrm; end;
+  ok := ok and err = 'packaging_set_not_found' and p8 is null;
+  reset role;
+  r := r || jsonb_build_object('save_menu_refuses_archived_set',
+    ok
+    and (select name = 'ชาเย็น' and packaging_set_id = pkA and house_glass_default from public.products where id = p6)
+    and (select count(*) = 0 from public.products where name = 'ห้ามสร้าง'));
+
+  -- the set row is locked FOR SHARE before archived_at is checked (archive_packaging_set locks it FOR UPDATE,
+  -- so a concurrent archive and save serialise); a single session cannot race, so this reads the body
+  r := r || jsonb_build_object('save_menu_locks_set_for_share',
+    (select prosrc ~* 'from\s+packaging_sets\s+s\s+where\s+s\.id\s*=\s*v_set\s+and\s+s\.tenant_id\s*=\s*v_tenant\s+for\s+share'
+       from pg_proc where oid = 'public.save_menu(uuid, jsonb, jsonb, uuid[])'::regprocedure));
+
   -- ── grants: anon cannot call any of the three functions ─────────────────
   r := r || jsonb_build_object('grants_kept',
     not has_function_privilege('anon', 'public.save_menu(uuid, jsonb, jsonb, uuid[])', 'execute')
@@ -632,6 +782,8 @@ begin
     and (select not prosecdef from pg_proc where oid = 'public.save_option_effects(uuid, jsonb)'::regprocedure)
     and (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'public' and p.proname = 'save_option_effects'));
+  r := r || jsonb_build_object('_save_menu_md5',
+    (select md5(prosrc) from pg_proc where oid = 'public.save_menu(uuid, jsonb, jsonb, uuid[])'::regprocedure));
 
   raise exception 'RESULT %', r;
 end $$;

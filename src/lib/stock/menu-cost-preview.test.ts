@@ -225,3 +225,16 @@ test("menu cost preview includes packaging cost", () => {
   });
   assert.deepEqual(withSet.cups.map((c) => c.costSatang), base.cups.map((c) => c.costSatang + 325));
 });
+
+test("menu cost preview: a menu normally served in แก้วร้าน has no packaging in its default cup", () => {
+  const cup = { id: "cup16", name: "แก้ว 16oz", unit: "pcs", costPerUnit: 2.5, archived: false };
+  const base = menuCostPreview(input());
+  const pk = { name: "แก้วเย็น", items: [{ materialId: "cup16", qty: 1 }] };
+  const glass = menuCostPreview({ ...input(), materials: [...materials, cup], packaging: { ...pk, houseGlassDefault: true } });
+  assert.deepEqual(glass.cups.map((c) => c.costSatang), base.cups.map((c) => c.costSatang));
+  const set = menuCostPreview({ ...input(), materials: [...materials, cup], packaging: { ...pk, houseGlassDefault: false } });
+  assert.deepEqual(set.cups.map((c) => c.costSatang), base.cups.map((c) => c.costSatang + 250));
+  // a set alone (no recipe yet) still prices the cup: the editor shows the preview as soon as a set is picked
+  const only = menuCostPreview({ ...input({ recipes: [], sweetness: null }), materials: [...materials, cup], packaging: pk });
+  assert.deepEqual(only.cups, [{ levelId: null, levelName: null, costSatang: 250 }]);
+});

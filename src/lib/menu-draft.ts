@@ -51,6 +51,10 @@ export type MenuDraft = {
   modifierIds: string[];
   /** undefined = leave the menu's sweetness as it is; null = the menu has no sweetness */
   sweetness?: SweetnessDraft | null;
+  /** "ภาชนะ" (D2a): undefined = leave the menu's set as it is; null = "ไม่หักภาชนะ" */
+  packagingSetId?: string | null;
+  /** "ปกติเสิร์ฟแก้วร้าน" (D2a): undefined = leave as it is */
+  houseGlassDefault?: boolean;
 };
 
 export type RecipeLine =
@@ -72,6 +76,10 @@ export type MenuValue = {
   modifierIds: string[];
   /** undefined = not sent (the menu's sweetness is left as it is) */
   sweetness?: SweetnessValue | null;
+  /** undefined = not sent (left as it is); null = no set */
+  packagingSetId?: string | null;
+  /** undefined = not sent (left as it is) */
+  houseGlassDefault?: boolean;
 };
 
 export const RECIPE_QTY_ERROR = "ปริมาณวัตถุดิบไม่ถูกต้อง";
@@ -221,10 +229,22 @@ export function parseMenuDraft(d: MenuDraft): { value: MenuValue } | { error: st
     if ("error" in sweetness) return sweetness;
     value.sweetness = sweetness.value;
   }
+  // Packaging: the database checks the set is this shop's and not archived (packaging_set_not_found).
+  if (d.packagingSetId !== undefined) {
+    if (d.packagingSetId !== null && !isId(d.packagingSetId)) return { error: BAD_INPUT };
+    value.packagingSetId = d.packagingSetId;
+  }
+  if (d.houseGlassDefault !== undefined) {
+    if (typeof d.houseGlassDefault !== "boolean") return { error: BAD_INPUT };
+    value.houseGlassDefault = d.houseGlassDefault;
+  }
   return { value };
 }
 
-/** save_menu's arguments for a checked draft. `sweetness` is only sent when the draft carried it. */
+/**
+ * save_menu's arguments for a checked draft. `sweetness`, `packaging_set_id` and `house_glass_default` are
+ * only sent when the draft carried them (an absent key leaves the menu's value as it is).
+ */
 export function menuSavePayload(v: MenuValue): {
   p_menu: Record<string, unknown>;
   p_recipes: Record<string, unknown>[];
@@ -251,6 +271,8 @@ export function menuSavePayload(v: MenuValue): {
             custom: v.sweetness.custom.map((c) => ({ member_id: c.memberId, level_id: c.levelId, amount: c.amount })),
           };
   }
+  if (v.packagingSetId !== undefined) p_menu.packaging_set_id = v.packagingSetId;
+  if (v.houseGlassDefault !== undefined) p_menu.house_glass_default = v.houseGlassDefault;
   const p_recipes = v.recipes.map((r) =>
     r.kind === "fixed"
       ? { line_kind: "fixed", raw_material_id: r.rawMaterialId, quantity_used: r.quantityUsed }
@@ -276,6 +298,9 @@ export type MenuRows = {
     category_id: string | null;
     drink_type: string | null;
     is_active: boolean;
+    /** read by the D2a edit page; a row without them gives a draft without them (nothing is wiped on save) */
+    packaging_set_id?: string | null;
+    house_glass_default?: boolean;
   };
   /** product_recipes */
   recipes: {
@@ -348,7 +373,7 @@ export function menuDraftFromRows(rows: MenuRows): MenuDraft {
     };
   }
 
-  return {
+  const draft: MenuDraft = {
     name: rows.product.name,
     price: String(Number(rows.product.price)),
     description: rows.product.description ?? "",
@@ -359,6 +384,9 @@ export function menuDraftFromRows(rows: MenuRows): MenuDraft {
     modifierIds: rows.modifierIds,
     sweetness,
   };
+  if (rows.product.packaging_set_id !== undefined) draft.packagingSetId = rows.product.packaging_set_id;
+  if (rows.product.house_glass_default !== undefined) draft.houseGlassDefault = rows.product.house_glass_default;
+  return draft;
 }
 
 /**

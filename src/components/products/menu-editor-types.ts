@@ -21,5 +21,8 @@ export type EditorGroup = {
 /** A material with its current cost: owner/manager pages only. */
 export type EditorMaterial = { id: string; name: string; unit: string; costPerUnit: number; archived: boolean };
 
+/** A live (not archived) "ชุดภาชนะ" with its items, qty per cup (round D2a). */
+export type EditorPackagingSet = { id: string; name: string; items: { materialId: string; qty: number }[] };
+
 export type EditorLevel = { id: string; name: string; isNone: boolean; isDefault: boolean };
 export type EditorAmount = { member_id: string; level_id: string; amount: number };

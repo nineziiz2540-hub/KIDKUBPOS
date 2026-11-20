@@ -44,6 +44,8 @@ export default async function NewMenuPage({
         recipes: [],
         modifierIds: [],
         sweetness: null,
+        packagingSetId: null,
+        houseGlassDefault: false,
       }}
       imageUrl={null}
       categories={categories ?? []}
@@ -52,6 +54,7 @@ export default async function NewMenuPage({
       groups={refs.groups}
       levels={refs.levels}
       standardAmounts={refs.standardAmounts}
+      packagingSets={refs.packagingSets}
     />
   );
 }

@@ -63,7 +63,7 @@ export default async function InventoryPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-sidebar">
             <FlaskConical size={24} />
@@ -77,6 +77,12 @@ export default async function InventoryPage({
             className="inline-flex h-14 items-center rounded-lg border bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted"
           >
             กลุ่มตัวเลือก
+          </Link>
+          <Link
+            href="/inventory/packaging"
+            className="inline-flex h-14 items-center rounded-lg border bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted"
+          >
+            ชุดภาชนะ
           </Link>
           <Link
             href="/inventory/sweetness"

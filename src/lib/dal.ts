@@ -1848,3 +1848,38 @@ export async function getSweetnessConfig(
     amounts: (amounts ?? []).map((a) => ({ member_id: a.member_id, level_id: a.level_id, amount: Number(a.amount) })),
   };
 }
+
+// ── "ชุดภาชนะ" (round D2a, Task 8) ─────────────────────────────────────────────────────────────────
+// No cost columns here (costs come from getRawMaterials on the owner/manager pages). Every member of the shop
+// may read sets (RLS). Throws on a failed read: the menu editor treats "not in this list" as "archived", so a
+// silently empty list would make a save clear a live set.
+
+export type PackagingSetView = { id: string; name: string; items: { materialId: string; qty: number }[] };
+
+/** The shop's live (not archived) packaging sets, by sort order then name, with their items. */
+export async function getPackagingSets(tenantId: string): Promise<PackagingSetView[]> {
+  const supabase = await createClient();
+  const [sets, items] = await Promise.all([
+    supabase
+      .from("packaging_sets")
+      .select("id, name")
+      .eq("tenant_id", tenantId)
+      .is("archived_at", null)
+      .order("sort_order")
+      .order("name"),
+    supabase
+      .from("packaging_set_items")
+      .select("set_id, raw_material_id, qty")
+      .eq("tenant_id", tenantId)
+      .order("id"),
+  ]);
+  if (sets.error) throw sets.error;
+  if (items.error) throw items.error;
+  return (sets.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    items: (items.data ?? [])
+      .filter((i) => i.set_id === s.id)
+      .map((i) => ({ materialId: i.raw_material_id, qty: Number(i.qty) })),
+  }));
+}

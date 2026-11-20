@@ -5,6 +5,7 @@ import { getProfile } from "@/lib/dal";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MAX_FLOAT, parseAmount } from "@/lib/shift-math";
+import { parseBagSettings } from "@/lib/stock/packaging-input";
 
 export type SettingsState = { error?: string; success?: boolean } | undefined;
 
@@ -173,6 +174,55 @@ export async function updateCashFloatDefault(
 
   revalidatePath("/settings");
   revalidatePath("/shifts");
+  return { success: true };
+}
+
+/**
+ * "ถุงหิ้ว" (round D2a): the shop's bag material ("วัตถุดิบถุง") and the bags a bill starts with
+ * ("ถุงเริ่มต้นต่อบิล": none, or 1 bag per N cups, N 1–20). Owner only; the tenant is the caller's own.
+ */
+export async function updateBagSettings(
+  prevState: SettingsState,
+  formData: FormData
+): Promise<SettingsState> {
+  const profile = await getProfile();
+  if (!profile || profile.role !== "owner") {
+    return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  }
+
+  const parsed = parseBagSettings({
+    materialId: formData.get("bag_material_id"),
+    mode: formData.get("bag_mode"),
+    perCups: formData.get("bags_per_cups"),
+  });
+  if ("error" in parsed) return { error: parsed.error };
+  const { bagMaterialId, bagsPerCups } = parsed.value;
+
+  // The bag is one of THIS shop's materials, still in use, and counted: an untracked bag would write no
+  // stock row at the till, so its cost would vanish from the reports (R-D2a-11).
+  if (bagMaterialId !== null) {
+    const { data: material, error: materialError } = await createAdminClient()
+      .from("raw_materials")
+      .select("id")
+      .eq("id", bagMaterialId)
+      .eq("tenant_id", profile.tenant_id)
+      .is("archived_at", null)
+      .eq("track_stock", true)
+      .maybeSingle();
+    if (materialError) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+    if (!material) return { error: "ไม่พบวัตถุดิบถุงนี้ หรือไม่ได้นับสต๊อก — รีเฟรชหน้าแล้วเลือกใหม่" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("tenants")
+    .update({ bag_material_id: bagMaterialId, bags_per_cups: bagsPerCups })
+    .eq("id", profile.tenant_id);
+
+  if (error) return { error: "บันทึกข้อมูลไม่สำเร็จ" };
+
+  revalidatePath("/settings");
+  revalidatePath("/pos"); // the bag counter and its starting count
   return { success: true };
 }
 

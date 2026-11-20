@@ -21,7 +21,8 @@ import {
 import type { ModifierWithOptions } from "@/types/app";
 import { RecipeLinesEditor } from "./recipe-lines-editor";
 import { MenuSweetnessEditor } from "./menu-sweetness-editor";
-import type { EditorAmount, EditorGroup, EditorLevel, EditorMaterial } from "./menu-editor-types";
+import { packagingSetCost } from "@/lib/stock/packaging-input";
+import type { EditorAmount, EditorGroup, EditorLevel, EditorMaterial, EditorPackagingSet } from "./menu-editor-types";
 
 type MenuEditorProps = {
   productId: string | null;
@@ -36,6 +37,10 @@ type MenuEditorProps = {
   /** the shop's sweetness levels in order, and its standard sweetness table */
   levels: EditorLevel[];
   standardAmounts: EditorAmount[];
+  /** the shop's live "ชุดภาชนะ" (round D2a) */
+  packagingSets: EditorPackagingSet[];
+  /** the menu pointed at a set that has been archived (the editor starts at "ไม่หักภาชนะ") */
+  packagingSetArchived?: boolean;
   /** Set when a create landed here because the photo upload failed. */
   photoFailed?: boolean;
 };
@@ -75,6 +80,8 @@ export function MenuEditor({
   groups,
   levels,
   standardAmounts,
+  packagingSets,
+  packagingSetArchived = false,
   photoFailed = false,
 }: MenuEditorProps) {
   const router = useRouter();
@@ -107,11 +114,23 @@ export function MenuEditor({
     Number(draft.price) >= HIGH_PRICE_CONFIRM && draft.price.trim() !== initial.price.trim();
   const lineGroups = groups.filter((g) => g.kind !== "sweetener");
   const sweetenerGroups = groups.filter((g) => g.kind === "sweetener");
+  // The menu's packaging set: deducted per cup unless the cup is served in a "แก้วร้าน" (round D2a).
+  const packagingSet = packagingSets.find((s) => s.id === draft.packagingSetId) ?? null;
+  const houseGlass = draft.houseGlassDefault ?? false;
+  const setCost = packagingSet ? packagingSetCost(packagingSet.items, materials) : null;
   // Cost per cup at today's material costs, resolved exactly as the till would (owner/manager pages only).
-  const preview = menuCostPreview({ draft, groups, levels, standardAmounts, materials });
-  const previewText = draft.recipes.some((r) => (r.kind === "fixed" ? r.rawMaterialId : r.groupId) !== "") || draft.sweetness
-    ? costPreviewText(preview)
-    : null;
+  const preview = menuCostPreview({
+    draft,
+    groups,
+    levels,
+    standardAmounts,
+    materials,
+    packaging: packagingSet && { name: packagingSet.name, items: packagingSet.items, houseGlassDefault: houseGlass },
+  });
+  const previewText =
+    draft.recipes.some((r) => (r.kind === "fixed" ? r.rawMaterialId : r.groupId) !== "") || draft.sweetness || packagingSet
+      ? costPreviewText(preview)
+      : null;
 
   function update(patch: Partial<MenuDraft>) {
     setDraft((d) => ({ ...d, ...patch }));
@@ -454,6 +473,72 @@ export function MenuEditor({
             />
           </section>
 
+          <section className={CARD}>
+            <h2 className="text-[19px] font-semibold text-sidebar">ภาชนะ</h2>
+            <div>
+              <label htmlFor="menu-packaging" className={LABEL}>ชุดภาชนะที่หักต่อแก้ว</label>
+              <select
+                id="menu-packaging"
+                value={draft.packagingSetId ?? ""}
+                onChange={(e) => update({ packagingSetId: e.target.value === "" ? null : e.target.value })}
+                className={FIELD}
+              >
+                <option value="">ไม่หักภาชนะ</option>
+                {packagingSets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              {packagingSetArchived && draft.packagingSetId == null && (
+                <p role="status" className="mt-2 text-[15px] font-medium text-sidebar">
+                  <span className="mr-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-[13px] font-semibold">
+                    ชุดภาชนะถูกเก็บแล้ว
+                  </span>
+                  เลือกชุดใหม่ หรือบันทึกเป็น “ไม่หักภาชนะ”
+                </p>
+              )}
+              {packagingSets.length === 0 ? (
+                <p className="mt-2 text-base text-muted-foreground">
+                  ยังไม่มีชุดภาชนะ —{" "}
+                  <Link href="/inventory/packaging" className="text-accent font-medium hover:underline">
+                    ไปสร้างที่หน้าชุดภาชนะ
+                  </Link>
+                </p>
+              ) : (
+                setCost && (
+                  <p className="mt-2 text-[15px] text-muted-foreground">
+                    ต้นทุนภาชนะ ฿{formatPrice(setCost.costSatang / 100)} ต่อแก้ว
+                    {setCost.missingMaterials.length > 0 && ` (ยังไม่มีราคาทุน: ${setCost.missingMaterials.join(", ")})`}
+                  </p>
+                )
+              )}
+            </div>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={houseGlass}
+              onClick={() => update({ houseGlassDefault: !houseGlass })}
+              className={`w-full min-h-[60px] rounded-xl border px-4 py-2 flex items-center gap-3 text-left transition-colors ${
+                houseGlass ? "border-2 border-accent bg-accent/5" : "border-input bg-white hover:border-accent"
+              }`}
+            >
+              <span
+                className={`w-6 h-6 shrink-0 rounded-md border-2 flex items-center justify-center text-white text-sm ${
+                  houseGlass ? "bg-accent border-accent" : "border-muted-foreground/50"
+                }`}
+              >
+                {houseGlass ? "✓" : ""}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-base font-medium text-sidebar">ปกติเสิร์ฟแก้วร้าน</span>
+                <span className="block text-sm text-muted-foreground">
+                  แก้วนี้ไม่หักชุดภาชนะ เว้นแต่แตะ “แก้วร้าน” ออกในตะกร้า
+                </span>
+              </span>
+            </button>
+          </section>
+
           {previewText && (
             <section className={CARD} aria-live="polite">
               <p className="text-[17px] font-medium text-sidebar">{previewText}</p>
@@ -473,7 +558,10 @@ export function MenuEditor({
                   {PREVIEW_INCOMPLETE}
                 </p>
               )}
-              <p className="text-[13px] text-muted-foreground">คิดจากค่าเริ่มต้นของเมนู ราคาวัตถุดิบล่าสุด ไม่รวมตัวเลือกเพิ่มเติม</p>
+              <p className="text-[13px] text-muted-foreground">
+                คิดจากค่าเริ่มต้นของเมนู ราคาวัตถุดิบล่าสุด ไม่รวมตัวเลือกเพิ่มเติม
+                {packagingSet && (houseGlass ? " · ปกติเสิร์ฟแก้วร้าน: ไม่รวมภาชนะ" : ` · รวมภาชนะ ${packagingSet.name}`)}
+              </p>
             </section>
           )}
         </div>

@@ -35,7 +35,12 @@ const RPC_ERRORS: Record<string, string> = {
   invalid_recipe_line: "สูตรเมนูไม่ถูกต้อง กรุณารีเฟรชหน้า",
   invalid_sweetness: "การตั้งค่าความหวานไม่ถูกต้อง กรุณารีเฟรชหน้า",
   sweetness_table_incomplete: "ปริมาณเฉพาะเมนูนี้ยังไม่ครบทุกระดับความหวาน กรุณารีเฟรชหน้าแล้วกรอกให้ครบ",
+  // round D2a: another shop's set, an unknown one or an archived one
+  packaging_set_not_found: "ชุดภาชนะนี้ถูกเก็บแล้ว หรือไม่พบ — เลือกชุดอื่น (รีเฟรชหน้าเพื่อดูชุดล่าสุด)",
 };
+
+/** Said after a restore that had to drop the menu's archived packaging set. */
+const RESTORE_SET_CLEARED = "ชุดภาชนะถูกเก็บแล้ว — เมนูนี้จะไม่หักภาชนะจนกว่าจะเลือกชุดใหม่ที่หน้าแก้ไข";
 
 function isManagerOrOwner(role: string): boolean {
   return role === "owner" || role === "manager";
@@ -129,15 +134,43 @@ export async function removeProduct(
   return { outcome: "archived" };
 }
 
-/** Brings an archived product back, still closed, so it never reappears on the POS by surprise. */
-export async function restoreProduct(productId: string): Promise<ActionResult> {
+/**
+ * Brings an archived product back, still closed, so it never reappears on the POS by surprise.
+ * Its packaging set may have been archived meanwhile (archive_packaging_set only guards menus that are not
+ * archived). Such a set can't come back with the menu: the till deducts nothing for it and save_menu would
+ * refuse it. So the link is cleared in the same update and the result says so ("ชุดภาชนะถูกเก็บแล้ว").
+ */
+export async function restoreProduct(productId: string): Promise<{ ok: true; notice?: string } | { error: string }> {
   const profile = await requireManager();
   if (!profile) return { error: FORBIDDEN };
 
   const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("products")
+    .select("id, packaging_set_id")
+    .eq("id", productId)
+    .eq("tenant_id", profile.tenant_id)
+    .not("archived_at", "is", null)
+    .maybeSingle();
+  if (readError) return { error: "กู้คืนไม่สำเร็จ" };
+  if (!current) return { error: NOT_FOUND };
+
+  // An archived set is never un-archived, so this answer can't go stale before the update below.
+  let clearSet = false;
+  if (current.packaging_set_id !== null) {
+    const { data: set, error: setError } = await supabase
+      .from("packaging_sets")
+      .select("archived_at")
+      .eq("id", current.packaging_set_id)
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle();
+    if (setError) return { error: "กู้คืนไม่สำเร็จ" };
+    clearSet = !set || set.archived_at !== null;
+  }
+
   const { data, error } = await supabase
     .from("products")
-    .update({ archived_at: null, is_active: false })
+    .update(clearSet ? { archived_at: null, is_active: false, packaging_set_id: null } : { archived_at: null, is_active: false })
     .eq("id", productId)
     .eq("tenant_id", profile.tenant_id)
     .not("archived_at", "is", null)
@@ -146,7 +179,7 @@ export async function restoreProduct(productId: string): Promise<ActionResult> {
   if (!data || data.length === 0) return { error: NOT_FOUND };
 
   revalidateMenu();
-  return { ok: true };
+  return clearSet ? { ok: true, notice: RESTORE_SET_CLEARED } : { ok: true };
 }
 
 function rpcError(message: string | undefined): string {

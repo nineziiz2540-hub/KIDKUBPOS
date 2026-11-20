@@ -33,6 +33,8 @@ export function RestoreProductButton({ productId }: { productId: string }) {
             title: "กู้คืนแล้ว — เมนูยังปิดอยู่ เปิดได้ที่หน้าแก้ไข",
             type: "success",
           });
+          // e.g. its packaging set was archived meanwhile: "ชุดภาชนะถูกเก็บแล้ว — …"
+          if (result.notice) toastManager.add({ title: result.notice, type: "success" });
           router.refresh();
         })
       }

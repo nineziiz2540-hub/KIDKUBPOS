@@ -25,7 +25,9 @@ export default async function EditMenuPage({
   const supabase = await createClient();
   const { data: product } = await supabase
     .from("products")
-    .select("id, name, price, description, is_active, category_id, image_url, drink_type, archived_at")
+    .select(
+      "id, name, price, description, is_active, category_id, image_url, drink_type, archived_at, packaging_set_id, house_glass_default"
+    )
     .eq("id", id)
     .eq("tenant_id", profile.tenant_id)
     .maybeSingle();
@@ -125,6 +127,12 @@ export default async function EditMenuPage({
       refs.standardAmounts
     );
   }
+  // A menu can still point at a set that was archived (e.g. set by hand through the Data API). The till
+  // deducts nothing for it, and save_menu would refuse it, so the editor starts at "ไม่หักภาชนะ" and says
+  // why. refs.packagingSets is complete (getPackagingSets throws on a failed read), so "not listed" = archived.
+  const packagingSetArchived =
+    initial.packagingSetId != null && !refs.packagingSets.some((s) => s.id === initial.packagingSetId);
+  if (packagingSetArchived) initial.packagingSetId = null;
 
   return (
     <MenuEditor
@@ -138,6 +146,8 @@ export default async function EditMenuPage({
       groups={refs.groups}
       levels={refs.levels}
       standardAmounts={refs.standardAmounts}
+      packagingSets={refs.packagingSets}
+      packagingSetArchived={packagingSetArchived}
       photoFailed={photo === "failed"}
     />
   );

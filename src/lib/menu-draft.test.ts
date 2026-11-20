@@ -88,11 +88,18 @@ function storeLikeDb(prev: MenuRows, payload: ReturnType<typeof menuSavePayload>
       ? s.custom.map((c) => ({ ...c, amount: LEVELS.find((l) => l.id === c.level_id)?.isNone ? 0 : c.amount }))
       : [];
   }
+  // packaging (migration 20261123150000): an absent key leaves the stored value as it is
+  const packaging: Partial<Pick<MenuRows["product"], "packaging_set_id" | "house_glass_default">> = {};
+  if ("packaging_set_id" in prev.product) packaging.packaging_set_id = prev.product.packaging_set_id;
+  if ("house_glass_default" in prev.product) packaging.house_glass_default = prev.product.house_glass_default;
+  if ("packaging_set_id" in m) packaging.packaging_set_id = m.packaging_set_id as string | null;
+  if ("house_glass_default" in m) packaging.house_glass_default = m.house_glass_default as boolean;
   return {
     ...prev,
     product: {
       name: m.name as string, price: m.price as number, description: m.description as string | null,
       category_id: m.category_id as string | null, drink_type: m.drink_type as string | null, is_active: m.is_active as boolean,
+      ...packaging,
     },
     recipes: [...[...fixedByMaterial.values()].reverse(), ...slots], // row order from the DB is not meaningful
     modifierIds: payload.p_modifier_ids,
@@ -202,6 +209,44 @@ test("sweetness: absent = no key (left as it is), null = removed", () => {
   const cleared = storeLikeDb(latteRows(), pNull);
   assert.equal(cleared.sweetness, null);
   assert.deepEqual(cleared.customAmounts, []);
+});
+
+test("packaging: absent = no keys (left as it is), null = no set, both sent when the editor has them", () => {
+  // rows read without the packaging columns (D1 shape) give a draft without the keys: nothing is wiped
+  const d1 = menuDraftFromRows(latteRows());
+  assert.equal("packagingSetId" in d1, false);
+  assert.equal("houseGlassDefault" in d1, false);
+  const pD1 = menuSavePayload(parsed(d1));
+  assert.equal("packaging_set_id" in pD1.p_menu, false);
+  assert.equal("house_glass_default" in pD1.p_menu, false);
+
+  // the D2a edit page reads them: they round-trip
+  const rows = latteRows();
+  rows.product = { ...rows.product, packaging_set_id: "set-cold16", house_glass_default: true };
+  const d = menuDraftFromRows(rows);
+  assert.equal(d.packagingSetId, "set-cold16");
+  assert.equal(d.houseGlassDefault, true);
+  const p = menuSavePayload(parsed(d));
+  assert.equal(p.p_menu.packaging_set_id, "set-cold16");
+  assert.equal(p.p_menu.house_glass_default, true);
+  assert.deepEqual(menuDraftFromRows(storeLikeDb(rows, p)), d);
+
+  // "ไม่หักภาชนะ" sends null (clears the set); the house-glass default is a plain boolean
+  const none = menuSavePayload(parsed({ ...d, packagingSetId: null, houseGlassDefault: false }));
+  assert.equal(none.p_menu.packaging_set_id, null);
+  assert.equal(none.p_menu.house_glass_default, false);
+  // a D1-shaped payload keeps what the menu has
+  assert.deepEqual(storeLikeDb(rows, pD1).product.packaging_set_id, "set-cold16");
+  assert.deepEqual(storeLikeDb(rows, pD1).product.house_glass_default, true);
+});
+
+test("packaging values the server does not trust", () => {
+  const d = menuDraftFromRows(latteRows());
+  const bad = (patch: Record<string, unknown>) => parseMenuDraft({ ...d, ...patch } as unknown as MenuDraft);
+  assert.deepEqual(bad({ packagingSetId: "" }), { error: "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า" });
+  assert.deepEqual(bad({ packagingSetId: 5 }), { error: "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า" });
+  assert.deepEqual(bad({ houseGlassDefault: "yes" }), { error: "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า" });
+  assert.deepEqual(bad({ houseGlassDefault: null }), { error: "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า" });
 });
 
 test("a pre-D1 line without a kind is a fixed line", () => {
