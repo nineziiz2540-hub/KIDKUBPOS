@@ -1958,6 +1958,15 @@ export type Database = {
         Returns: undefined
       }
       reorder_categories: { Args: { p_ids: string[] }; Returns: undefined }
+      set_menu_paused: {
+        Args: {
+          p_actor_id: string
+          p_paused: boolean
+          p_product_id: string
+          p_tenant_id: string
+        }
+        Returns: string | null
+      }
       shift_add_cash_movement: {
         Args: {
           p_actor_id: string
@@ -2031,6 +2040,19 @@ export type Database = {
         }
         Returns: undefined
       }
+      stock_flag_resolve: {
+        Args: { p_actor_id: string; p_flag_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
+      stock_flag_sold_while_out: {
+        Args: {
+          p_actor_id: string
+          p_material_ids: string[]
+          p_product_id: string | null
+          p_tenant_id: string
+        }
+        Returns: number
+      }
       stock_receive: {
         Args: {
           p_actor_id: string
@@ -2055,6 +2077,10 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: undefined
+      }
+      stock_waste_undo: {
+        Args: { p_actor_id: string; p_ref_id: string; p_tenant_id: string }
+        Returns: number
       }
       reorder_products: {
         Args: { p_category_id: string | null; p_ids: string[] }
@@ -2081,6 +2107,11 @@ export type Database = {
         Args: { p_effects: Json; p_option_id: string }
         Returns: undefined
       }
+      save_packaging_set: {
+        Args: { p_id: string | null; p_items: Json; p_name: string }
+        Returns: string
+      }
+      archive_packaging_set: { Args: { p_id: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
