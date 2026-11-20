@@ -1,8 +1,15 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bangkokToday } from "@/lib/bangkok-time";
 import { nextDeviceQueue, observeQueue, type QueueState } from "@/lib/offline/device-queue";
 import { kvGet, kvSet } from "@/lib/offline/idb";
+import {
+  liveStockFromStored,
+  liveStockToStored,
+  mergeLiveStock,
+  type LiveStock,
+  type StoredLiveStock,
+} from "@/lib/stock/live-stock";
 import type { HeartbeatAnswer } from "./use-heartbeat";
 
 type Snapshot = {
@@ -10,6 +17,8 @@ type Snapshot = {
   shiftId: string | null;
   promptpayId: string | null;
   queue: QueueState | null;
+  /** The last live stock (round D2a), for offline; null = never read. Has its own `at`. */
+  stock: StoredLiveStock | null;
 };
 
 type Page = {
@@ -17,12 +26,16 @@ type Page = {
   shiftId: string | null;
   promptpayId: string | null;
   queue: QueueState;
+  /** The page's own read of the levels and paused menus (its `at` is the page's); null = it failed. */
+  stock?: StoredLiveStock | null;
 };
 
 export type DeviceSnapshot = {
   shiftId: string | null;
   promptpayId: string | null;
   queue: QueueState | null;
+  /** The last live stock (levels, paused menus); null until one was read. Offline it is what the device last knew. */
+  stock: LiveStock | null;
   /** Raise today's queue to at least n (a number the server handed out). Never throws. */
   observe(n: number): void;
   /** Allocate the next device queue number; resolves only once it is saved on the device. */
@@ -45,7 +58,21 @@ function parseStored(v: unknown): Snapshot | null {
     shiftId: typeof s.shiftId === "string" ? s.shiftId : null,
     promptpayId: typeof s.promptpayId === "string" ? s.promptpayId : null,
     queue: isQueue(s.queue) ? s.queue : null,
+    stock: cleanStock(s.stock),
   };
+}
+
+/** A stored or page stock, re-read through the coercing parser (NaN dropped); malformed = none. */
+function cleanStock(v: unknown): StoredLiveStock | null {
+  const live = liveStockFromStored(v);
+  return live ? liveStockToStored(live) : null;
+}
+
+/** The stock with the larger `at` (the first on a tie), the same newer-wins rule as mergeLiveStock. */
+function newerStock(a: StoredLiveStock | null, b: StoredLiveStock | null): StoredLiveStock | null {
+  if (!a) return b;
+  if (!b) return a;
+  return b.at > a.at ? b : a;
 }
 
 /** Max of the queue states that are for `today`; a state from another day never wins. */
@@ -67,6 +94,7 @@ function mergeSnapshots(a: Snapshot, b: Snapshot | null, today: string): Snapsho
     shiftId: newer.shiftId,
     promptpayId: newer.promptpayId,
     queue: mergeQueue(today, a.queue, b?.queue ?? null),
+    stock: newerStock(a.stock, b?.stock ?? null),
   };
 }
 
@@ -104,7 +132,7 @@ export function useDeviceSnapshot({
   page: Page;
   heartbeat: { answer: HeartbeatAnswer | null };
 }): DeviceSnapshot {
-  const [snap, setSnap] = useState<Snapshot>(() => ({ ...page }));
+  const [snap, setSnap] = useState<Snapshot>(() => ({ ...page, stock: cleanStock(page.stock) }));
   const snapRef = useRef<Snapshot>(snap);
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -155,6 +183,7 @@ export function useDeviceSnapshot({
   // merge them in (the larger `at` wins) so the snapshot agrees with the page straight away.
   const { at: pageAt, shiftId: pageShift, promptpayId: pagePromptpay } = page;
   const { date: pageQDate, last: pageQLast } = page.queue;
+  const pageStock = page.stock;
   const firstPageRef = useRef(true);
   useEffect(() => {
     if (firstPageRef.current) {
@@ -170,12 +199,13 @@ export function useDeviceSnapshot({
           shiftId: pageShift,
           promptpayId: pagePromptpay,
           queue: { date: pageQDate, last: pageQLast },
+          stock: cleanStock(pageStock),
         },
         today,
       ),
     );
     persist();
-  }, [pageAt, pageShift, pagePromptpay, pageQDate, pageQLast, apply, persist]);
+  }, [pageAt, pageShift, pagePromptpay, pageQDate, pageQLast, pageStock, apply, persist]);
 
   // Every online heartbeat answer. A field the server could not read (undefined) changes nothing;
   // null is a real "no open shift".
@@ -189,6 +219,12 @@ export function useDeviceSnapshot({
       shiftId: answer.shiftId !== undefined ? answer.shiftId : cur.shiftId,
       promptpayId: answer.promptpayId !== undefined ? answer.promptpayId : cur.promptpayId,
       queue: mergeQueue(today, cur.queue, answer.queue ?? null),
+      // Absent stock (a failed read on the server) keeps what the device has; a newer one replaces it.
+      stock: answer.stock
+        ? liveStockToStored(
+            mergeLiveStock(liveStockFromStored(cur.stock) ?? { levels: new Map(), paused: new Set(), at: 0 }, answer.stock, answer.at),
+          )
+        : cur.stock,
     });
     persist();
   }, [answer, apply, persist]);
@@ -220,10 +256,13 @@ export function useDeviceSnapshot({
     [apply, serialized, tenantId],
   );
 
+  const stock = useMemo(() => liveStockFromStored(snap.stock), [snap.stock]);
+
   return {
     shiftId: snap.shiftId,
     promptpayId: snap.promptpayId,
     queue: snap.queue,
+    stock,
     observe,
     takeNext,
   };

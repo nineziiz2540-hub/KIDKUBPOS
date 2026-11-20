@@ -13,6 +13,7 @@ import {
   type Connectivity,
 } from "@/lib/connectivity";
 import type { QueueState } from "@/lib/offline/device-queue";
+import { parseStockAnswer, type StockAnswer } from "@/lib/stock/live-stock";
 
 /** What one online answer actually carried; undefined = the server didn't read it. */
 export type HeartbeatAnswer = {
@@ -20,6 +21,8 @@ export type HeartbeatAnswer = {
   promptpayId: string | null | undefined;
   shiftId: string | null | undefined;
   queue: QueueState | undefined;
+  /** Levels and paused menus (round D2a); undefined = the server didn't read them. */
+  stock: StockAnswer | undefined;
 };
 
 /**
@@ -40,6 +43,7 @@ export function useHeartbeat(): {
   lastSuccessAt: number | null;
   /** The last online answer, as sent (fields the server could not read stay undefined). */
   answer: HeartbeatAnswer | null;
+  /** Asks right away; a call made while a check is running re-asks once it ends (a sale just changed the levels). */
   checkNow: () => void;
 } {
   const [connectivity, setConnectivity] = useState<Connectivity>(INITIAL_CONNECTIVITY);
@@ -55,6 +59,7 @@ export function useHeartbeat(): {
   const everSucceededRef = useRef(false);
   const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkNowRef = useRef<() => Promise<void>>(async () => {});
+  const rerunRef = useRef(false);
 
   const checkNow = useCallback(async () => {
     if (inFlight.current) return;
@@ -95,7 +100,8 @@ export function useHeartbeat(): {
       setConnectivity((s) => nextConnectivity(s, "success"));
       setLastSuccessAt(Date.now());
       if (kind === "online") {
-        const body = parseHeartbeatBody(await res.json());
+        const json: unknown = await res.json();
+        const body = parseHeartbeatBody(json);
         if (body.version !== undefined && isNewVersion(BUILD_VERSION, body.version)) {
           setNewVersionAvailable(true);
         }
@@ -108,6 +114,7 @@ export function useHeartbeat(): {
           promptpayId: body.promptpayId,
           shiftId: body.shiftId,
           queue: body.queue,
+          stock: parseStockAnswer(json),
         });
       }
     } catch {
@@ -115,8 +122,19 @@ export function useHeartbeat(): {
     } finally {
       clearTimeout(timer);
       inFlight.current = false;
+      if (rerunRef.current) {
+        rerunRef.current = false;
+        void checkNowRef.current();
+      }
     }
   }, []);
+
+  // An explicit request (a sale, later a pause, waste or receive just changed the levels): a check
+  // already in flight may have read before it, so ask once more when that one ends.
+  const requestCheck = useCallback(() => {
+    if (inFlight.current) rerunRef.current = true;
+    else void checkNow();
+  }, [checkNow]);
 
   useEffect(() => {
     checkNowRef.current = checkNow;
@@ -158,6 +176,6 @@ export function useHeartbeat(): {
     queue,
     lastSuccessAt,
     answer,
-    checkNow: () => void checkNow(),
+    checkNow: requestCheck,
   };
 }

@@ -11,6 +11,7 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bangkokToday } from "@/lib/bangkok-time";
 import { loadPosStockRows } from "@/lib/stock/pos-catalog";
+import { readLiveStock } from "@/lib/stock/live-stock";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -124,7 +125,7 @@ export default async function PosPage() {
   // Today's queue counter, for the device snapshot. tenant_queue_counters has no member RLS policy,
   // so it is read with the admin client, scoped to this shop. No row yet means 0.
   const todayQueueDate = bangkokToday(new Date());
-  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId, stockRows, bagRule] = await Promise.all([
+  const [counter, activeShift, heldBills, cancelledHeldToday, promptpayId, stockRows, liveStockRows, bagRule] = await Promise.all([
     createAdminClient()
       .from("tenant_queue_counters")
       .select("last_number")
@@ -136,6 +137,8 @@ export default async function PosPage() {
     getCancelledHeldBillsToday(profile.tenant_id),
     getTenantPromptPayId(profile.tenant_id),
     loadPosStockRows(supabase, profile.tenant_id, [...onSaleIds], linkedOptionIds),
+    // Levels and paused menus for the tiles (round D2a); null = a read failed, the heartbeat fills it in.
+    readLiveStock(supabase, profile.tenant_id),
     // The bag counter: only whether the shop counts bags and its one-per-N rule. No cost column.
     supabase.from("tenants").select("bag_material_id, bags_per_cups").eq("id", profile.tenant_id).single(),
   ]);
@@ -147,6 +150,7 @@ export default async function PosPage() {
       productModifierRecord={productModifierRecord}
       allModifiers={allModifiers}
       stockRows={stockRows}
+      liveStockRows={liveStockRows}
       bagsEnabled={bagRule.data?.bag_material_id != null}
       bagsPerCups={bagRule.data?.bags_per_cups ?? null}
       userName={profile.full_name ?? "ผู้ใช้"}

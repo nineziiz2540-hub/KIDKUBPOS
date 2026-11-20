@@ -3,6 +3,7 @@ import { BUILD_VERSION } from "@/lib/build-version";
 import { bangkokToday } from "@/lib/bangkok-time";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { readLiveStock, type StockAnswer } from "@/lib/stock/live-stock";
 
 /**
  * The POS asks this every 30 s (src/components/pos/use-heartbeat.ts): answering at all means the
@@ -13,6 +14,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * Round C2: `shiftId` is the shop's open shift (null for none), which an offline sale records,
  * and `queue` is today's Bangkok date with the last queue number handed out (0 before the first),
  * from which the device numbers offline sales.
+ *
+ * Round D2a: `stock` is the tracked materials' levels and the paused menu ids (live-stock.ts); it
+ * only drives hints on the POS, so a failed read just omits it.
  *
  * Every field but `version` is only sent when it was actually read: getProfile returns null on a
  * database error as well as when signed out, and a missing key makes the POS keep the value it
@@ -26,6 +30,7 @@ export async function GET() {
     promptpayId?: string | null;
     shiftId?: string | null;
     queue?: { date: string; last: number };
+    stock?: StockAnswer;
   } = { version: BUILD_VERSION };
   if (tenant) body.promptpayId = tenant.promptpay_id;
 
@@ -34,7 +39,7 @@ export async function GET() {
     const supabase = await createClient();
     // The same read as getActiveShift (src/lib/dal.ts), which can't tell "no shift" from a failed
     // read; a failed read must leave shiftId out, not say "no shift".
-    const [shift, counter] = await Promise.all([
+    const [shift, counter, stock] = await Promise.all([
       supabase
         .from("shifts")
         .select("id")
@@ -49,9 +54,13 @@ export async function GET() {
         .eq("tenant_id", profile.tenant_id)
         .eq("business_date", today)
         .maybeSingle(),
+      // D2a: two small selects with the user client (readLiveStock); null when either fails.
+      readLiveStock(supabase, profile.tenant_id),
     ]);
     if (!shift.error) body.shiftId = shift.data?.id ?? null;
     if (!counter.error) body.queue = { date: today, last: counter.data?.last_number ?? 0 };
+    // Left out when a read failed: never "nothing is paused" from a failed read.
+    if (stock) body.stock = stock;
   }
 
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });

@@ -57,6 +57,7 @@ import { NoShiftDialog } from "./no-shift-dialog";
 import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
+import { effectiveLevels, type LiveStock, type StockAnswer } from "@/lib/stock/live-stock";
 import { useHeartbeat } from "./use-heartbeat";
 import { useDeviceSnapshot } from "./use-device-snapshot";
 import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
@@ -99,6 +100,8 @@ type Props = {
   allModifiers: ModifierWithOptions[];
   /** Bean/matcha and sweetness config for the option window (round D1); null = it could not be loaded. */
   stockRows: StockCatalogRows | null;
+  /** Levels and paused menus as the page read them (round D2a); null = the read failed. */
+  liveStockRows: StockAnswer | null;
   /** The shop counts carry-out bags (tenants.bag_material_id is set): the counter shows (round D2a). */
   bagsEnabled: boolean;
   /** One bag per this many cups for the automatic count; null = no rule (starts at 0). */
@@ -128,6 +131,7 @@ export function PosScreen({
   productModifierRecord,
   allModifiers,
   stockRows,
+  liveStockRows,
   bagsEnabled,
   bagsPerCups,
   userName,
@@ -264,6 +268,10 @@ export function PosScreen({
   // The device snapshot starts from this page and follows the heartbeat, so a tab left open never
   // draws a QR to an account the owner has since changed, and keeps the latest shift and queue
   // for offline sales.
+  const pageStock = useMemo(
+    () => (liveStockRows ? { at: renderedAt, ...liveStockRows } : null),
+    [liveStockRows, renderedAt]
+  );
   const snapshot = useDeviceSnapshot({
     tenantId,
     page: {
@@ -271,6 +279,7 @@ export function PosScreen({
       shiftId: activeShiftId,
       promptpayId,
       queue: { date: todayQueueDate, last: todayQueueLast },
+      stock: pageStock,
     },
     heartbeat,
   });
@@ -322,6 +331,18 @@ export function PosScreen({
   );
   const stockCatalog = stock.catalog;
   const refreshCatalog = refreshCatalogOf(stock);
+
+  // Live stock (round D2a): the heartbeat's levels and paused menus, minus what this device's queued
+  // bills will take once they are sent. Online the server's levels already include every synced bill;
+  // offline it is the last known levels. Hints only — nothing here ever blocks a sale.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by the menu tiles in the next task (D2a T10)
+  const liveStock: LiveStock | null = useMemo(
+    () =>
+      snapshot.stock
+        ? { ...snapshot.stock, levels: effectiveLevels(snapshot.stock.levels, outbox.entries, tenantId, stockCatalog) }
+        : null,
+    [snapshot.stock, outbox.entries, tenantId, stockCatalog]
+  );
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
@@ -1088,6 +1109,7 @@ export function PosScreen({
             if ("error" in late) return;
             void dropAttempt(clientRef, tenantId);
             if (attemptRef.current?.clientRef === clientRef) applySuccess(late);
+            heartbeat.checkNow();
           })
           .catch(() => {});
         result = await withDeadline(call, PAYMENT_DEADLINE_MS);
@@ -1122,6 +1144,8 @@ export function PosScreen({
         if (noAnswer && !paymentWindowOpenRef.current) void resolveUncertain(clientRef);
       } else {
         applySuccess(result);
+        // The sale just changed the levels: read them now instead of at the next 30 s heartbeat.
+        heartbeat.checkNow();
       }
       onSettled?.("error" in result ? result.error : null, noAnswer);
     })().finally(() => setCheckoutPending(false));
