@@ -87,7 +87,7 @@ The order and dates were agreed with the owner on 2026-11-20:
 - **Live checks** happen only on a disposable QA tenant: `qa-d1-setup.cjs` + `qa-cookie.cjs` in the session scratchpad. The purge loop is guarded by tenant name. Never touch the tenant "The Connect Brew&Bar".
 - **Commits and deploys:**
   - Commit per task on `main`. **Push only when the owner says so.**
-  - Vercel auto-deploys on push, so never push Sat/Sun.
+  - Vercel auto-deploys on push. Until the 30 Dec cut-over the system is not used in the real shop, so work and deploys happen any day (owner, 2026-11-20). The no-Sat/Sun rule starts at cut-over.
 
 ## Owner-facing decisions in this plan (Claude's calls — listed for the owner to override)
 
@@ -792,7 +792,7 @@ The order and dates were agreed with the owner on 2026-11-20:
    - a parked bill keeps "แก้วร้าน"
    - void returns the bags
    - phone width
-4. **Hand-off:** delete the QA tenant. The owner tests on localhost. Push only on the owner's word, never Sat/Sun.
+4. **Hand-off:** delete the QA tenant. The owner tests on localhost. Push only on the owner's word (any day until cut-over).
 
 ## Review Focus
 
