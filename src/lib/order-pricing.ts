@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { CartItem } from "@/types/app";
+import { isValidHouseGlass } from "@/lib/bags";
 import {
   MAX_LINES,
   MAX_OPTIONS_PER_LINE,
@@ -40,7 +41,8 @@ async function loadPricingCatalog(
       !Array.isArray(item.selectedModifiers) ||
       item.selectedModifiers.length > MAX_OPTIONS_PER_LINE ||
       item.selectedModifiers.some((m) => typeof m?.optionId !== "string") ||
-      !isValidCartChoices(item.choices)
+      !isValidCartChoices(item.choices) ||
+      !isValidHouseGlass(item.houseGlass)
     ) {
       return { error: "ข้อมูลสินค้าในตะกร้าไม่ถูกต้อง" };
     }

@@ -8,6 +8,7 @@ import { computeDiscount } from "@/lib/discount";
 import { computeChange, MAX_CASH_RECEIVED, toSatang } from "@/lib/cash";
 import { priceCartItems, priceCartItemsAsCharged } from "@/lib/order-pricing";
 import { STALE } from "@/lib/order-pricing-core";
+import { billStockPayload, validBags } from "@/lib/bags";
 import { orderItemsPayload } from "@/lib/order-items-payload";
 import { diffReductions } from "@/lib/held-bill-diff";
 import { createFailureOutcome, HELD_BILL_STALE_MESSAGE, OLD_TAB_MESSAGE } from "@/lib/order-create-errors";
@@ -104,6 +105,10 @@ export async function createOrder(
     offline
       ? { error: reviewCode === "other" ? error : REVIEW_MESSAGES[reviewCode], outcome: "review", reviewCode }
       : { error, outcome: "refused" };
+
+  // 0b2. Carry-out bags: a whole number 0..99 (absent = 0). A malformed value is refused as input.
+  const bags = validBags(data.bags);
+  if (bags === null) return stop("ข้อมูลไม่ถูกต้อง");
 
   // 0c. "Record as charged": an active owner/manager of this shop approves the bill as charged.
   let override: { approverId: string; reason: string } | null = null;
@@ -257,6 +262,19 @@ export async function createOrder(
           serverSubtotal - computeDiscount(serverSubtotal, discountType, discountValue ?? 0).discountAmount
         ) / 100;
 
+  // 4c. Bags are stock only: the shop's bag material (if any) is deducted once for the bill.
+  let bagMaterialId: string | null = null;
+  if (bags > 0) {
+    const { data: tenant, error: tenantError } = await admin
+      .from("tenants")
+      .select("bag_material_id")
+      .eq("id", profile.tenant_id)
+      .maybeSingle();
+    // A failed read is not a reason to drop the bags (or to send an offline bill to review).
+    if (tenantError) return { error: SAVE_FAILED_MESSAGE, outcome: "retry" };
+    bagMaterialId = tenant?.bag_material_id ?? null;
+  }
+
   // 5-8. One transaction: order/queue numbers, the order (attached to the open shift — cash needs
   // one, guard_order_drawer refuses it otherwise), its items, and the held-bill close-out. An
   // offline bill keeps its sale time, queue number and recorded shift (see order_record).
@@ -278,6 +296,7 @@ export async function createOrder(
       discount_approved_by: approverId,
       customer_id: data.customerId ?? null,
       note: data.note ?? null,
+      ...billStockPayload(bags, bagMaterialId),
     },
     p_items: orderItemsPayload(priced.lines) as unknown as Json,
     p_held_bill_id: data.heldBillId ?? null,

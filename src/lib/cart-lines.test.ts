@@ -218,3 +218,14 @@ test("restoreLine keeps the line exactly", () => {
   assert.deepEqual(out[1], item);
   assert.deepEqual(out[1]!.choices, ch);
 });
+
+test("addLine keeps a house-glass latte separate from a paper-cup latte", () => {
+  const paper = line("a");
+  const house = line("b", { houseGlass: true });
+  const out = addLine([paper], house);
+  assert.equal(out.length, 2);
+  // the same house-glass cup merges; absent and an explicit false are different raw values
+  assert.equal(addLine(out, line("c", { houseGlass: true })).length, 2);
+  assert.equal(addLine([paper], line("d", { houseGlass: false })).length, 2);
+  assert.equal(addLine([paper], line("e")).length, 1);
+});

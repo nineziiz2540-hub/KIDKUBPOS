@@ -13,10 +13,18 @@ export function withQuantity(line: CartItem, quantity: number): CartItem {
   return { ...line, quantity, totalPrice: lineTotal(line.basePrice, line.selectedModifiers, quantity, line.choices) };
 }
 
+/**
+ * Merge identity: the held-bill audit identity plus the raw house-glass value, only when present (so
+ * lines without it keep their exact identity). The audit identity itself must not change: switching a
+ * cup to the shop glass is not removing an item.
+ */
+const mergeIdentity = (item: CartItem): string =>
+  item.houseGlass === undefined ? lineIdentity(item) : `${lineIdentity(item)}|glass:${item.houseGlass}`;
+
 /** Adds a line: an identical cup already in the cart gains the quantity, anything else is a new line. */
 export function addLine(cart: CartItem[], item: CartItem): CartItem[] {
-  const id = lineIdentity(item);
-  const at = cart.findIndex((l) => lineIdentity(l) === id);
+  const id = mergeIdentity(item);
+  const at = cart.findIndex((l) => mergeIdentity(l) === id);
   if (at === -1) return [...cart, item];
   return cart.map((l, i) => (i === at ? withQuantity(l, l.quantity + item.quantity) : l));
 }

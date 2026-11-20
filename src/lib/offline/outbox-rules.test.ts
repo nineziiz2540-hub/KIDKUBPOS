@@ -450,3 +450,18 @@ test("saleKey with choices: undefined as an own key is the pre-D1 string", () =>
     JSON.stringify([[["p1", 2, 110, null, []]], "cash", "dine_in", null, null, null, null, null]),
   );
 });
+
+test("payment fingerprint ignores bags and houseGlass: saleKey too", () => {
+  const base = saleKey(cartInput);
+  assert.equal(saleKey({ ...cartInput, items: [{ ...latte, houseGlass: true }] }), base);
+  assert.equal(saleKey({ ...cartInput, bags: 3 } as typeof cartInput), base);
+});
+
+test("outbox accepts entries with and without bags", () => {
+  const without = entry({ clientRef: "a" });
+  const withBags = entry({ clientRef: "b", input: { ...without.input, bags: 2 } });
+  assert.equal(saleKey(without.input), saleKey(withBags.input));
+  assert.equal(sendable([without, withBags], 0, "t1").length, 2);
+  assert.equal(withBags.input.bags, 2);
+  assert.equal(without.input.bags, undefined);
+});

@@ -56,6 +56,7 @@ test("toDraft never stores a PIN, and drops every unknown key", () => {
   assert.equal(JSON.stringify(d).includes("9731"), false);
   assert.deepEqual(Object.keys(d).sort(), [
     "activeHeld",
+    "bags",
     "customer",
     "discount",
     "items",
@@ -215,4 +216,29 @@ test("malformed choices make the draft not restorable", () => {
     raw.items[0]!.choices = c;
     assert.equal(restorable(raw, ids), null, JSON.stringify(c));
   }
+});
+
+test("draft restores bags and houseGlass; a pre-D2a draft restores with bags 0", () => {
+  const glassItem = { ...item, houseGlass: true };
+  const saved = JSON.parse(JSON.stringify(toDraft(state({ items: [glassItem], bags: 3 }), ids)));
+  const back = restorable(saved, ids);
+  assert.equal(back!.bags, 3);
+  assert.equal(back!.items[0]!.houseGlass, true);
+  // a draft saved before D2a has neither key
+  const old = JSON.parse(JSON.stringify(toDraft(state(), ids)));
+  delete old.bags;
+  const oldBack = restorable(old, ids);
+  assert.equal(oldBack!.bags, 0);
+  assert.ok(!("houseGlass" in oldBack!.items[0]!));
+  // a malformed bag count is dropped, the cart still comes back
+  assert.equal(restorable({ ...saved, bags: 100 }, ids)!.bags, 0);
+  assert.equal(restorable({ ...saved, bags: 1.5 }, ids)!.bags, 0);
+});
+
+test("houseGlass that is not a boolean is refused (draft)", () => {
+  const d = JSON.parse(JSON.stringify(toDraft(state(), ids)));
+  d.items[0].houseGlass = "yes";
+  assert.equal(restorable(d, ids), null);
+  d.items[0].houseGlass = false;
+  assert.equal(restorable(d, ids)!.items[0]!.houseGlass, false);
 });

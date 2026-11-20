@@ -171,3 +171,15 @@ test("sweetness is stored from the catalog, and no sweetness has no sweetener", 
   const [b] = normalizeHeldItems(none, price(none));
   assert.deepEqual(b!.choices!.sweetness, { levelId: "none", levelName: "ไม่หวาน", memberId: null, memberLabel: null });
 });
+
+test("held bill items keep houseGlass after normalizeHeldItems", () => {
+  const items = [
+    { ...cartItem([], 1, 65), houseGlass: true },
+    { ...cartItem([], 1, 65), houseGlass: false },
+    cartItem([], 1, 65),
+  ];
+  const out = normalizeHeldItems(items, price(items));
+  assert.equal(out[0]!.houseGlass, true);
+  assert.equal(out[1]!.houseGlass, false);
+  assert.ok(!("houseGlass" in out[2]!), "absent stays absent");
+});

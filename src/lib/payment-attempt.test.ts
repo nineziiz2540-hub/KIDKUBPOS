@@ -138,3 +138,9 @@ test("choices: undefined as an own key fingerprints exactly as before round D1",
     attemptFingerprint(base),
   );
 });
+
+test("payment fingerprint ignores bags and houseGlass", () => {
+  const withGlass = { ...base, items: [{ ...latte, houseGlass: true }, tea] };
+  assert.equal(attemptFingerprint(withGlass), attemptFingerprint(base));
+  assert.equal(attemptFingerprint({ ...base, bags: 3 } as AttemptInput), attemptFingerprint(base));
+});

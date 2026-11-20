@@ -1,4 +1,5 @@
 import type { CartItem } from "../../types/app.ts";
+import { isValidHouseGlass, validBags } from "../bags.ts";
 
 // The cart in progress, as saved on the device so a reload brings it back (spec call 16).
 // Pure: no React, no browser globals. The manager PIN is never part of it.
@@ -25,10 +26,12 @@ export type CartDraft = {
    * the restored cart can only ever replay its own bill. Absent when no payment was tried.
    */
   attemptRef?: string;
+  /** Carry-out bags typed for this cart; drafts saved before D2a have none and restore as 0. */
+  bags: number;
 };
 
 /** What the screen hands over; the draft keeps exactly the listed fields of it. */
-export type DraftState = Omit<CartDraft, "v" | "tenantId" | "sellerId">;
+export type DraftState = Omit<CartDraft, "v" | "tenantId" | "sellerId" | "bags"> & { bags?: number };
 
 type Ids = { tenantId: string; sellerId: string };
 
@@ -53,6 +56,7 @@ function cleanItem(i: CartItem): CartItem {
     })),
     totalPrice: i.totalPrice,
     note: i.note,
+    ...(typeof i.houseGlass === "boolean" ? { houseGlass: i.houseGlass } : {}),
     ...(c
       ? {
           choices: {
@@ -116,6 +120,7 @@ export function toDraft(state: DraftState, ids: Ids): CartDraft | null {
         }
       : null,
     ...(isUuid(state.attemptRef) ? { attemptRef: state.attemptRef } : {}),
+    bags: validBags(state.bags) ?? 0,
   };
 }
 
@@ -167,6 +172,7 @@ function validItem(x: unknown): x is CartItem {
   if (!isNum(x.basePrice) || !isNum(x.quantity) || !isNum(x.totalPrice)) return false;
   if (!(x.note === null || isStr(x.note))) return false;
   if (!Array.isArray(x.selectedModifiers)) return false;
+  if (!isValidHouseGlass(x.houseGlass)) return false;
   if ("choices" in x && x.choices !== undefined && !validChoices(x.choices)) return false;
   return x.selectedModifiers.every(
     (m) =>
@@ -243,6 +249,8 @@ export function restorable(d: unknown, ids: Ids, now?: number): CartDraft | null
     discount,
     // A malformed ref is dropped (the cart still comes back, it just adopts nothing).
     ...(isUuid(d.attemptRef) ? { attemptRef: d.attemptRef } : {}),
+    // A malformed or missing count (a draft from before D2a) is 0; the cart still comes back.
+    bags: validBags(d.bags) ?? 0,
   };
   // An empty cart with no held bill is not worth bringing back.
   if (draft.items.length === 0 && draft.activeHeld === null) return null;

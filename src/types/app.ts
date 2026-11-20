@@ -58,6 +58,8 @@ export type CreateOrderInput = {
   /** Set when paying a parked bill; version must match what the cashier loaded. */
   heldBillId?: string;
   heldBillVersion?: number;
+  /** Carry-out bags for the bill, integer 0..99; absent = 0. Stock only, never the price. */
+  bags?: number;
   /** Id of this payment attempt, kept across retries; the same id never records a second bill. */
   clientRef: string;
   /** Set when the bill was sold in device-numbered mode and is sent later by the outbox. */
