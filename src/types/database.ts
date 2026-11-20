@@ -1289,11 +1289,11 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "products_packaging_set_id_fkey"
-            columns: ["packaging_set_id"]
+            foreignKeyName: "products_packaging_set_tenant_fkey"
+            columns: ["packaging_set_id", "tenant_id"]
             isOneToOne: false
             referencedRelation: "packaging_sets"
-            referencedColumns: ["id"]
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "products_paused_by_fkey"
@@ -1850,11 +1850,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "tenants_bag_material_id_fkey"
-            columns: ["bag_material_id"]
+            foreignKeyName: "tenants_bag_material_tenant_fkey"
+            columns: ["bag_material_id", "id"]
             isOneToOne: false
             referencedRelation: "raw_materials"
-            referencedColumns: ["id"]
+            referencedColumns: ["id", "tenant_id"]
           },
         ]
       }

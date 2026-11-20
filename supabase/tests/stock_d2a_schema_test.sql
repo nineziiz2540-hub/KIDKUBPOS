@@ -3,8 +3,9 @@
 -- (Dry run: the migration text + this file in ONE execute_sql call. Run alone before the migration, it stops
 --  at the first missing table: that is the RED state.)
 -- Run the whole file through execute_sql. It never commits: it ends with
--- raise exception 'RESULT <json>', so every row it creates is rolled back. Every key (except _succeeded,
--- which lists the probes that got through, and _unindexed_fks) must be true.
+-- raise exception 'RESULT <json>', so every row it creates is rolled back. Every key must be true, except
+-- the diagnostic keys that start with an underscore (_succeeded lists the probes that got through,
+-- _unindexed_fks the foreign keys without a full index, _flag_reads the flag counts, _*_err any error text).
 -- Sessions are simulated with `set local role` + request.jwt.claims, as PostgREST does.
 -- "Probe succeeded" = a write that raised nothing AND touched >=1 row, or a read that raised nothing.
 -- A probe is refused when it raises (permission denied / RLS violation / check) or a write touches 0 rows.
@@ -27,12 +28,14 @@ declare
   actor uuid; actor_name text;
   p record;
   n int; n_sets int; n_items int;
-  ok boolean; ok2 boolean; ok3 boolean;
+  ok boolean; ok2 boolean; ok3 boolean; ok4 boolean;
+  okp boolean; okt boolean;
   flag_reads jsonb := '{}';
   unindexed text[];
   v_src text;
   v_items_case text;
   v_sets_case text;
+  v_rit_case text;
 begin
   -- ── fixtures (as the default role) ──────────────────────────────────────
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
@@ -364,6 +367,13 @@ begin
   exception when unique_violation then ok2 := true;
             when others then ok2 := false;
   end;
+  -- a sold_while_out flag always names its material (a null one would slip past the per-day index)
+  ok4 := false;
+  begin
+    insert into public.stock_flags (tenant_id, kind, product_id, business_date) values (ta, 'sold_while_out', pa, bkk);
+  exception when check_violation then ok4 := true;
+            when others then ok4 := false;
+  end;
   ok3 := true;
   begin
     begin insert into public.stock_flags (tenant_id, kind, business_date) values (ta, 'bogus', bkk); ok3 := false;
@@ -378,6 +388,11 @@ begin
   r := r || jsonb_build_object('service_role_writes_flags', ok);
   r := r || jsonb_build_object('sold_while_out_one_per_material_per_day', ok2);
   r := r || jsonb_build_object('flag_checks', ok3);
+  r := r || jsonb_build_object('sold_while_out_needs_material', ok4
+    and exists (select 1 from pg_constraint where conname = 'stock_flags_sold_while_out_has_material'
+                  and conrelid = 'public.stock_flags'::regclass and contype = 'c')
+    -- stock_skipped rows may still have no material (the service inserts above wrote two)
+    and (select count(*) >= 3 from public.stock_flags where tenant_id = ta and kind = 'stock_skipped' and raw_material_id is null));
 
   -- ── products: packaging and pause columns ───────────────────────────────
   r := r || jsonb_build_object('products_has_pause_columns',
@@ -389,8 +404,12 @@ begin
           or (column_name = 'paused_by' and data_type = 'uuid' and is_nullable = 'YES' and column_default is null)))
     and exists (select 1 from pg_constraint where conname = 'products_paused_by_fkey'
                   and conrelid = 'public.products'::regclass and confrelid = 'public.profiles'::regclass)
-    and exists (select 1 from pg_constraint where conname = 'products_packaging_set_id_fkey'
-                  and conrelid = 'public.products'::regclass and confrelid = 'public.packaging_sets'::regclass)
+    -- the set is checked against the menu's own shop: one composite FK, no single-column one
+    and exists (select 1 from pg_constraint where conname = 'products_packaging_set_tenant_fkey'
+                  and conrelid = 'public.products'::regclass and confrelid = 'public.packaging_sets'::regclass
+                  and cardinality(conkey) = 2)
+    and not exists (select 1 from pg_constraint where contype = 'f' and conrelid = 'public.products'::regclass
+                      and confrelid = 'public.packaging_sets'::regclass and cardinality(conkey) = 1)
     and (select packaging_set_id is null and not house_glass_default and paused_at is null and paused_by is null
            from public.products where id = pa));
 
@@ -443,6 +462,71 @@ begin
     and (select paused_at is null and paused_by is null from public.products where id = pa)
     and not exists (select 1 from public.products where tenant_id = ta and name = 'ปิดไว้'));
 
+  -- ── a menu's set and the shop's bag material belong to the same shop (composite FKs, R-D2a-7) ──
+  -- as shop A's OWNER (user client): shop B's set or material is refused; her own, or none, is accepted
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  for p in select * from (values
+    ('menu_set_b',     format('update public.products set packaging_set_id = %L where id = %L', setB, pa)),
+    ('new_menu_set_b', format('insert into public.products (tenant_id, name, price, is_active, packaging_set_id) values (%L, ''เมนูแอบ'', 50, true, %L)', ta, setB)),
+    ('bag_material_b', format('update public.tenants set bag_material_id = %L where id = %L', mB, ta))
+  ) v(label, q) loop
+    ok := false;
+    begin
+      execute p.q;
+      get diagnostics n = row_count;
+      ok := n > 0;
+    exception when others then ok := false;
+    end;
+    if ok then hit := hit || ('xref:' || p.label); end if;
+  end loop;
+  okp := true;
+  begin
+    update public.products set packaging_set_id = null where id = pa;
+    get diagnostics n = row_count; okp := okp and n = 1;
+    update public.products set packaging_set_id = setM where id = pa;
+    get diagnostics n = row_count; okp := okp and n = 1;
+  exception when others then
+    okp := false;
+    r := r || jsonb_build_object('_menu_own_set_err', sqlerrm);
+  end;
+  okt := true;
+  begin
+    update public.tenants set bag_material_id = mA3 where id = ta;
+    get diagnostics n = row_count; okt := okt and n = 1;
+    update public.tenants set bag_material_id = null where id = ta;
+    get diagnostics n = row_count; okt := okt and n = 1;
+  exception when others then
+    okt := false;
+    r := r || jsonb_build_object('_bag_own_material_err', sqlerrm);
+  end;
+  reset role;
+  -- the FKs hold for the service role too (no RLS, no app check in the way)
+  set local role service_role;
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  ok := false;
+  begin
+    update public.products set packaging_set_id = setB where id = pa;
+  exception when foreign_key_violation then ok := true;
+            when others then ok := false;
+  end;
+  ok2 := false;
+  begin
+    update public.tenants set bag_material_id = mB where id = ta;
+  exception when foreign_key_violation then ok2 := true;
+            when others then ok2 := false;
+  end;
+  reset role;
+  r := r || jsonb_build_object('product_packaging_set_other_tenant_refused',
+    okp and ok
+    and not exists (select 1 from unnest(hit) h where h in ('xref:menu_set_b', 'xref:new_menu_set_b'))
+    and (select packaging_set_id = setM from public.products where id = pa)
+    and not exists (select 1 from public.products where packaging_set_id = setB and tenant_id = ta));
+  r := r || jsonb_build_object('tenant_bag_material_other_tenant_refused',
+    okt and ok2
+    and not exists (select 1 from unnest(hit) h where h = 'xref:bag_material_b')
+    and (select bag_material_id is null from public.tenants where id = ta));
+
   -- ── orders.bags ─────────────────────────────────────────────────────────
   ok := (select bags = 0 from public.orders where id = oa)
     and exists (select 1 from information_schema.columns
@@ -467,6 +551,49 @@ begin
   end;
   r := r || jsonb_build_object('orders_bags_default_0', ok);
 
+  -- ── orders.bags: no member of the shop changes it through the Data API ──
+  for actor_name, actor in select * from (values ('owner', ua), ('manager', um), ('staff', us)) v(a, u) loop
+    set local role authenticated;
+    perform set_config('request.jwt.claims', json_build_object('sub', actor, 'role', 'authenticated')::text, true);
+    ok := false;
+    begin
+      execute format('update public.orders set bags = 7 where id = %L', oa);
+      get diagnostics n = row_count;
+      ok := n > 0;
+    exception when others then ok := false;
+    end;
+    if ok then hit := hit || ('bagsw:' || actor_name); end if;
+    reset role;
+  end loop;
+  -- control: the guard touches only bags; staff still updates another column of the same bill
+  set local role authenticated;
+  perform set_config('request.jwt.claims', json_build_object('sub', us, 'role', 'authenticated')::text, true);
+  ok := true;
+  begin
+    update public.orders set note = 'โต๊ะริมหน้าต่าง' where id = oa;
+    get diagnostics n = row_count; ok := n = 1;
+  exception when others then
+    ok := false;
+    r := r || jsonb_build_object('_staff_note_err', sqlerrm);
+  end;
+  reset role;
+  -- the service role (order_record / order_void) still writes it
+  set local role service_role;
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  ok2 := true;
+  begin
+    update public.orders set bags = 2 where id = oa;
+    get diagnostics n = row_count; ok2 := n = 1;
+  exception when others then
+    ok2 := false;
+    r := r || jsonb_build_object('_service_bags_err', sqlerrm);
+  end;
+  reset role;
+  r := r || jsonb_build_object('staff_cannot_change_order_bags',
+    ok and ok2
+    and not exists (select 1 from unnest(hit) h where h like 'bagsw:%')
+    and (select bags = 2 and note = 'โต๊ะริมหน้าต่าง' from public.orders where id = oa));
+
   -- ── tenants: bag material and "1 bag per N cups" ────────────────────────
   ok := (select bag_material_id is null and bags_per_cups is null from public.tenants where id = ta);
   begin
@@ -477,8 +604,11 @@ begin
     update public.tenants set bag_material_id = mA3, bags_per_cups = 20 where id = ta;
     update public.tenants set bags_per_cups = 1 where id = ta;
     ok := ok and (select bag_material_id = mA3 and bags_per_cups = 1 from public.tenants where id = ta)
-      and exists (select 1 from pg_constraint where conname = 'tenants_bag_material_id_fkey'
-                    and conrelid = 'public.tenants'::regclass and confrelid = 'public.raw_materials'::regclass);
+      and exists (select 1 from pg_constraint where conname = 'tenants_bag_material_tenant_fkey'
+                    and conrelid = 'public.tenants'::regclass and confrelid = 'public.raw_materials'::regclass
+                    and cardinality(conkey) = 2)
+      and not exists (select 1 from pg_constraint where contype = 'f' and conrelid = 'public.tenants'::regclass
+                        and confrelid = 'public.raw_materials'::regclass and cardinality(conkey) = 1);
   exception when others then
     ok := false;
     r := r || jsonb_build_object('_tenant_bags_err', sqlerrm);
@@ -553,15 +683,35 @@ begin
     and public.config_refs_ok('choice_groups', jsonb_build_object('tenant_id', ta))
     and public.config_refs_ok('sweetness_levels', jsonb_build_object('tenant_id', ta))
     and not public.config_refs_ok('choice_group_members', jsonb_build_object('tenant_id', ta, 'group_id', null, 'raw_material_id', mA1));
+  -- row_in_tenant knows packaging_sets, and still answers only for the caller's own shop (no oracle)
+  ok3 := public.row_in_tenant('packaging_sets', setM, ta)
+    and not public.row_in_tenant('packaging_sets', setB, tb)
+    and not public.row_in_tenant('packaging_sets', setB, ta)
+    and not public.row_in_tenant('packaging_sets', setM, tb)
+    and not public.row_in_tenant('packaging_sets', mA1, ta)
+    and public.row_in_tenant('raw_materials', mA1, ta)
+    and not public.row_in_tenant('raw_materials', mB, tb)
+    and not public.row_in_tenant('no_such_table', setM, ta);
   reset role;
   r := r || jsonb_build_object('config_refs_ok_still_fails_closed_for_unknown_table', ok);
   r := r || jsonb_build_object('config_refs_ok_packaging_cases', ok2);
+  r := r || jsonb_build_object('row_in_tenant_packaging_sets', ok3);
 
-  -- everything but the two new cases is byte-identical to the lockdown body (md5 of its prosrc, read live 2026-11-20)
+  -- row_in_tenant: everything but the new case is byte-identical to the lockdown body (md5 of its prosrc, read live 2026-11-20)
+  select prosrc into v_src from pg_proc where oid = 'public.row_in_tenant(text, uuid, uuid)'::regprocedure;
+  v_rit_case := E'    when ''packaging_sets''       then exists (select 1 from public.packaging_sets       where id = p_id and tenant_id = p_tenant)\n';
+  r := r || jsonb_build_object('row_in_tenant_rest_byte_identical',
+    position(v_rit_case in v_src) > 0
+    and md5(replace(v_src, v_rit_case, '')) = '39436466bd98d8ffb406b4164ab1d28c'
+    and (select prosecdef and provolatile = 's' and proconfig = array['search_path=public']
+           from pg_proc where oid = 'public.row_in_tenant(text, uuid, uuid)'::regprocedure)
+    and not has_function_privilege('anon', 'public.row_in_tenant(text, uuid, uuid)', 'execute')
+    and has_function_privilege('authenticated', 'public.row_in_tenant(text, uuid, uuid)', 'execute'));
+
+  -- config_refs_ok: everything but the two new cases is byte-identical to the lockdown body (md5 of its prosrc, read live 2026-11-20)
   select prosrc into v_src from pg_proc where oid = 'public.config_refs_ok(text, jsonb)'::regprocedure;
   v_items_case := E'        when ''packaging_set_items'' then\n'
-    || E'          exists (select 1 from public.packaging_sets s\n'
-    || E'                   where s.id = (p_row->>''set_id'')::uuid and s.tenant_id = (p_row->>''tenant_id'')::uuid)\n'
+    || E'          public.row_in_tenant(''packaging_sets'', (p_row->>''set_id'')::uuid, (p_row->>''tenant_id'')::uuid)\n'
     || E'          and public.row_in_tenant(''raw_materials'', (p_row->>''raw_material_id'')::uuid, (p_row->>''tenant_id'')::uuid)\n';
   v_sets_case := E'        when ''packaging_sets''   then true\n';
   r := r || jsonb_build_object('config_refs_ok_rest_byte_identical',
@@ -590,7 +740,8 @@ begin
     and (select bool_and(relrowsecurity) from pg_class
           where oid in ('public.packaging_sets'::regclass, 'public.packaging_set_items'::regclass, 'public.stock_flags'::regclass)));
 
-  -- ── foreign keys: every FK of the D1 tables and the new tables / columns has an index that leads with it ──
+  -- ── foreign keys: every FK of the D1 tables and the new tables / columns has a full (non-partial) index that
+  --    leads with its columns, in FK column order. A partial index cannot serve the FK's lookup.
   select coalesce(array_agg(c.conrelid::regclass::text || ':' || c.conname order by c.conname), '{}') into unindexed
     from pg_constraint c
    where c.contype = 'f'
@@ -599,20 +750,22 @@ begin
                                   'public.product_recipes', 'public.choice_groups', 'public.choice_group_members',
                                   'public.sweetness_levels', 'public.sweetness_amounts', 'public.product_sweetness',
                                   'public.modifier_option_effects']::regclass[])
-          or c.conname in ('products_packaging_set_id_fkey', 'products_paused_by_fkey', 'tenants_bag_material_id_fkey'))
+          or c.conname in ('products_packaging_set_tenant_fkey', 'products_paused_by_fkey', 'tenants_bag_material_tenant_fkey'))
      and not exists (select 1 from pg_index i
                       where i.indrelid = c.conrelid
+                        and i.indpred is null
                         and (i.indkey::int2[])[0:cardinality(c.conkey) - 1] = c.conkey);
   r := r || jsonb_build_object('_unindexed_fks', to_jsonb(unindexed));
   r := r || jsonb_build_object('fk_columns_indexed',
     cardinality(unindexed) = 0
     and (select count(*) = 3 from pg_constraint
-          where conname in ('products_packaging_set_id_fkey', 'products_paused_by_fkey', 'tenants_bag_material_id_fkey'))
+          where conname in ('products_packaging_set_tenant_fkey', 'products_paused_by_fkey', 'tenants_bag_material_tenant_fkey'))
     -- the same test still sees a foreign key this migration leaves alone (products.category_id is not a D1 table's)
     and exists (select 1 from pg_constraint c
                  where c.conname = 'products_category_id_fkey'
                    and not exists (select 1 from pg_index i
                                     where i.indrelid = c.conrelid
+                                      and i.indpred is null
                                       and (i.indkey::int2[])[0:cardinality(c.conkey) - 1] = c.conkey)));
 
   r := r || jsonb_build_object('_succeeded', to_jsonb(hit));
