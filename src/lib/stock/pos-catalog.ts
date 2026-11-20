@@ -5,10 +5,11 @@
 // Explicit columns, never `*`, never a cost column. The client builds its catalog from these rows with
 // buildStockCatalog, the same mapping the server prices with.
 //
-// A display subset of catalog.ts: slot lines only (no fixed lines), slot_add effects only, no
-// sweetness amounts. Nothing on the POS deducts stock; the server re-resolves every line from its own
-// full catalog. Filtered to the menus on sale / their options by posStockRows (pure, tested against
-// the server's full catalog) rather than with long `in` lists.
+// The same rows catalog.ts reads (fixed and slot recipe lines, sweetness amounts, slot_add and
+// material_add effects), narrowed to the menus on sale / their options by posStockRows (pure, tested
+// against the server's full catalog) rather than with long `in` lists. Round D2a: the device computes
+// "หมด?/เหลือ ~N แก้ว" and the offline stock decrement from per-cup needs; the server still resolves
+// the authoritative stock for every sale.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { StockCatalogRows } from "@/lib/stock/catalog-build";
@@ -25,13 +26,12 @@ export async function loadPosStockRows(
   optionIds: string[]
 ): Promise<StockCatalogRows | null> {
   try {
-    const [materials, recipes, groups, members, levels, productSweetness, effects, products, packagingSets, packagingItems] = await Promise.all([
+    const [materials, recipes, groups, members, levels, amounts, productSweetness, effects, products, packagingSets, packagingItems] = await Promise.all([
       supabase.from("raw_materials").select("id, archived_at").eq("tenant_id", tenantId).is("archived_at", null).order("id"),
       supabase
         .from("product_recipes")
         .select("product_id, line_kind, raw_material_id, group_id, quantity_used, default_member_id, allow_special")
         .eq("tenant_id", tenantId)
-        .eq("line_kind", "slot")
         .order("id"),
       supabase.from("choice_groups").select("id, kind, name, sort_order").eq("tenant_id", tenantId).order("sort_order").order("id"),
       supabase
@@ -46,6 +46,8 @@ export async function loadPosStockRows(
         .eq("tenant_id", tenantId)
         .order("sort_order")
         .order("id"),
+      // standard table (product_id null) and every menu's custom rows; posStockRows keeps the on-sale ones
+      supabase.from("sweetness_amounts").select("product_id, member_id, level_id, amount").eq("tenant_id", tenantId),
       supabase
         .from("product_sweetness")
         .select("product_id, group_id, default_member_id, allowed_member_ids, default_level_id, use_custom")
@@ -55,7 +57,6 @@ export async function loadPosStockRows(
         .from("modifier_option_effects")
         .select("option_id, kind, group_id, raw_material_id, amount")
         .eq("tenant_id", tenantId)
-        .eq("kind", "slot_add")
         .order("id"),
       // packaging: no cost anywhere here; Staff may read these columns
       supabase.from("products").select("id, packaging_set_id, house_glass_default").eq("tenant_id", tenantId),
@@ -63,7 +64,7 @@ export async function loadPosStockRows(
       supabase.from("packaging_set_items").select("set_id, raw_material_id, qty").eq("tenant_id", tenantId).order("set_id"),
     ]);
 
-    const failed = [materials, recipes, groups, members, levels, productSweetness, effects, products, packagingSets, packagingItems].find((r) => r.error);
+    const failed = [materials, recipes, groups, members, levels, amounts, productSweetness, effects, products, packagingSets, packagingItems].find((r) => r.error);
     if (failed?.error) {
       console.error("[loadPosStockRows] query failed:", failed.error.message);
       return null;
@@ -75,7 +76,7 @@ export async function loadPosStockRows(
       groups: groups.data ?? [],
       members: members.data ?? [],
       levels: levels.data ?? [],
-      amounts: [],
+      amounts: amounts.data ?? [],
       productSweetness: productSweetness.data ?? [],
       optionEffects: effects.data ?? [],
       productPackaging: (products.data ?? []).map((p) => ({

@@ -75,14 +75,23 @@ function fullRows(): StockCatalogRows {
 const ON_SALE = ["latte", "americano", "espresso_house", "thai_tea", "water"];
 const OFFERED = ["o_shot", "o_oat"];
 
-test("the POS rows: menus on sale and their options only, slot lines and slot_add effects only, no amounts", () => {
+test("the POS rows: menus on sale and their options only, with fixed lines, amounts and material effects", () => {
   const full = fullRows();
   const pos = posStockRows(full, ON_SALE, OFFERED);
   assert.ok(pos.recipes.length > 0);
-  assert.ok(pos.recipes.every((r) => r.line_kind === "slot" && ON_SALE.includes(r.product_id)));
-  assert.deepEqual(pos.recipes.map((r) => r.product_id), ["latte", "americano", "espresso_house"]);
-  assert.deepEqual(pos.optionEffects.map((e) => e.option_id), ["o_shot"]);
-  assert.deepEqual(pos.amounts, []);
+  assert.ok(pos.recipes.every((r) => ON_SALE.includes(r.product_id)));
+  // fixed lines are kept; the off-sale menu "retired" is dropped
+  assert.deepEqual(pos.recipes.map((r) => `${r.product_id}:${r.line_kind}`), [
+    "latte:slot", "latte:fixed", "latte:fixed", "americano:slot", "americano:fixed", "espresso_house:slot", "thai_tea:fixed",
+  ]);
+  // slot_add and material_add kept for offered options; the unoffered one is dropped
+  assert.deepEqual(pos.optionEffects.map((e) => e.option_id), ["o_shot", "o_oat"]);
+  // the standard table and the on-sale menu's custom rows are kept
+  assert.equal(pos.amounts.length, full.amounts.length);
+  assert.ok(pos.amounts.some((a) => a.product_id === "thai_tea") && pos.amounts.some((a) => a.product_id === null));
+  const offSale = fullRows();
+  offSale.amounts.push({ product_id: "retired", member_id: "s_syrup", level_id: "lv_normal", amount: 99 });
+  assert.equal(posStockRows(offSale, ON_SALE, OFFERED).amounts.length, full.amounts.length);
   assert.deepEqual(pos.productSweetness.map((p) => p.product_id), ["latte", "thai_tea"]);
   assert.deepEqual(pos.materials, full.materials);
   assert.deepEqual(pos.groups, full.groups);
@@ -131,6 +140,27 @@ test("INVARIANT: the client catalog (POS rows) prices and resolves every pick li
   assert.equal(kenyaShot.slots[0]!.shot?.memberId, "m_med");
   const doubled = choicesFromWindow("latte", client, tapSpecial(tapSpecial(start("latte"), "g_bean", "m_kenya"), "g_bean", "m_kenya"), []);
   assert.equal(cupPriceDeltaSatang(doubled.slots), 4000);
+});
+
+test("D2a: resolveLine on the POS catalog yields the fixed milk line, and the price is the same as with the old slot-only subset", () => {
+  const rows = fullRows();
+  const widened = posStock(posStockRows(rows, ON_SALE, OFFERED)).catalog;
+  // the old rule: slot lines and slot_add effects only, no amounts
+  const old = posStockRows(rows, ON_SALE, OFFERED);
+  const oldCatalog = buildStockCatalog({
+    ...old,
+    recipes: old.recipes.filter((r) => r.line_kind === "slot"),
+    optionEffects: old.optionEffects.filter((e) => e.kind === "slot_add"),
+    amounts: [],
+  });
+  const choices = { slots: [{ groupId: "g_bean", memberId: "m_kenya" }] };
+  const now = resolveLine("latte", 2, choices, ["o_shot"], widened);
+  const before = resolveLine("latte", 2, choices, ["o_shot"], oldCatalog);
+  assert.ok(!("error" in now) && !("error" in before));
+  assert.deepEqual(now.stock.find((l) => l.materialId === "milk"), { materialId: "milk", qty: 360 });
+  assert.equal(before.stock.some((l) => l.materialId === "milk"), false);
+  assert.equal(now.priceDeltaSatang, before.priceDeltaSatang);
+  assert.deepEqual(now.snapshot, before.snapshot);
 });
 
 // ── not loaded: a query failure (null) or a builder throw ─────────────────

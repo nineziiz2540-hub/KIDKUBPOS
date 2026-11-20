@@ -4,24 +4,26 @@ import { buildStockCatalog, type StockCatalogRows } from "./catalog-build.ts";
 import { emptyStockCatalog, type StockCatalog } from "./stock-core.ts";
 
 /**
- * The display subset of the server's rows for the POS: recipe slot lines and product sweetness of
- * the menus on sale, slot_add effects of the options offered with them, no sweetness amounts. That is
- * all the option window and the cart price need (fixed lines, material_add effects and amounts only
- * change stock, which the server resolves from its own full catalog). The page reads less still —
- * explicit columns, tenant filter (pos-catalog.ts) — and this is the rule it ends with.
+ * The server's rows narrowed to what the POS sells: every recipe line (fixed and slot), product
+ * sweetness and per-menu sweetness amounts of the menus on sale (the shop's standard amounts too),
+ * and every effect (slot_add and material_add) of the options offered with them. Round D2a: the device
+ * computes availability ("หมด?/เหลือ ~N แก้ว") and the offline stock decrement from per-cup needs, so
+ * it needs the full per-cup stock rows; the server still resolves the authoritative stock for every
+ * sale, and prices do not depend on the extra rows. The page reads with explicit columns and a tenant
+ * filter (pos-catalog.ts) — never a cost column — and this is the rule it ends with.
  */
 export function posStockRows(rows: StockCatalogRows, productIds: string[], optionIds: string[]): StockCatalogRows {
   const onSale = new Set(productIds);
   const offered = new Set(optionIds);
   return {
     materials: rows.materials,
-    recipes: rows.recipes.filter((r) => r.line_kind === "slot" && onSale.has(r.product_id)),
+    recipes: rows.recipes.filter((r) => onSale.has(r.product_id)),
     groups: rows.groups,
     members: rows.members,
     levels: rows.levels,
-    amounts: [],
+    amounts: rows.amounts.filter((a) => a.product_id === null || onSale.has(a.product_id)),
     productSweetness: rows.productSweetness.filter((p) => onSale.has(p.product_id)),
-    optionEffects: rows.optionEffects.filter((e) => e.kind === "slot_add" && offered.has(e.option_id)),
+    optionEffects: rows.optionEffects.filter((e) => offered.has(e.option_id)),
     productPackaging: rows.productPackaging.filter((p) => onSale.has(p.product_id)),
     packagingSets: rows.packagingSets,
     packagingItems: rows.packagingItems,
