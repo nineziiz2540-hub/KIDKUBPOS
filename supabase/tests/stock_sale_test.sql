@@ -210,6 +210,47 @@ begin
     and (select current_stock = -9999990 from public.raw_materials where id = huge)
     and (select cost_total is null from public.order_items where order_id = o.order_id));
 
+  -- ── stock_skipped_flag_written (R28, round D2a): the same failing block, as the real caller ──
+  -- The bill-level milk line and the bag count ride on the failing bill: the bill and its bags stay,
+  -- every stock row of the bill rolls back (milk too), and one flag tells the owner.
+  select current_stock into bal_before from public.raw_materials where id = milk;
+  set local role service_role;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 1, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', milk, 'qty', 4))),
+    items, null, null, '[]', null);
+  reset role;
+  r := r || jsonb_build_object('stock_skipped_flag_written',
+    o.created
+    and (select count(*) = 1 from public.stock_flags where order_id = o.order_id)
+    and (select kind = 'stock_skipped' and tenant_id = ta
+                and business_date = (now() at time zone 'Asia/Bangkok')::date
+                and detail like '22003 %' and detail like '%overflow%' and char_length(detail) <= 206
+                and raw_material_id is null and product_id is null and created_by = ua
+                and resolved_at is null and resolved_by is null
+           from public.stock_flags where order_id = o.order_id)
+    -- a bill whose stock went through has no flag
+    and not exists (select 1 from public.stock_flags where order_id = first.order_id));
+  r := r || jsonb_build_object('stock_skipped_keeps_bill_and_bags',
+    o.created
+    and (select bags = 1 and status = 'completed' from public.orders where id = o.order_id)
+    and not exists (select 1 from public.inventory_transactions where order_id = o.order_id)
+    and (select current_stock = bal_before from public.raw_materials where id = milk)
+    and (select current_stock = -9999990 from public.raw_materials where id = huge));
+
+  -- The flag can never raise either: with the flag insert refused (privilege revoked for this
+  -- rolled-back test only), the bill is still recorded, without a flag.
+  revoke insert on public.stock_flags from service_role;
+  set local role service_role;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(), cash_order, items, null, null, '[]', null);
+  reset role;
+  grant insert on public.stock_flags to service_role;
+  r := r || jsonb_build_object('stock_flag_failure_never_refuses',
+    o.created
+    and exists (select 1 from public.orders where id = o.order_id)
+    and not exists (select 1 from public.stock_flags where order_id = o.order_id)
+    and has_table_privilege('service_role', 'public.stock_flags', 'insert'));
+
   -- ── rounding_edges: 0.0005 -> 0.001 kept; 1e6 skipped; bill created ────────
   items := jsonb_build_array(jsonb_build_object(
     'product_id', pa, 'product_name', 'ลาเต้', 'unit_price', 55, 'quantity', 1, 'subtotal', 55,

@@ -1,4 +1,5 @@
 -- order_record + queue_counter_raise (round C2, selling while offline) — DB test.
+-- Round D2a adds bags on the bill and bill-level stock lines (p_order "bags" / "stock").
 -- Run the whole file through execute_sql. It never commits: it ends with
 -- raise exception 'RESULT <json>', so every row it creates is rolled back.
 -- Every key in the JSON must be true. "As service" = default role (auth.uid() is null), the
@@ -25,6 +26,15 @@ declare
   ts timestamptz;
   n int;
   ok boolean;
+  -- bags and bill-level stock (round D2a)
+  ub uuid := gen_random_uuid();  -- owner, tenant B (a foreign material)
+  tb uuid;
+  bag uuid; cup uuid; band uuid; old_m uuid; foreign_m uuid;
+  bag_bal numeric; cup_bal numeric;
+  bill_order jsonb; items2 jsonb;
+  ref2 uuid;
+  first2 record; again2 record;
+  v jsonb;
 begin
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
   values
@@ -261,6 +271,208 @@ begin
   perform public.queue_counter_raise(ta, ua, date '2020-01-01', 3);
   r := r || jsonb_build_object('raise_counter', ok
     and (select last_number = 15 from public.tenant_queue_counters where tenant_id = ta and business_date = date '2020-01-01'));
+
+  -- ── Bags and bill-level stock (round D2a) ───────────────────────────────
+  -- Shift s2 is open and ua is an active owner: online cash sales from here on.
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
+  values (ub, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'qa-or-b-' || ub || '@example.test', 'x', now(), now());
+  perform public.create_tenant_and_owner(ub, 'QA OR B', true);
+  select tenant_id into tb from public.profiles where id = ub;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock, category)
+  values (ta, 'ถุงหิ้ว', 'ชิ้น', 1.5, 100, true, 'บรรจุภัณฑ์') returning id into bag;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock, category)
+  values (ta, 'แก้ว 16oz', 'ชิ้น', 2, 200, true, 'บรรจุภัณฑ์') returning id into cup;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock)
+  values (ta, 'หนังยาง', 'ชิ้น', 0.1, 0, false) returning id into band;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock, archived_at)
+  values (ta, 'ถุงเก่า', 'ชิ้น', 1, 100, true, now()) returning id into old_m;
+  insert into public.raw_materials (tenant_id, name, unit, cost_per_unit, current_stock, track_stock)
+  values (tb, 'ถุงร้านอื่น', 'ชิ้น', 1, 500, true) returning id into foreign_m;
+  insert into public.inventory_transactions (tenant_id, raw_material_id, type, quantity, unit_cost, note)
+  select tenant_id, id, 'opening', current_stock, cost_per_unit, 'test'
+    from public.raw_materials where id in (bag, cup, old_m, foreign_m);
+
+  -- bags 2, bill-level stock: the bag twice (1 + 1, aggregated to one row) and 3 cups
+  bill_order := cash_order || jsonb_build_object('bags', 2, 'stock', jsonb_build_array(
+    jsonb_build_object('material_id', bag, 'qty', 1),
+    jsonb_build_object('material_id', bag, 'qty', 1),
+    jsonb_build_object('material_id', cup, 'qty', 3)));
+  ref := gen_random_uuid();
+  select * into first from public.order_record(ta, ua, ref, bill_order, items, null, null, '[]', null);
+  r := r || jsonb_build_object('bags_stored',
+    first.created and (select bags = 2 from public.orders where id = first.order_id));
+  r := r || jsonb_build_object('bill_stock_rows_written_once',
+    (select count(*) = 1 and sum(quantity) = -2
+            and bool_and(order_item_id is null and tenant_id = ta and unit_cost = 1.5 and created_by = ua
+                         and not legacy
+                         and occurred_at = (select created_at from public.orders where id = first.order_id))
+       from public.inventory_transactions
+      where order_id = first.order_id and raw_material_id = bag and type = 'sale')
+    and (select count(*) = 1 and sum(quantity) = -3 and bool_and(order_item_id is null and unit_cost = 2)
+           from public.inventory_transactions
+          where order_id = first.order_id and raw_material_id = cup and type = 'sale')
+    and (select count(*) = 2 from public.inventory_transactions where order_id = first.order_id)
+    and (select current_stock = 98 from public.raw_materials where id = bag)
+    and (select current_stock = 197 from public.raw_materials where id = cup)
+    -- a bill-level line belongs to no item: the items (no stock lines) keep cost_total null
+    and (select cost_total is null from public.order_items where order_id = first.order_id));
+
+  -- Replays: the same client_ref again (even with other bags / stock) records nothing more; an
+  -- offline sale synced twice deducts once, at the sale time.
+  select * into again from public.order_record(ta, ua, ref,
+    cash_order || jsonb_build_object('bags', 5, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', bag, 'qty', 5))),
+    items, null, null, '[]', null);
+  ok := not again.created and again.order_id = first.order_id
+    and (select bags = 2 from public.orders where id = first.order_id)
+    and (select count(*) = 2 from public.inventory_transactions where order_id = first.order_id)
+    and (select current_stock = 98 from public.raw_materials where id = bag)
+    and (select current_stock = 197 from public.raw_materials where id = cup);
+  ts := now() - interval '25 minutes';
+  ref2 := gen_random_uuid();
+  select * into first2 from public.order_record(ta, ua, ref2, bill_order, items, null, null, '[]',
+    jsonb_build_object('sold_at', ts, 'queue_number', 21, 'shift_id', s2, 'override', null));
+  select * into again2 from public.order_record(ta, ua, ref2, bill_order, items, null, null, '[]',
+    jsonb_build_object('sold_at', ts, 'queue_number', 21, 'shift_id', s2, 'override', null));
+  r := r || jsonb_build_object('bill_stock_replay_no_double', ok
+    and first2.created and not again2.created and again2.order_id = first2.order_id
+    and (select bags = 2 from public.orders where id = first2.order_id)
+    and (select count(*) = 1 and sum(quantity) = -2 and bool_and(occurred_at = ts and order_item_id is null)
+           from public.inventory_transactions
+          where order_id = first2.order_id and raw_material_id = bag and type = 'sale')
+    and (select count(*) = 2 from public.inventory_transactions where order_id = first2.order_id)
+    and (select current_stock = 96 from public.raw_materials where id = bag)
+    and (select current_stock = 194 from public.raw_materials where id = cup));
+
+  -- Absent bags is 0: the D1 payload (neither key), and bill-level stock sent without bags.
+  select * into o from public.order_record(ta, ua, gen_random_uuid(), cash_order, items, null, null, '[]', null);
+  ok := o.created and (select bags = 0 from public.orders where id = o.order_id)
+    and not exists (select 1 from public.inventory_transactions where order_id = o.order_id);
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('stock', jsonb_build_array(jsonb_build_object('material_id', cup, 'qty', 1))),
+    items, null, null, '[]', null);
+  r := r || jsonb_build_object('bags_default_zero_when_absent', ok
+    and o.created and (select bags = 0 from public.orders where id = o.order_id)
+    and (select count(*) = 1 and sum(quantity) = -1 from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = cup and type = 'sale' and order_item_id is null));
+
+  -- A bags value that is not a whole number 0..99 is 0, never a refused sale; 0, 99 and 2.0 are kept.
+  ok := true;
+  for v in select x.value from jsonb_array_elements('[150, -1, 100, 1.5, "2", null, true, {"n": 1}, [2]]'::jsonb) as x loop
+    select * into o from public.order_record(ta, ua, gen_random_uuid(),
+      cash_order || jsonb_build_object('bags', v), items, null, null, '[]', null);
+    ok := ok and o.created and (select bags = 0 from public.orders where id = o.order_id);
+  end loop;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 99), items, null, null, '[]', null);
+  ok := ok and (select bags = 99 from public.orders where id = o.order_id);
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 2.0), items, null, null, '[]', null);
+  ok := ok and (select bags = 2 from public.orders where id = o.order_id);
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 0), items, null, null, '[]', null);
+  r := r || jsonb_build_object('bags_invalid_is_zero', ok
+    and (select bags = 0 from public.orders where id = o.order_id));
+
+  -- An untracked material writes no row (and moves nothing); the tracked bag on the same bill does.
+  select current_stock into bag_bal from public.raw_materials where id = bag;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 1, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', band, 'qty', 5),
+      jsonb_build_object('material_id', bag, 'qty', 1))),
+    items, null, null, '[]', null);
+  r := r || jsonb_build_object('bill_stock_untracked_no_row',
+    o.created
+    and not exists (select 1 from public.inventory_transactions where raw_material_id = band)
+    and (select current_stock = 0 from public.raw_materials where id = band)
+    and (select count(*) = 1 and sum(quantity) = -1 from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = bag and type = 'sale')
+    and (select count(*) = 1 from public.inventory_transactions where order_id = o.order_id)
+    and (select current_stock = bag_bal - 1 from public.raw_materials where id = bag));
+
+  -- Another shop's material and an archived one are skipped; the bag on the same bill is recorded.
+  select current_stock into bag_bal from public.raw_materials where id = bag;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 1, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', foreign_m, 'qty', 5),
+      jsonb_build_object('material_id', old_m, 'qty', 5),
+      jsonb_build_object('material_id', bag, 'qty', 1))),
+    items, null, null, '[]', null);
+  r := r || jsonb_build_object('bill_stock_foreign_material_skipped',
+    o.created
+    and (select current_stock = 500 from public.raw_materials where id = foreign_m)
+    and (select current_stock = 100 from public.raw_materials where id = old_m)
+    and not exists (select 1 from public.inventory_transactions
+                     where raw_material_id in (foreign_m, old_m) and type = 'sale')
+    and (select count(*) = 1 from public.inventory_transactions where order_id = o.order_id)
+    and (select current_stock = bag_bal - 1 from public.raw_materials where id = bag));
+
+  -- Unusable lines are skipped like item lines (non-numeric, non-positive, rounding to 0, out of
+  -- range, malformed id, not an object); a "stock" that is not an array is ignored.
+  select current_stock into bag_bal from public.raw_materials where id = bag;
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 1, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', bag, 'qty', 0),
+      jsonb_build_object('material_id', bag, 'qty', -3),
+      jsonb_build_object('material_id', bag, 'qty', 'abc'),
+      jsonb_build_object('material_id', bag, 'qty', '5'),
+      jsonb_build_object('material_id', bag, 'qty', 0.0001),
+      jsonb_build_object('material_id', bag, 'qty', 1000000),
+      jsonb_build_object('material_id', bag),
+      jsonb_build_object('material_id', 'not-a-uuid', 'qty', 5),
+      jsonb_build_object('qty', 5),
+      to_jsonb('junk'::text),
+      jsonb_build_object('material_id', cup, 'qty', 1))),
+    items, null, null, '[]', null);
+  ok := o.created
+    and (select current_stock = bag_bal from public.raw_materials where id = bag)
+    and (select count(*) = 1 and sum(quantity) = -1 from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = cup and type = 'sale')
+    and (select count(*) = 1 from public.inventory_transactions where order_id = o.order_id);
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('stock', 'oops'), items, null, null, '[]', null);
+  ok := ok and o.created and not exists (select 1 from public.inventory_transactions where order_id = o.order_id);
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('stock', jsonb_build_object('material_id', bag, 'qty', 1)),
+    items, null, null, '[]', null);
+  r := r || jsonb_build_object('bill_stock_bad_lines_skipped', ok
+    and o.created and not exists (select 1 from public.inventory_transactions where order_id = o.order_id)
+    and (select current_stock = bag_bal from public.raw_materials where id = bag));
+
+  -- The same material in an item line and a bill line: one row each, the balance moves by the sum,
+  -- and the item's cost counts only its own lines (2 cups x 2 + 0.5 bag x 1.5 = 4.75).
+  select current_stock into bag_bal from public.raw_materials where id = bag;
+  select current_stock into cup_bal from public.raw_materials where id = cup;
+  items2 := jsonb_build_array(jsonb_build_object(
+    'product_id', pa, 'product_name', 'ลาเต้', 'unit_price', 55, 'quantity', 2, 'subtotal', 110,
+    'stock', jsonb_build_array(
+      jsonb_build_object('material_id', cup, 'qty', 2),
+      jsonb_build_object('material_id', bag, 'qty', 0.5))));
+  select * into o from public.order_record(ta, ua, gen_random_uuid(),
+    cash_order || jsonb_build_object('bags', 1, 'stock', jsonb_build_array(
+      jsonb_build_object('material_id', bag, 'qty', 1),
+      jsonb_build_object('material_id', cup, 'qty', 1))),
+    items2, null, null, '[]', null);
+  r := r || jsonb_build_object('bill_and_item_share_material_one_lock_set',
+    o.created
+    and (select current_stock = cup_bal - 3 from public.raw_materials where id = cup)
+    and (select current_stock = bag_bal - 1.5 from public.raw_materials where id = bag)
+    and (select count(*) = 2 and sum(quantity) = -3
+                and count(*) filter (where order_item_id is null and quantity = -1) = 1
+                and count(*) filter (where order_item_id is not null and quantity = -2) = 1
+           from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = cup and type = 'sale')
+    and (select count(*) = 2 and sum(quantity) = -1.5
+                and count(*) filter (where order_item_id is null and quantity = -1) = 1
+           from public.inventory_transactions
+          where order_id = o.order_id and raw_material_id = bag and type = 'sale')
+    and (select cost_total = 4.75 from public.order_items where order_id = o.order_id));
+
+  r := r || jsonb_build_object('bill_stock_balance_equals_ledger',
+    (select bool_and(rm.current_stock = coalesce((
+              select sum(t.quantity) from public.inventory_transactions t
+               where t.raw_material_id = rm.id and not t.legacy), 0))
+       from public.raw_materials rm where rm.id in (bag, cup, old_m, foreign_m)));
 
   -- ── Privileges ──────────────────────────────────────────────────────────
   r := r || jsonb_build_object('privileges',
