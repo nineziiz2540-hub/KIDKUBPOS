@@ -760,6 +760,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          bags: number
           cancel_reason: string | null
           cancelled_approved_by: string | null
           cancelled_at: string | null
@@ -804,6 +805,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          bags?: number
           cancel_reason?: string | null
           cancelled_approved_by?: string | null
           cancelled_at?: string | null
@@ -848,6 +850,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          bags?: number
           cancel_reason?: string | null
           cancelled_approved_by?: string | null
           cancelled_at?: string | null
@@ -950,6 +953,87 @@ export type Database = {
           },
           {
             foreignKeyName: "orders_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      packaging_set_items: {
+        Row: {
+          id: string
+          qty: number
+          raw_material_id: string
+          set_id: string
+          tenant_id: string
+        }
+        Insert: {
+          id?: string
+          qty: number
+          raw_material_id: string
+          set_id: string
+          tenant_id: string
+        }
+        Update: {
+          id?: string
+          qty?: number
+          raw_material_id?: string
+          set_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "packaging_set_items_raw_material_id_fkey"
+            columns: ["raw_material_id"]
+            isOneToOne: false
+            referencedRelation: "raw_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "packaging_set_items_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "packaging_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "packaging_set_items_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      packaging_sets: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          tenant_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          tenant_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "packaging_sets_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -1146,10 +1230,14 @@ export type Database = {
           created_at: string
           description: string | null
           drink_type: string | null
+          house_glass_default: boolean
           id: string
           image_url: string | null
           is_active: boolean
           name: string
+          packaging_set_id: string | null
+          paused_at: string | null
+          paused_by: string | null
           price: number
           tenant_id: string
           updated_at: string
@@ -1161,10 +1249,14 @@ export type Database = {
           created_at?: string
           description?: string | null
           drink_type?: string | null
+          house_glass_default?: boolean
           id?: string
           image_url?: string | null
           is_active?: boolean
           name: string
+          packaging_set_id?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
           price?: number
           tenant_id: string
           updated_at?: string
@@ -1176,10 +1268,14 @@ export type Database = {
           created_at?: string
           description?: string | null
           drink_type?: string | null
+          house_glass_default?: boolean
           id?: string
           image_url?: string | null
           is_active?: boolean
           name?: string
+          packaging_set_id?: string | null
+          paused_at?: string | null
+          paused_by?: string | null
           price?: number
           tenant_id?: string
           updated_at?: string
@@ -1190,6 +1286,20 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_packaging_set_id_fkey"
+            columns: ["packaging_set_id"]
+            isOneToOne: false
+            referencedRelation: "packaging_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_paused_by_fkey"
+            columns: ["paused_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -1487,6 +1597,94 @@ export type Database = {
           },
         ]
       }
+      stock_flags: {
+        Row: {
+          business_date: string
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          id: string
+          kind: string
+          order_id: string | null
+          product_id: string | null
+          raw_material_id: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          tenant_id: string
+        }
+        Insert: {
+          business_date: string
+          created_at?: string
+          created_by?: string | null
+          detail?: string | null
+          id?: string
+          kind: string
+          order_id?: string | null
+          product_id?: string | null
+          raw_material_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          tenant_id: string
+        }
+        Update: {
+          business_date?: string
+          created_at?: string
+          created_by?: string | null
+          detail?: string | null
+          id?: string
+          kind?: string
+          order_id?: string | null
+          product_id?: string | null
+          raw_material_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_flags_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_flags_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_flags_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_flags_raw_material_id_fkey"
+            columns: ["raw_material_id"]
+            isOneToOne: false
+            referencedRelation: "raw_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_flags_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_flags_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sweetness_amounts: {
         Row: {
           amount: number
@@ -1606,6 +1804,8 @@ export type Database = {
       }
       tenants: {
         Row: {
+          bag_material_id: string | null
+          bags_per_cups: number | null
           cash_float_default: number
           created_at: string
           delivery_gp_percent: number
@@ -1619,6 +1819,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          bag_material_id?: string | null
+          bags_per_cups?: number | null
           cash_float_default?: number
           created_at?: string
           delivery_gp_percent?: number
@@ -1632,6 +1834,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          bag_material_id?: string | null
+          bags_per_cups?: number | null
           cash_float_default?: number
           created_at?: string
           delivery_gp_percent?: number
@@ -1644,7 +1848,15 @@ export type Database = {
           slug?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tenants_bag_material_id_fkey"
+            columns: ["bag_material_id"]
+            isOneToOne: false
+            referencedRelation: "raw_materials"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
