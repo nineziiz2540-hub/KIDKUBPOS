@@ -3,9 +3,9 @@
 
 export const MAX_BAGS = 99;
 
-/** The bag count suggested for a bill: one bag per `bagsPerCups` cups, rounded up; 0 when the shop has no rule. */
+/** The bag count suggested for a bill: one bag per `bagsPerCups` cups, rounded up, capped at MAX_BAGS (a bigger count would be refused); 0 when the shop has no rule. */
 export function defaultBags(cups: number, bagsPerCups: number | null): number {
-  return bagsPerCups ? Math.ceil(cups / bagsPerCups) : 0;
+  return bagsPerCups ? Math.min(MAX_BAGS, Math.ceil(cups / bagsPerCups)) : 0;
 }
 
 /** The bill-level stock lines for a bag count: none without a bag material or without bags. */
@@ -18,11 +18,6 @@ export function billStockLines(bags: number, bagMaterialId: string | null): { ma
 export function validBags(x: unknown): number | null {
   if (x === undefined) return 0;
   return typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= MAX_BAGS ? x : null;
-}
-
-/** houseGlass is a boolean or absent; anything else is malformed. */
-export function isValidHouseGlass(x: unknown): boolean {
-  return x === undefined || typeof x === "boolean";
 }
 
 /** The bags/stock part of order_record's p_order (snake_case keys, like the D1 item lines). */

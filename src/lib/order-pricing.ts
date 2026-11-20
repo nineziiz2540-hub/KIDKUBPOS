@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import type { CartItem } from "@/types/app";
-import { isValidHouseGlass } from "@/lib/bags";
 import {
   MAX_LINES,
   MAX_OPTIONS_PER_LINE,
@@ -9,6 +8,7 @@ import {
   priceLines,
   priceLinesAsCharged,
   isValidCartChoices,
+  isValidHouseGlass,
   type CatalogModifier,
   type CatalogOption,
   type PricedLine,

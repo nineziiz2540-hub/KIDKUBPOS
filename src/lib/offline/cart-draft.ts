@@ -1,5 +1,6 @@
 import type { CartItem } from "../../types/app.ts";
-import { isValidHouseGlass, validBags } from "../bags.ts";
+import { validBags } from "../bags.ts";
+import { isValidHouseGlass } from "../order-pricing-core.ts";
 
 // The cart in progress, as saved on the device so a reload brings it back (spec call 16).
 // Pure: no React, no browser globals. The manager PIN is never part of it.

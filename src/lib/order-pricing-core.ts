@@ -67,6 +67,11 @@ export type PricingCatalog = {
   stock: StockCatalog;
 };
 
+/** houseGlass is a boolean or absent; anything else is malformed (createOrder, outbox sync and draft all use this). */
+export function isValidHouseGlass(x: unknown): boolean {
+  return x === undefined || typeof x === "boolean";
+}
+
 /** Shape check for a client's `choices` (undefined is fine: carts from before D1 have none). */
 export function isValidCartChoices(value: unknown): boolean {
   if (value === undefined) return true;

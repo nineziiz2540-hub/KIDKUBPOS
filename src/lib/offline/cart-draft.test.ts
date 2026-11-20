@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CartChoices } from "../../types/app.ts";
+import { isValidHouseGlass } from "../order-pricing-core.ts";
 import { DRAFT_MAX_AGE_MS, draftKey, restorable, toDraft, type DraftState } from "./cart-draft.ts";
 
 const ids = { tenantId: "t1", sellerId: "u1" };
@@ -235,10 +236,18 @@ test("draft restores bags and houseGlass; a pre-D2a draft restores with bags 0",
   assert.equal(restorable({ ...saved, bags: 1.5 }, ids)!.bags, 0);
 });
 
-test("houseGlass that is not a boolean is refused (draft)", () => {
+test("houseGlass that is not a boolean is refused (createOrder, draft, outbox)", () => {
+  // createOrder and the outbox sync (which calls createOrder) share this one shape check
+  for (const bad of ["yes", "true", 1, 0, null, {}]) assert.equal(isValidHouseGlass(bad), false, String(bad));
+  for (const ok of [true, false, undefined]) assert.equal(isValidHouseGlass(ok), true);
+  // draft leg
   const d = JSON.parse(JSON.stringify(toDraft(state(), ids)));
-  d.items[0].houseGlass = "yes";
-  assert.equal(restorable(d, ids), null);
+  for (const bad of ["yes", 1, null]) {
+    d.items[0].houseGlass = bad;
+    assert.equal(restorable(d, ids), null, String(bad));
+  }
   d.items[0].houseGlass = false;
   assert.equal(restorable(d, ids)!.items[0]!.houseGlass, false);
+  delete d.items[0].houseGlass;
+  assert.ok(restorable(d, ids));
 });
