@@ -100,3 +100,8 @@ export function usePendingCount(tenantId?: string): {
   }, [tenantId]);
   return state;
 }
+
+/** The POS heartbeat's last verdict, read at the moment of a call (a toast outlives its component's props). */
+export function isPosOnline(): boolean {
+  return posOnline;
+}

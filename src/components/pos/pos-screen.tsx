@@ -468,6 +468,8 @@ export function PosScreen({
    * fresh levels now. A late success only asks for fresh levels (the heartbeat shows it).
    */
   async function changePause(product: PosProduct, paused: boolean): Promise<PauseResult> {
+    // Offline is refused before calling: a server action on a dead network would hold up the next sale.
+    if (!online) return { offline: true };
     const call = setMenuPaused(product.id, paused);
     const res = await settlePauseCall(call);
     if ("offline" in res) {

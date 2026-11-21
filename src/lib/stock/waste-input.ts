@@ -152,3 +152,13 @@ export function groupMaterials(materials: WasteMaterial[]): { category: string; 
     .sort(([a], [b]) => a.localeCompare(b, "th"))
     .map(([category, items]) => ({ category, items: [...items].sort((a, b) => a.name.localeCompare(b.name, "th")) }));
 }
+
+export const NO_COUNTED_MATERIALS = "เมนูนี้ไม่มีวัตถุดิบที่นับสต๊อก ไม่ต้องบันทึก";
+
+/**
+ * A menu waste's lines, minus any whose material is untracked or archived: stock_waste skips those
+ * silently, so without this a waste that writes nothing would still show a green "saved" toast.
+ */
+export function keepCountedLines<T extends { material_id: string }>(lines: T[], countedIds: Set<string>): T[] {
+  return lines.filter((l) => countedIds.has(l.material_id));
+}

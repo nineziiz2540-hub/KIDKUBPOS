@@ -103,3 +103,12 @@ test("groupMaterials groups by category and sorts names, carrying no cost", asyn
   const g = groupMaterials([m("1", "ข", "นม"), m("2", "ค", "เมล็ด"), m("3", "ก", "นม")]);
   assert.deepEqual(g.map((x) => [x.category, x.items.map((i) => i.id)]), [["นม", ["3", "1"]], ["เมล็ด", ["2"]]]);
 });
+
+test("keepCountedLines keeps only lines of tracked, non-archived materials (no false waste, R-D2a-25)", async () => {
+  const { keepCountedLines, NO_COUNTED_MATERIALS } = await import("./waste-input.ts");
+  const lines = [{ material_id: "a", qty: 18 }, { material_id: "b", qty: 200 }, { material_id: "c", qty: 1 }];
+  assert.deepEqual(keepCountedLines(lines, new Set(["a", "c"])), [{ material_id: "a", qty: 18 }, { material_id: "c", qty: 1 }]);
+  assert.deepEqual(keepCountedLines(lines, new Set()), []);
+  assert.deepEqual(keepCountedLines([], new Set(["a"])), []);
+  assert.equal(NO_COUNTED_MATERIALS, "เมนูนี้ไม่มีวัตถุดิบที่นับสต๊อก ไม่ต้องบันทึก");
+});

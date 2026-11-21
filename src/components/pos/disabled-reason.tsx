@@ -20,3 +20,6 @@ export function DisabledReason({
     </p>
   );
 }
+
+/** The one sentence for anything that needs the server while the connection is down. */
+export const OFFLINE_REASON = "ใช้ไม่ได้ตอนเน็ตหลุด";

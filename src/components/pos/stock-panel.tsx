@@ -8,11 +8,9 @@ import type { StockCatalog } from "@/lib/stock/stock-core";
 import type { PauseResult } from "@/lib/stock/pos-states";
 import type { WasteMaterial } from "@/lib/stock/waste-input";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
-import { DisabledReason } from "./disabled-reason";
+import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
 import { PauseList } from "./pause-list";
 import { WasteFlow } from "./waste-flow";
-
-export const STOCK_OFFLINE = "ใช้ไม่ได้ตอนเน็ตหลุด";
 
 type Props = {
   online: boolean;
@@ -82,7 +80,7 @@ export function StockPanel(props: Props) {
                   {!online && (
                     <DisabledReason
                       what={["บันทึกของเสีย", ...(onReceive ? ["รับของเข้า"] : []), "ปิด/เปิดขายเมนู"]}
-                      reason={STOCK_OFFLINE}
+                      reason={OFFLINE_REASON}
                     />
                   )}
                 </div>
@@ -95,12 +93,13 @@ export function StockPanel(props: Props) {
                   materials={props.materials}
                   modifiersFor={props.modifiersFor}
                   productsWithOptions={props.productsWithOptions}
+                  online={online}
                   onChanged={props.onChanged}
                   onDone={onClose}
                 />
               )}
               {view === "pause" && (
-                <PauseList products={props.products} pausedIds={props.pausedIds} onChange={props.onChangePause} />
+                <PauseList online={online} products={props.products} pausedIds={props.pausedIds} onChange={props.onChangePause} />
               )}
             </div>
           </div>

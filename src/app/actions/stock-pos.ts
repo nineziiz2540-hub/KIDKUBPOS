@@ -9,7 +9,7 @@ import { loadStockCatalog } from "@/lib/stock/catalog";
 import { resolveLine } from "@/lib/stock/stock-core";
 import { toLineChoices } from "@/lib/order-pricing-core";
 import {
-  parseWasteInput, wasteLabel, wasteReasonText, wasteUndoErrorMessage,
+  keepCountedLines, NO_COUNTED_MATERIALS, parseWasteInput, wasteLabel, wasteReasonText, wasteUndoErrorMessage,
   type WasteInput, type WasteNames,
 } from "@/lib/stock/waste-input";
 
@@ -101,7 +101,25 @@ export async function recordWaste(raw: WasteInput): Promise<{ refId: string; lab
       loaded.catalog
     );
     if ("error" in resolved) return { error: resolved.error };
-    lines = resolved.stock.map((l) => ({ material_id: l.materialId, qty: l.qty }));
+    const resolvedLines = resolved.stock.map((l) => ({ material_id: l.materialId, qty: l.qty }));
+    // stock_waste skips materials that are untracked or archived without a word: keep only the counted
+    // ones here, and refuse a waste that would write nothing (no false "saved" toast, R-D2a-25).
+    const { data: counted, error: countedError } =
+      resolvedLines.length === 0
+        ? { data: [], error: null }
+        : await admin
+            .from("raw_materials")
+            .select("id")
+            .eq("tenant_id", profile.tenant_id)
+            .eq("track_stock", true)
+            .is("archived_at", null)
+            .in("id", resolvedLines.map((l) => l.material_id));
+    if (countedError) {
+      console.error("[recordWaste]", countedError.message);
+      return { error: "บันทึกของเสียไม่สำเร็จ ลองใหม่อีกครั้ง" };
+    }
+    lines = keepCountedLines(resolvedLines, new Set((counted ?? []).map((m) => m.id)));
+    if (lines.length === 0) return { error: NO_COUNTED_MATERIALS };
     names = { name: product.name, parts: resolved.snapshot.slots.map((s) => s.label) };
   } else {
     const { data: material } = await admin

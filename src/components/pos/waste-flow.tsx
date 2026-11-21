@@ -13,6 +13,8 @@ import {
   type WasteInput, type WasteMaterial,
 } from "@/lib/stock/waste-input";
 import type { CartItem, ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
+import { isPosOnline } from "@/lib/offline/status-store";
+import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
 import { NumericKeypad } from "./numeric-keypad";
 import { OptionWindow } from "./modifier-modal";
 import { ProductGrid } from "./product-grid";
@@ -24,6 +26,8 @@ type Props = {
   materials: WasteMaterial[];
   modifiersFor: (productId: string) => ModifierWithOptions[];
   productsWithOptions: Set<string>;
+  /** The live connection: offline the reason chips and the undo do not call the server. */
+  online: boolean;
   /** Fresh levels after a save or an undo (the heartbeat's checkNow). */
   onChanged: () => void;
   /** The waste is saved: close the panel. */
@@ -43,7 +47,7 @@ const FRACTIONS = [
 const TAB = "h-14 flex-1 rounded-lg border-2 text-lg font-semibold transition-colors";
 const BACK = "h-14 shrink-0 rounded-lg border border-input bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted";
 
-export function WasteFlow({ products, categories, catalog, materials, modifiersFor, productsWithOptions, onChanged, onDone }: Props) {
+export function WasteFlow({ online, products, categories, catalog, materials, modifiersFor, productsWithOptions, onChanged, onDone }: Props) {
   const toast = useToastManager();
   const [tab, setTab] = useState<"menu" | "material">("menu");
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -55,6 +59,10 @@ export function WasteFlow({ products, categories, catalog, materials, modifiersF
 
   async function save(reason: string, otherText?: string) {
     if (!picked || savingRef.current) return;
+    if (!isPosOnline()) {
+      setError(OFFLINE_REASON);
+      return;
+    }
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -94,6 +102,11 @@ export function WasteFlow({ products, categories, catalog, materials, modifiersF
         children: "ย้อนกลับ",
         onClick: async () => {
           if (done) return;
+          // The toast outlives this screen: ask the connection now, not what it was when it was drawn.
+          if (!isPosOnline()) {
+            toast.add({ title: OFFLINE_REASON, type: "error" });
+            return;
+          }
           done = true;
           toast.close(toastId);
           let undo: { error?: string };
@@ -126,7 +139,7 @@ export function WasteFlow({ products, categories, catalog, materials, modifiersF
             { name: picked.material.name, unit: picked.material.unit }
           );
     return (
-      <ReasonStep label={label} saving={saving} error={error} onBack={() => { setPicked(null); setError(null); }} onPick={save} />
+      <ReasonStep online={online} label={label} saving={saving} error={error} onBack={() => { setPicked(null); setError(null); }} onPick={save} />
     );
   }
 
@@ -231,11 +244,16 @@ function MaterialQty({ material, onBack, onNext }: { material: WasteMaterial; on
   const shown = `${pad === "" ? "0" : pad}${unit === "purchase" && fraction ? ` + ${FRACTIONS.find((f) => f.value === fraction)?.label}` : ""}`;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* The body scrolls on a very short screen; "ต่อไป" below it never does (always in view). On a wide
+          screen the keypad sits beside the controls, so the whole step is about 300 px tall. */}
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
       <div className="flex items-center gap-3">
         <button type="button" onClick={onBack} className={BACK}>กลับ</button>
         <p className="min-w-0 text-xl font-bold text-sidebar">{material.name}</p>
       </div>
+      <div className="space-y-3 sm:grid sm:grid-cols-2 sm:items-start sm:gap-4 sm:space-y-0">
+      <div className="space-y-3">
       {hasPurchase && (
         <div className="flex gap-2">
           {(
@@ -259,9 +277,10 @@ function MaterialQty({ material, onBack, onNext }: { material: WasteMaterial; on
       <p className="text-center text-3xl font-bold text-sidebar tabular-nums">
         {shown} <span className="text-xl font-semibold text-muted-foreground">{entryUnit}</span>
       </p>
-      {unit === "purchase" && qty !== null && (
-        <p className="text-center text-base text-muted-foreground tabular-nums">= {qty.toLocaleString("en-US", { maximumFractionDigits: 3 })} {material.unit}</p>
-      )}
+      {/* its line is always there, so the pad and the buttons never move when it comes and goes */}
+      <p className="min-h-6 text-center text-base text-muted-foreground tabular-nums">
+        {unit === "purchase" && qty !== null ? `= ${qty.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${material.unit}` : " "}
+      </p>
       {unit === "purchase" && (
         <div className="flex gap-2">
           {FRACTIONS.map((f) => (
@@ -277,7 +296,10 @@ function MaterialQty({ material, onBack, onNext }: { material: WasteMaterial; on
           ))}
         </div>
       )}
+      </div>
       <NumericKeypad allowDecimal onKey={(k) => setPad((p) => padPress(p, k))} />
+      </div>
+      </div>
       <button
         type="button"
         disabled={!valid}
@@ -291,8 +313,9 @@ function MaterialQty({ material, onBack, onNext }: { material: WasteMaterial; on
 }
 
 function ReasonStep({
-  label, saving, error, onBack, onPick,
+  online, label, saving, error, onBack, onPick,
 }: {
+  online: boolean;
   label: string;
   saving: boolean;
   error: string | null;
@@ -302,6 +325,7 @@ function ReasonStep({
   const [other, setOther] = useState(false);
   const [text, setText] = useState("");
   const trimmed = text.trim();
+  const off = saving || !online;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       <div className="flex items-center gap-3">
@@ -314,7 +338,7 @@ function ReasonStep({
           <button
             key={r}
             type="button"
-            disabled={saving}
+            disabled={off}
             aria-pressed={r === OTHER_REASON ? other : undefined}
             onClick={() => (r === OTHER_REASON ? setOther(true) : onPick(r))}
             className={`min-h-14 rounded-lg border-2 px-2 text-lg font-semibold transition-colors disabled:opacity-50 ${
@@ -337,7 +361,7 @@ function ReasonStep({
           />
           <button
             type="button"
-            disabled={saving || trimmed === ""}
+            disabled={off || trimmed === ""}
             onClick={() => onPick(OTHER_REASON, trimmed)}
             className="h-14 shrink-0 rounded-lg bg-accent px-6 text-lg font-bold text-white disabled:bg-accent/40 disabled:cursor-not-allowed"
           >
@@ -345,6 +369,7 @@ function ReasonStep({
           </button>
         </div>
       )}
+      {!online && <DisabledReason what={["บันทึก"]} reason={OFFLINE_REASON} />}
       {saving && <p role="status" className="text-base text-muted-foreground">กำลังบันทึก…</p>}
       {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-semibold text-destructive">{error}</p>}
     </div>

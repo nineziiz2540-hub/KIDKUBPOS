@@ -8,8 +8,12 @@ import { useMemo, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
 import type { PauseResult } from "@/lib/stock/pos-states";
 import type { PosProduct } from "@/types/app";
+import { isPosOnline } from "@/lib/offline/status-store";
+import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
 
 type Props = {
+  /** The live connection: offline the switches are faded and untappable (R-D2a, offline refused before calling). */
+  online: boolean;
   products: PosProduct[];
   /** Menus that are paused now (the tiles' paused state). */
   pausedIds: Set<string>;
@@ -19,7 +23,7 @@ type Props = {
 
 const NO_CATEGORY = "ไม่มีหมวด";
 
-export function PauseList({ products, pausedIds, onChange }: Props) {
+export function PauseList({ online, products, pausedIds, onChange }: Props) {
   const toast = useToastManager();
   const [pausedAtOpen] = useState(() => new Set(pausedIds));
   // What a tapped switch shows until its answer comes: true = ปิดขาย.
@@ -42,6 +46,10 @@ export function PauseList({ products, pausedIds, onChange }: Props) {
 
   async function flip(product: PosProduct, paused: boolean) {
     if (busy.has(product.id)) return;
+    if (!isPosOnline()) {
+      toast.add({ title: OFFLINE_REASON, type: "error" });
+      return;
+    }
     setBusy((b) => new Set(b).add(product.id));
     setShown((s) => ({ ...s, [product.id]: paused }));
     let res: PauseResult;
@@ -73,6 +81,7 @@ export function PauseList({ products, pausedIds, onChange }: Props) {
   }
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+      {!online && <DisabledReason what={["ปิด/เปิดขายเมนู"]} reason={OFFLINE_REASON} />}
       {groups.map((g) => (
         <section key={g.title}>
           <h3 className="mb-1.5 text-base font-semibold text-muted-foreground">{g.title}</h3>
@@ -90,9 +99,9 @@ export function PauseList({ products, pausedIds, onChange }: Props) {
                     role="switch"
                     aria-checked={!paused}
                     aria-label={`${p.name}: ${paused ? "ปิดขาย" : "ขายอยู่"}`}
-                    disabled={busy.has(p.id)}
+                    disabled={busy.has(p.id) || !online}
                     onClick={() => void flip(p, !paused)}
-                    className="flex h-14 shrink-0 items-center gap-2 disabled:opacity-60"
+                    className="flex h-14 shrink-0 items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <span className={`text-lg font-semibold ${paused ? "text-destructive" : "text-success"}`}>
                       {paused ? "ปิดขาย" : "ขายอยู่"}
