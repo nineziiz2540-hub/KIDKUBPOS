@@ -8,7 +8,7 @@ import { useToastManager } from "@/components/ui/toast";
 import { undoWaste, recordWaste } from "@/app/actions/stock-pos";
 import type { StockCatalog } from "@/lib/stock/stock-core";
 import {
-  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, wasteReasonOf, wasteUndoErrorMessage,
+  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, WASTE_MAX_QTY, wasteReasonOf, wasteUndoErrorMessage,
   type WasteInput, type WasteMaterial,
 } from "@/lib/stock/waste-input";
 import type { CartItem, ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
@@ -140,6 +140,7 @@ export function WasteFlow({ online, products, categories, catalog, materials, mo
     return (
       <MaterialAmountStep
         material={material}
+        maxQty={WASTE_MAX_QTY}
         primaryLabel="ต่อไป"
         onBack={() => setMaterial(null)}
         onSubmit={({ qty }) => setPicked({ kind: "material", material, qty })}

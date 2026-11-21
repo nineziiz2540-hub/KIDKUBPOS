@@ -4,7 +4,7 @@
 // "= N ml" line. The primary button sits in a fixed footer, so it is always in view at 1180x740.
 import { useState, type ReactNode } from "react";
 import { padPress, composeEntryQty } from "@/lib/stock/material-view";
-import { receiveAmountToUseUnits } from "@/lib/stock/receive-input";
+import { amountProblem, receiveAmountToUseUnits } from "@/lib/stock/receive-input";
 import type { WasteMaterial } from "@/lib/stock/waste-input";
 import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
 import { NumericKeypad } from "./numeric-keypad";
@@ -28,6 +28,8 @@ export type AmountEntry = {
 
 type Props = {
   material: WasteMaterial;
+  /** The most this step accepts, in the use unit (waste and receive have their own limits). */
+  maxQty: number;
   /** The main button, e.g. "ต่อไป" or "บันทึกรับของ". */
   primaryLabel: string;
   onBack: () => void;
@@ -41,14 +43,15 @@ type Props = {
   online?: boolean;
 };
 
-export function MaterialAmountStep({ material, primaryLabel, onBack, onSubmit, extra, busy = false, error = null, online = true }: Props) {
+export function MaterialAmountStep({ maxQty, material, primaryLabel, onBack, onSubmit, extra, busy = false, error = null, online = true }: Props) {
   const hasPurchase = material.purchaseSize !== null && !!material.purchaseUnit;
   const [unit, setUnit] = useState<"purchase" | "use">(hasPurchase ? "purchase" : "use");
   const [pad, setPad] = useState("");
   const [fraction, setFraction] = useState<0 | 0.25 | 0.5 | 0.75>(0);
   const entry = composeEntryQty(pad, unit === "purchase" ? fraction : 0);
   const qty = receiveAmountToUseUnits(entry, unit, material);
-  const valid = qty !== null && qty <= 100_000 && Math.round(qty * 1000) / 1000 === qty;
+  const problem = amountProblem(qty, maxQty, pad !== "" || fraction !== 0);
+  const valid = qty !== null && problem === null;
   const entryUnit = (unit === "purchase" ? material.purchaseUnit : material.unit) ?? material.unit;
   const shown = `${pad === "" ? "0" : pad}${unit === "purchase" && fraction ? ` + ${FRACTIONS.find((f) => f.value === fraction)?.label}` : ""}`;
 
@@ -90,6 +93,7 @@ export function MaterialAmountStep({ material, primaryLabel, onBack, onSubmit, e
       <p className="min-h-6 text-center text-base text-muted-foreground tabular-nums">
         {unit === "purchase" && qty !== null ? `= ${qty.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${material.unit}` : " "}
       </p>
+      {problem && <p role="alert" className="text-center text-base font-semibold text-destructive">{problem}</p>}
       {unit === "purchase" && (
         <div className="flex gap-2">
           {FRACTIONS.map((f) => (

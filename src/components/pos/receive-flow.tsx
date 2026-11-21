@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
 import { receiveStock, undoReceive } from "@/app/actions/inventory";
 import { undoErrorMessage } from "@/lib/stock/material-view";
+import { RECEIVE_MAX_QTY } from "@/lib/stock/receive-input";
 import type { WasteMaterial } from "@/lib/stock/waste-input";
 import { isPosOnline } from "@/lib/offline/status-store";
 import { OFFLINE_REASON } from "./disabled-reason";
@@ -102,6 +103,7 @@ export function ReceiveFlow({ materials, canSeePrice, online, onChanged, onDone 
       <MaterialAmountStep
         key={material.id}
         material={material}
+        maxQty={RECEIVE_MAX_QTY}
         primaryLabel="บันทึกรับของ"
         online={online}
         busy={saving}

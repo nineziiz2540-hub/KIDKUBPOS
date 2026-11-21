@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { receiveAmountToUseUnits } from "./receive-input.ts";
+import { AMOUNT_PROBLEM, RECEIVE_MAX_QTY, amountProblem, receiveAmountToUseUnits } from "./receive-input.ts";
+import { WASTE_MAX_QTY } from "./waste-input.ts";
 import { toBaseQty } from "./units.ts";
 
 const milk = { purchaseSize: 2000 };
@@ -26,4 +27,16 @@ test("receiveAmountToUseUnits: nothing typed (0 or less) is null, never a save",
 
 test("receiveAmountToUseUnits agrees with the D1 unit maths (units.ts toBaseQty)", () => {
   assert.equal(receiveAmountToUseUnits(6, "purchase", milk), toBaseQty(6, 2000));
+});
+
+test("amountProblem: a real delivery of 125,000 passes the receive limit but not the waste limit", () => {
+  assert.equal(amountProblem(125000, RECEIVE_MAX_QTY, true), null);
+  assert.equal(amountProblem(125000, WASTE_MAX_QTY, true), AMOUNT_PROBLEM);
+  assert.ok(RECEIVE_MAX_QTY < 10_000_000);
+});
+
+test("amountProblem: too many decimals, or 0 after typing, say so; an untouched 0 stays quiet", () => {
+  assert.equal(amountProblem(1.2345, RECEIVE_MAX_QTY, true), AMOUNT_PROBLEM);
+  assert.equal(amountProblem(null, RECEIVE_MAX_QTY, true), AMOUNT_PROBLEM);
+  assert.equal(amountProblem(null, RECEIVE_MAX_QTY, false), null);
 });

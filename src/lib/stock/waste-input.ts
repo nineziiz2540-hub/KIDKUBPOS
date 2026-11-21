@@ -134,6 +134,9 @@ export function wasteUndoErrorMessage(message: string | undefined): string {
   return "ย้อนกลับไม่สำเร็จ ลองใหม่อีกครั้ง";
 }
 
+/** The most one material waste takes, in the use unit. */
+export const WASTE_MAX_QTY = 100_000;
+
 /** A material the waste list shows: names and units only, never a cost (spec §8). */
 export type WasteMaterial = {
   id: string;
