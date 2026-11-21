@@ -6,7 +6,10 @@ import {
   getRawMaterials,
   getArchivedRawMaterials,
   getMaterialHistory,
+  getStockFlags,
+  getPausedMenus,
 } from "@/lib/dal";
+import { StockFlags } from "@/components/inventory/stock-flags";
 import { createRawMaterial, updateRawMaterial } from "@/app/actions/inventory";
 import { RawMaterialForm } from "@/components/inventory/raw-material-form";
 import { StockActionForm } from "@/components/inventory/stock-action-form";
@@ -35,9 +38,11 @@ export default async function InventoryPage({
   if (profile.role !== "owner" && profile.role !== "manager") redirect("/");
 
   const { action, id } = await searchParams;
-  const [materials, archived] = await Promise.all([
+  const [materials, archived, flags, pausedMenus] = await Promise.all([
     getRawMaterials(profile.tenant_id),
     getArchivedRawMaterials(profile.tenant_id),
+    getStockFlags(profile.tenant_id),
+    getPausedMenus(profile.tenant_id),
   ]);
 
   const editTarget =
@@ -100,6 +105,8 @@ export default async function InventoryPage({
           )}
         </div>
       </div>
+
+      <StockFlags flags={flags} paused={pausedMenus} />
 
       {action === "new" && (
         <div className="space-y-4 rounded-lg border bg-white p-5">

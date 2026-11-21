@@ -3,6 +3,7 @@
 // the cashier sells a material the system thinks is out. Any active member of the shop may do both
 // (spec §8 table). The service-role functions check the actor belongs to the shop and is active
 // (supabase/migrations/20261123130000_stock_d2a_functions.sql); they never block a sale.
+import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 import { loadStockCatalog } from "@/lib/stock/catalog";
@@ -166,5 +167,33 @@ export async function undoWaste(refId: string): Promise<{ error?: string }> {
     console.error("[undoWaste]", error.message);
     return { error: wasteUndoErrorMessage(error.message) };
   }
+  return {};
+}
+
+/** Plain Thai for stock_flag_resolve's error codes (R-D2a-28); never a raw code on screen. */
+function resolveFlagErrorMessage(message: string): string {
+  if (message.includes("forbidden")) return "ไม่มีสิทธิ์ดำเนินการนี้";
+  if (message.includes("not_found")) return "รายการนี้ตรวจไปแล้วหรือไม่พบ";
+  return "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง";
+}
+
+/** "ตรวจแล้ว": the owner/manager has looked at a "ยอดน่าจะผิด" flag. The function checks the role. */
+export async function resolveStockFlag(flagId: string): Promise<{ error?: string }> {
+  const profile = await getProfile();
+  if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  if (typeof flagId !== "string" || !/^[0-9a-f-]{36}$/i.test(flagId)) {
+    return { error: resolveFlagErrorMessage("not_found") };
+  }
+
+  const { error } = await createAdminClient().rpc("stock_flag_resolve", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_flag_id: flagId,
+  });
+  if (error) {
+    console.error("[resolveStockFlag]", error.message);
+    return { error: resolveFlagErrorMessage(error.message) };
+  }
+  revalidatePath("/inventory");
   return {};
 }

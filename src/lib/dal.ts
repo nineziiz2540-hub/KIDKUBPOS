@@ -448,6 +448,101 @@ export async function getArchivedRawMaterials(tenantId: string): Promise<RawMate
   return (data ?? []) as RawMaterial[];
 }
 
+export type StockFlagRow = {
+  id: string;
+  kind: string;
+  created_at: string;
+  order_id: string | null;
+  names: { menu: string | null; material: string | null; person: string | null; orderNumber: string | null };
+};
+
+export type PausedMenuRow = { id: string; name: string; paused_at: string | null; pausedByName: string | null };
+
+const MAX_FLAGS = 50;
+
+/** id -> name for one table, tenant-scoped, explicit columns. A failed read just leaves names empty. */
+async function nameMap(
+  table: "raw_materials" | "products",
+  tenantId: string,
+  ids: (string | null)[]
+): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((i): i is string => !!i))];
+  if (unique.length === 0) return new Map();
+  const { data } = await createAdminClient().from(table).select("id, name").eq("tenant_id", tenantId).in("id", unique);
+  return new Map((data ?? []).map((r) => [r.id, r.name]));
+}
+
+async function personNames(tenantId: string, ids: (string | null)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((i): i is string => !!i))];
+  if (unique.length === 0) return new Map();
+  const { data } = await createAdminClient().from("profiles").select("id, full_name").eq("tenant_id", tenantId).in("id", unique);
+  return new Map((data ?? []).flatMap((r) => (r.full_name ? [[r.id, r.full_name] as [string, string]] : [])));
+}
+
+/** Unresolved "ยอดน่าจะผิด" flags, newest first, at most 50, with names. Owner/manager only. */
+export async function getStockFlags(tenantId: string): Promise<StockFlagRow[]> {
+  if (!(await canViewCosts(tenantId))) return [];
+  const admin = createAdminClient();
+  const { data: flags } = await admin
+    .from("stock_flags")
+    .select("id, kind, raw_material_id, product_id, order_id, created_by, created_at")
+    .eq("tenant_id", tenantId)
+    .is("resolved_at", null)
+    .order("created_at", { ascending: false })
+    .limit(MAX_FLAGS);
+  if (!flags || flags.length === 0) return [];
+
+  const orderIds = [...new Set(flags.map((f) => f.order_id).filter((i): i is string => !!i))];
+  const [materials, menus, people, orders] = await Promise.all([
+    nameMap("raw_materials", tenantId, flags.map((f) => f.raw_material_id)),
+    nameMap("products", tenantId, flags.map((f) => f.product_id)),
+    personNames(tenantId, flags.map((f) => f.created_by)),
+    orderIds.length === 0
+      ? Promise.resolve(new Map<string, string>())
+      : admin
+          .from("orders")
+          .select("id, order_number")
+          .eq("tenant_id", tenantId)
+          .in("id", orderIds)
+          .then(({ data }) => new Map((data ?? []).flatMap((o) => (o.order_number ? [[o.id, o.order_number] as [string, string]] : [])))),
+  ]);
+
+  return flags.map((f) => ({
+    id: f.id,
+    kind: f.kind,
+    created_at: f.created_at,
+    order_id: f.order_id,
+    names: {
+      menu: (f.product_id && menus.get(f.product_id)) || null,
+      material: (f.raw_material_id && materials.get(f.raw_material_id)) || null,
+      person: (f.created_by && people.get(f.created_by)) || null,
+      orderNumber: (f.order_id && orders.get(f.order_id)) || null,
+    },
+  }));
+}
+
+/** Menus paused ("ปิดขายอยู่") with who and since when, newest first. Owner/manager only. */
+export async function getPausedMenus(tenantId: string): Promise<PausedMenuRow[]> {
+  if (!(await canViewCosts(tenantId))) return [];
+  const { data } = await createAdminClient()
+    .from("products")
+    .select("id, name, paused_at, paused_by")
+    .eq("tenant_id", tenantId)
+    .eq("is_active", true)
+    .is("archived_at", null)
+    .not("paused_at", "is", null)
+    .order("paused_at", { ascending: false })
+    .limit(MAX_FLAGS);
+  if (!data || data.length === 0) return [];
+  const people = await personNames(tenantId, data.map((p) => p.paused_by));
+  return data.map((p) => ({
+    id: p.id,
+    name: p.name,
+    paused_at: p.paused_at,
+    pausedByName: (p.paused_by && people.get(p.paused_by)) || null,
+  }));
+}
+
 /** Last 50 ledger rows of one material (newest first), with the bill number for sale rows. Owner/manager only. */
 export async function getMaterialHistory(
   tenantId: string,
