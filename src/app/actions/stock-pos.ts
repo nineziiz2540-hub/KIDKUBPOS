@@ -5,6 +5,13 @@
 // (supabase/migrations/20261123130000_stock_d2a_functions.sql); they never block a sale.
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
+import { loadStockCatalog } from "@/lib/stock/catalog";
+import { resolveLine } from "@/lib/stock/stock-core";
+import { toLineChoices } from "@/lib/order-pricing-core";
+import {
+  parseWasteInput, wasteLabel, wasteReasonText, wasteUndoErrorMessage,
+  type WasteInput, type WasteNames,
+} from "@/lib/stock/waste-input";
 
 /** The most material ids one flag call takes: a cup never has more out materials than this. */
 const MAX_FLAG_MATERIALS = 20;
@@ -56,4 +63,90 @@ export async function flagSoldWhileOut(materialIds: string[], productId: string)
     p_product_id: productId === "" ? null : productId,
   });
   if (error) console.error("[flagSoldWhileOut]", error.message);
+}
+
+/**
+ * "บันทึกของเสีย": a menu (its recipe resolved on the server from the shop's own catalog, packaging
+ * included unless the shop's own glass is used, D2-6) or one material. Any active member of the shop.
+ * The caller, the shop and the new record id (p_ref_id) all come from here, never from the arguments.
+ */
+export async function recordWaste(raw: WasteInput): Promise<{ refId: string; label: string } | { error: string }> {
+  const profile = await getProfile();
+  if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  const parsed = parseWasteInput(raw);
+  if ("error" in parsed) return { error: parsed.error };
+  const input = parsed.value;
+
+  const admin = createAdminClient();
+  let lines: { material_id: string; qty: number }[];
+  let names: WasteNames;
+
+  if (input.kind === "menu") {
+    const { data: product } = await admin
+      .from("products")
+      .select("name")
+      .eq("id", input.productId)
+      .eq("tenant_id", profile.tenant_id)
+      .eq("is_active", true)
+      .is("archived_at", null)
+      .maybeSingle();
+    if (!product) return { error: "ไม่พบเมนูนี้ (อาจถูกเก็บเข้าคลังแล้ว)" };
+    const loaded = await loadStockCatalog(admin, profile.tenant_id, [input.productId], input.optionIds);
+    if ("error" in loaded) return { error: loaded.error };
+    const resolved = resolveLine(
+      input.productId,
+      input.quantity,
+      toLineChoices({ choices: input.choices, houseGlass: input.houseGlass }),
+      input.optionIds,
+      loaded.catalog
+    );
+    if ("error" in resolved) return { error: resolved.error };
+    lines = resolved.stock.map((l) => ({ material_id: l.materialId, qty: l.qty }));
+    names = { name: product.name, parts: resolved.snapshot.slots.map((s) => s.label) };
+  } else {
+    const { data: material } = await admin
+      .from("raw_materials")
+      .select("name, unit, track_stock, archived_at")
+      .eq("id", input.materialId)
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle();
+    if (!material || material.archived_at !== null || !material.track_stock) {
+      return { error: "ไม่พบวัตถุดิบนี้ (หรือไม่ได้นับสต๊อก)" };
+    }
+    lines = [{ material_id: input.materialId, qty: input.qty }];
+    names = { name: material.name, unit: material.unit };
+  }
+
+  const label = wasteLabel(input, names);
+  const refId = crypto.randomUUID();
+  const { error } = await admin.rpc("stock_waste", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_lines: lines,
+    p_reason: wasteReasonText(input, label),
+    p_ref_id: refId,
+  });
+  if (error) {
+    console.error("[recordWaste]", error.message);
+    return { error: "บันทึกของเสียไม่สำเร็จ ลองใหม่อีกครั้ง" };
+  }
+  return { refId, label };
+}
+
+/** "ย้อนกลับ" of a waste record: 10 minutes, once, the recorder or an owner/manager (decided by the function). */
+export async function undoWaste(refId: string): Promise<{ error?: string }> {
+  const profile = await getProfile();
+  if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
+  if (typeof refId !== "string" || !/^[0-9a-f-]{36}$/i.test(refId)) return { error: wasteUndoErrorMessage("not_found") };
+
+  const { error } = await createAdminClient().rpc("stock_waste_undo", {
+    p_tenant_id: profile.tenant_id,
+    p_actor_id: profile.id,
+    p_ref_id: refId,
+  });
+  if (error) {
+    console.error("[undoWaste]", error.message);
+    return { error: wasteUndoErrorMessage(error.message) };
+  }
+  return {};
 }

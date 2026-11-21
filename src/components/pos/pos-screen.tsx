@@ -61,6 +61,8 @@ import { effectiveLevels, type LiveStock, type StockAnswer } from "@/lib/stock/l
 import { asksFirst, materialLabel, settlePauseCall, type PauseResult, type TileState } from "@/lib/stock/pos-states";
 import { flagSoldWhileOut, setMenuPaused } from "@/app/actions/stock-pos";
 import { StockStateDialog } from "./stock-state-dialog";
+import { StockPanel } from "./stock-panel";
+import type { WasteMaterial } from "@/lib/stock/waste-input";
 import { useStockStates } from "./use-stock-states";
 import { useHeartbeat } from "./use-heartbeat";
 import { useDeviceSnapshot } from "./use-device-snapshot";
@@ -108,6 +110,8 @@ type Props = {
   liveStockRows: StockAnswer | null;
   /** Tracked materials' names, for "ระบบคิดว่า…หมด" (round D2a). No cost. */
   materialNames: Record<string, string>;
+  /** Tracked materials for the waste list (round D2a): names, units and purchase sizes. No cost. */
+  wasteMaterials: WasteMaterial[];
   /** The shop counts carry-out bags (tenants.bag_material_id is set): the counter shows (round D2a). */
   bagsEnabled: boolean;
   /** One bag per this many cups for the automatic count; null = no rule (starts at 0). */
@@ -139,6 +143,7 @@ export function PosScreen({
   stockRows,
   liveStockRows,
   materialNames,
+  wasteMaterials,
   bagsEnabled,
   bagsPerCups,
   userName,
@@ -195,6 +200,7 @@ export function PosScreen({
   const [showHoldModal, setShowHoldModal] = useState(false);
   const [holdError, setHoldError] = useState<string | null>(null);
   const [showHeldPanel, setShowHeldPanel] = useState(false);
+  const [showStockPanel, setShowStockPanel] = useState(false);
   const [holdPending, startHold] = useTransition();
   const [checkoutPending, setCheckoutPending] = useState(false);
   // Set synchronously on the first confirm tap, so a fast double-tap can't slip a second
@@ -1605,6 +1611,10 @@ export function PosScreen({
           setShowMobileCart(false);
           setShowHeldPanel(true);
         }}
+        onOpenStock={() => {
+          setShowMobileCart(false);
+          setShowStockPanel(true);
+        }}
         shiftDisabledReason={reasonOf(shiftGate)}
       />
       {!stock.loaded && (
@@ -1774,6 +1784,27 @@ export function PosScreen({
         />
       )}
       {renderStockAsk()}
+      {showStockPanel && (
+        <StockPanel
+          online={online}
+          products={products}
+          categories={categories}
+          catalog={stockCatalog}
+          materials={wasteMaterials}
+          modifiersFor={(productId) =>
+            (productModifierMap.get(productId) ?? [])
+              .map((modId) => allModifiers.find((m) => m.id === modId))
+              .filter((m): m is ModifierWithOptions => m !== undefined)
+          }
+          productsWithOptions={productsWithOptions}
+          pausedIds={
+            new Set(products.filter((p) => stockStates.tileStates.get(p.id)?.kind === "paused").map((p) => p.id))
+          }
+          onChangePause={changePause}
+          onChanged={heartbeat.checkNow}
+          onClose={() => setShowStockPanel(false)}
+        />
+      )}
       {showQrModal && (
         <QrPaymentModal
           total={total}

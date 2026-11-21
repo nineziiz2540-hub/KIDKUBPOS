@@ -54,11 +54,21 @@ type Props = {
   /** The line to add (its cartItemKey is "" — the cart gives it one) or the edited line (its own key). */
   onSave: (item: CartItem) => void;
   onClose: () => void;
+  /**
+   * "waste" (round D2a, Task 11): the same window for "บันทึกของเสีย". Title "บันทึกของเสีย: {เมนู}", a quantity
+   * stepper and a "แก้วร้าน" toggle, footer "ต่อไป · {n} แก้ว". No stock asks, no price, no note; onSave
+   * hands over the line (its quantity and houseGlass are the waste's).
+   */
+  mode?: "waste";
 };
 
 export function OptionWindow({
-  product, modifiers, catalog, editing = null, stock = null, materialName, onConfirmOut, onSave, onClose,
+  product, modifiers, catalog, editing = null, stock: stockProp = null, materialName, onConfirmOut, onSave, onClose,
+  mode: windowMode,
 }: Props) {
+  const waste = windowMode === "waste";
+  // R-D2a-24a: waste mode has no stock words or asks; wasting a menu proves it existed.
+  const stock = waste ? null : stockProp;
   const rows = useMemo(() => optionRows(product.id, catalog, stock), [product.id, catalog, stock]);
   const [state, setState] = useState<WindowState>(() =>
     initialWindowState(product.id, catalog, modifiers, editing ?? undefined, stock)
@@ -68,6 +78,10 @@ export function OptionWindow({
   const [note, setNote] = useState(editing?.note ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
   const noteId = useId();
+  const [wasteQty, setWasteQty] = useState(1);
+  // R-D2a-24b: starts at the menu's own default; ON = the shop's glass, no packaging deducted.
+  const [wasteGlass, setWasteGlass] = useState(() => catalog.packaging.get(product.id)?.houseGlassDefault ?? false);
+  const wasteGlassShown = waste && catalog.packaging.has(product.id);
 
   const mode = editing ? "edit" : "add";
   const line = buildLine({
@@ -76,10 +90,11 @@ export function OptionWindow({
     catalog,
     state,
     note,
-    quantity: editing?.quantity ?? 1,
+    quantity: waste ? wasteQty : (editing?.quantity ?? 1),
     key: editing?.cartItemKey ?? "",
     editing,
   });
+  if (wasteGlassShown) line.houseGlass = wasteGlass;
   const missing = missingRequired(state, modifiers);
   // "ช็อตเพิ่มใช้เมล็ดร้าน" rows: only on a special cup with a ticked extra shot, under that option's row
   const shots = shotRows(rows, line);
@@ -116,16 +131,60 @@ export function OptionWindow({
             {/* Header */}
             <div className="flex items-baseline justify-between gap-3 px-4 sm:px-5 pt-4 pb-3 border-b shrink-0">
               <Dialog.Title className="min-w-0 font-bold text-sidebar text-xl leading-tight">
-                {product.name}
+                {waste ? `บันทึกของเสีย: ${product.name}` : product.name}
               </Dialog.Title>
-              <p className="shrink-0 text-base text-muted-foreground tabular-nums">
-                ฿{formatPrice(product.price)}
-                {editing ? ` · ${editing.quantity} ชิ้น` : ""}
-              </p>
+              {!waste && (
+                <p className="shrink-0 text-base text-muted-foreground tabular-nums">
+                  ฿{formatPrice(product.price)}
+                  {editing ? ` · ${editing.quantity} ชิ้น` : ""}
+                </p>
+              )}
             </div>
 
             {/* Rows */}
             <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-3 space-y-2.5">
+              {waste && (
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-base font-semibold text-sidebar">จำนวน</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-label="ลดจำนวน"
+                      disabled={wasteQty <= 1}
+                      onClick={() => setWasteQty((n) => Math.max(1, n - 1))}
+                      className="size-14 rounded-lg border-2 border-input bg-white text-2xl font-bold text-sidebar disabled:opacity-40"
+                    >
+                      −
+                    </button>
+                    <span className="w-16 text-center text-2xl font-bold text-sidebar tabular-nums">{wasteQty}</span>
+                    <button
+                      type="button"
+                      aria-label="เพิ่มจำนวน"
+                      disabled={wasteQty >= 20}
+                      onClick={() => setWasteQty((n) => Math.min(20, n + 1))}
+                      className="size-14 rounded-lg border-2 border-input bg-white text-2xl font-bold text-sidebar disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
+              {wasteGlassShown && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={wasteGlass}
+                  onClick={() => setWasteGlass((v) => !v)}
+                  className={`flex w-full min-h-14 items-center justify-between gap-3 rounded-lg border-2 px-4 text-lg font-semibold ${
+                    wasteGlass ? "border-accent bg-accent/10 text-sidebar" : "border-input bg-white text-sidebar"
+                  }`}
+                >
+                  <span>แก้วร้าน</span>
+                  <span className={wasteGlass ? "text-accent" : "text-muted-foreground"}>
+                    {wasteGlass ? "ใช้แก้วร้าน ✓" : "ไม่ใช่"}
+                  </span>
+                </button>
+              )}
               {rows.slots.map((slot) => (
                 <Fragment key={slot.groupId}>
                   {slot.house.length > 0 && (
@@ -237,6 +296,7 @@ export function OptionWindow({
                 </Fragment>
               ))}
 
+              {!waste && (
               <div>
                 <button
                   type="button"
@@ -257,6 +317,7 @@ export function OptionWindow({
                   <NoteEditor value={note} onChange={setNote} />
                 </div>
               </div>
+              )}
             </div>
 
             {/* Footer — always visible */}
@@ -278,7 +339,7 @@ export function OptionWindow({
                       : "bg-accent hover:bg-accent/90 active:scale-[0.98]"
                   }`}
                 >
-                  {footerText(mode, line)}
+                  {waste ? `ต่อไป · ${wasteQty} แก้ว` : footerText(mode, line)}
                 </button>
               </div>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Package } from "lucide-react";
 import { formatDate } from "@/lib/bangkok-time";
 
 type Props = {
@@ -9,6 +9,8 @@ type Props = {
   hasActiveShift: boolean;
   heldCount: number;
   onOpenHeld: () => void;
+  /** Opens the "สต๊อก" panel (waste, close/open menus). */
+  onOpenStock: () => void;
   /** Why the shift link can't be used now (offline or bills still waiting); null = usable. */
   shiftDisabledReason: string | null;
 };
@@ -19,6 +21,7 @@ export function PosHeader({
   hasActiveShift,
   heldCount,
   onOpenHeld,
+  onOpenStock,
   shiftDisabledReason,
 }: Props) {
   const dateStr = formatDate(new Date().toISOString(), "full");
@@ -46,6 +49,15 @@ export function PosHeader({
               {heldCount}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenStock}
+          aria-label="สต๊อก"
+          className="flex items-center justify-center gap-2 h-11 min-w-11 px-2.5 sm:px-4 rounded-lg border-2 border-input bg-white text-base font-semibold text-sidebar hover:bg-muted transition-colors"
+        >
+          <Package size={20} />
+          <span className="hidden sm:inline">สต๊อก</span>
         </button>
         {shiftDisabledReason === null ? (
           <Link

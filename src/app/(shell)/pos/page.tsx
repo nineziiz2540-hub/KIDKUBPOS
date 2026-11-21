@@ -12,6 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { bangkokToday } from "@/lib/bangkok-time";
 import { loadPosStockRows } from "@/lib/stock/pos-catalog";
 import { readLiveStock } from "@/lib/stock/live-stock";
+import type { WasteMaterial } from "@/lib/stock/waste-input";
 import { PosScreen } from "@/components/pos/pos-screen";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 
@@ -144,7 +145,7 @@ export default async function PosPage() {
     // Names for "ระบบคิดว่า…หมด" (round D2a): only materials that can be out. A staff-readable column, no cost.
     supabase
       .from("raw_materials")
-      .select("id, name")
+      .select("id, name, unit, category, purchase_unit, purchase_size")
       .eq("tenant_id", profile.tenant_id)
       .eq("track_stock", true)
       .is("archived_at", null),
@@ -153,6 +154,15 @@ export default async function PosPage() {
   const materialNames: Record<string, string> = Object.fromEntries(
     (materialRows.data ?? []).map((m) => [m.id, m.name])
   );
+
+  const wasteMaterials: WasteMaterial[] = (materialRows.data ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    unit: m.unit,
+    category: m.category,
+    purchaseUnit: m.purchase_unit,
+    purchaseSize: m.purchase_size === null ? null : Number(m.purchase_size),
+  }));
 
   return (
     <PosScreen
@@ -163,6 +173,7 @@ export default async function PosPage() {
       stockRows={stockRows}
       liveStockRows={liveStockRows}
       materialNames={materialNames}
+      wasteMaterials={wasteMaterials}
       bagsEnabled={bagRule.data?.bag_material_id != null}
       bagsPerCups={bagRule.data?.bags_per_cups ?? null}
       userName={profile.full_name ?? "ผู้ใช้"}
