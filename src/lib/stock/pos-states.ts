@@ -182,15 +182,27 @@ export function pausedMenus(live: LiveStock | null, overrides: Record<string, Pa
 /** How long "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง" wait for the server before counting as no answer. */
 export const PAUSE_DEADLINE_MS = 5_000;
 
-/** What a pause/reopen call came back with: done, the server's Thai error, or no answer (network or too slow). */
-export type PauseResult = { ok: true } | { error: string } | { offline: true };
+/**
+ * What a pause/reopen call came back with: done, the server's Thai error, offline (not sent, or the owner
+ * page's server action got no answer), or noAnswer (the POS sent it and gave up waiting: the server may
+ * still do it, the next heartbeat shows the truth).
+ */
+export type PauseResult = { ok: true } | { error: string } | { offline: true } | { noAnswer: true };
+
+/** The toast for a pause/reopen the POS sent but got no answer to: never "ไม่สำเร็จ", it may still happen. */
+export function pauseNoAnswerText(paused: boolean, menuName: string): string {
+  return `${paused ? "ปิดขาย" : "เปิดขาย"} ${menuName}: ยังไม่ได้คำตอบ · สักครู่หน้าจอจะแสดงสถานะจริงเอง`;
+}
 
 /**
- * The pause/reopen call, bounded: server actions run one at a time, so it can sit behind a stalled
- * payment or the outbox catching up while the heartbeat still says online. After PAUSE_DEADLINE_MS it
- * counts as offline (the dialog then offers "ขายแก้วนี้"), so the POS is never stuck in a dialog.
+ * A pause/reopen server action, bounded: server actions run one at a time, so it can sit behind another
+ * one. After PAUSE_DEADLINE_MS it counts as offline. Used by the owner's inventory page ([เปิดขาย]); the
+ * POS does not use server actions for stock at all (postPause in src/lib/pos-api.ts, final review I3).
  */
-export async function settlePauseCall(call: Promise<{ error?: string }>, ms = PAUSE_DEADLINE_MS): Promise<PauseResult> {
+export async function settlePauseCall(
+  call: Promise<{ error?: string }>,
+  ms = PAUSE_DEADLINE_MS
+): Promise<Exclude<PauseResult, { noAnswer: true }>> {
   try {
     const res = await withDeadline(call, ms);
     return res.error ? { error: res.error } : { ok: true };

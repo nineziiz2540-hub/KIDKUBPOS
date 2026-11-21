@@ -3,12 +3,14 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/dal";
 import { parseMaterialInput } from "@/lib/stock/material-input";
+import { parseReceiveFields } from "@/lib/stock/receive-input";
+// Owner-facing words for the stock functions' error codes (stockErrorMessage), and the receive/undo writes
+// shared with the POS's /api/stock/receive and /api/stock/receive-undo.
+import {
+  isManagerOrOwner, receiveStockCore, stockActor, stockErrorMessage, undoReceiveCore,
+} from "@/lib/stock/stock-writes";
 
 export type InventoryState = { error?: string; success?: boolean; ledgerId?: string } | undefined;
-
-function isManagerOrOwner(role: string): boolean {
-  return role === "owner" || role === "manager";
-}
 
 function parseMaterialFields(formData: FormData) {
   return parseMaterialInput((k) => {
@@ -72,22 +74,6 @@ export async function updateRawMaterial(
   return { success: true };
 }
 
-// Owner-facing words for the stock functions' error codes (supabase/migrations/20261118140000_*).
-function stockErrorMessage(message: string): string {
-  if (message.includes("forbidden_price")) return "ไม่มีสิทธิ์ใส่ราคา";
-  if (message.includes("undo_forbidden")) return "ไม่มีสิทธิ์ย้อนกลับรายการนี้";
-  if (message.includes("undo_expired")) return "ย้อนกลับไม่ได้แล้ว (เกิน 10 นาที)";
-  if (message.includes("already_undone")) return "รายการนี้ย้อนกลับไปแล้ว";
-  if (message.includes("not_a_receive")) return "ไม่ใช่รายการรับของ";
-  if (message.includes("forbidden")) return "ไม่มีสิทธิ์ดำเนินการนี้";
-  if (message.includes("reason_required")) return "กรุณากรอกเหตุผล (ไม่เกิน 500 ตัวอักษร)";
-  if (message.includes("material_not_found")) return "ไม่พบวัตถุดิบ";
-  if (message.includes("invalid_qty")) return "จำนวนไม่ถูกต้อง";
-  if (message.includes("invalid_note")) return "หมายเหตุยาวเกินไป (ไม่เกิน 500 ตัวอักษร)";
-  if (message.includes("invalid_price")) return "ราคาไม่ถูกต้อง";
-  return "บันทึกไม่สำเร็จ";
-}
-
 export async function deleteRawMaterial(formData: FormData): Promise<InventoryState> {
   const profile = await getProfile();
   if (!profile || !isManagerOrOwner(profile.role)) {
@@ -149,42 +135,10 @@ export async function receiveStock(
   const profile = await getProfile();
   if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
 
-  const rawMaterialId = formData.get("raw_material_id");
-  const qtyRaw = formData.get("quantity");
-  const priceRaw = formData.get("total_price");
-  const noteRaw = formData.get("note");
-  const note = typeof noteRaw === "string" && noteRaw.trim() !== "" ? noteRaw.trim() : null;
-  if (note !== null && note.length > 500) return { error: "หมายเหตุยาวเกินไป (ไม่เกิน 500 ตัวอักษร)" };
-
-  if (typeof rawMaterialId !== "string") return { error: "ข้อมูลไม่ถูกต้อง" };
-  const quantity = typeof qtyRaw === "string" ? parseFloat(qtyRaw) : NaN;
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return { error: "กรุณากรอกจำนวนที่ถูกต้อง (> 0)" };
-  }
-
-  let totalPrice: number | null = null;
-  if (isManagerOrOwner(profile.role) && typeof priceRaw === "string" && priceRaw.trim() !== "") {
-    totalPrice = parseFloat(priceRaw);
-    if (!Number.isFinite(totalPrice) || totalPrice < 0) {
-      return { error: "กรุณากรอกราคาที่ถูกต้อง" };
-    }
-  }
-
-  const { data: ledgerId, error } = await createAdminClient().rpc("stock_receive", {
-    p_tenant_id: profile.tenant_id,
-    p_actor_id: profile.id,
-    p_material_id: rawMaterialId,
-    p_qty: quantity,
-    p_total_price: totalPrice,
-    p_note: note,
-  });
-  if (error) {
-    console.error("[receiveStock]", error.message);
-    return { error: stockErrorMessage(error.message) };
-  }
-
-  revalidatePath("/inventory");
-  return { success: true, ledgerId: ledgerId ?? undefined };
+  // The same checks as the POS's /api/stock/receive (parseReceiveFields), and the same write.
+  const parsed = parseReceiveFields((k) => formData.get(k), isManagerOrOwner(profile.role));
+  if ("error" in parsed) return { error: parsed.error };
+  return receiveStockCore(stockActor(profile), parsed.value);
 }
 
 export async function adjustStock(
@@ -231,16 +185,6 @@ export async function undoReceive(ledgerId: string): Promise<InventoryState> {
   if (!profile) return { error: "ไม่มีสิทธิ์ดำเนินการนี้" };
   if (typeof ledgerId !== "string" || ledgerId === "") return { error: "ข้อมูลไม่ถูกต้อง" };
 
-  const { error } = await createAdminClient().rpc("stock_receive_undo", {
-    p_tenant_id: profile.tenant_id,
-    p_actor_id: profile.id,
-    p_ledger_id: ledgerId,
-  });
-  if (error) {
-    console.error("[undoReceive]", error.message);
-    return { error: stockErrorMessage(error.message) };
-  }
-
-  revalidatePath("/inventory");
-  return { success: true };
+  const res = await undoReceiveCore(stockActor(profile), ledgerId);
+  return res.error ? { error: res.error } : { success: true };
 }

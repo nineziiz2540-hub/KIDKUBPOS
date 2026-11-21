@@ -50,9 +50,10 @@ export function StockStateDialog(props: Props) {
   }
 
   /**
-   * Runs the pause/reopen call. The caller bounds it (settlePauseCall, PAUSE_DEADLINE_MS), so the
+   * Runs the pause/reopen call. The caller bounds it (postPause aborts after PAUSE_DEADLINE_MS), so the
    * buttons are off for a few seconds at most. On success the caller has already closed the dialog;
-   * a pause with no answer is closed by the caller too, with a toast.
+   * a pause with no answer is closed by the caller too, with a toast. A reopen with no answer (offline
+   * or noAnswer) turns this into the offline dialog: "ขายแก้วนี้" still goes on.
    */
   async function run(kind: "pause" | "reopen", call: () => Promise<PauseResult>, onFail: (message: string) => void) {
     if (doneRef.current || busyRef.current) return;

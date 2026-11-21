@@ -59,8 +59,8 @@ import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
 import type { Levels } from "@/lib/stock/availability";
 import { effectiveLevels, type StockAnswer } from "@/lib/stock/live-stock";
-import { asksFirst, materialLabel, settlePauseCall, type PauseResult, type TileState } from "@/lib/stock/pos-states";
-import { flagSoldWhileOut, setMenuPaused } from "@/app/actions/stock-pos";
+import { asksFirst, materialLabel, pauseNoAnswerText, type PauseResult, type TileState } from "@/lib/stock/pos-states";
+import { postFlag, postPause } from "@/lib/pos-api";
 import { StockStateDialog } from "./stock-state-dialog";
 import { StockPanel } from "./stock-panel";
 import type { WasteMaterial } from "@/lib/stock/waste-input";
@@ -465,27 +465,28 @@ export function PosScreen({
   function confirmOut(materialIds: string[], productId: string) {
     if (materialIds.length === 0) return;
     stockStates.suppress(materialIds);
-    // Fire and forget (R-D2a-22). Not sent offline: server actions run one at a time, so a request
-    // hanging on a dead network would hold up the next sale's createOrder.
+    // Fire and forget (R-D2a-22): a plain fetch to /api/stock/flag with a 5 s timeout, never a server
+    // action, so it can never sit in the action queue ahead of the next sale's createOrder (final review
+    // I3). Not sent offline: it could only time out.
     if (online) {
-      void flagSoldWhileOut(materialIds, productId).catch((e) => console.error("[pos] stock flag failed:", e));
+      void postFlag(materialIds, productId).then((r) => {
+        if (!("ok" in r)) console.error("[pos] stock flag failed:", "error" in r ? r.error : "no answer");
+      });
     }
   }
 
   /**
-   * "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง", given up after PAUSE_DEADLINE_MS (it may sit behind another
-   * server action): no answer counts as offline, never a dead end. On success: shown at once, a toast,
-   * fresh levels now. A late success only asks for fresh levels (the heartbeat shows it).
+   * "ไม่มีแล้ว ปิดขาย" / "เปิดขายแล้วสั่ง" through /api/stock/pause (a fetch, never a server action, final
+   * review I3), given up and aborted after PAUSE_DEADLINE_MS: no answer is never a dead end, and since the
+   * server may still do it, fresh levels are asked for at once (the heartbeat shows the truth). On
+   * success: shown at once, a toast, fresh levels now.
    */
   async function changePause(product: PosProduct, paused: boolean): Promise<PauseResult> {
-    // Offline is refused before calling: a server action on a dead network would hold up the next sale.
+    // Offline is refused before calling: it could only time out.
     if (!online) return { offline: true };
-    const call = setMenuPaused(product.id, paused);
-    const res = await settlePauseCall(call);
-    if ("offline" in res) {
-      call.then((late) => {
-        if (!late.error) heartbeat.checkNow();
-      }, (e) => console.error("[pos] setMenuPaused failed:", e));
+    const res = await postPause(product.id, paused);
+    if ("noAnswer" in res) {
+      heartbeat.checkNow();
       return res;
     }
     if ("error" in res) return res;
@@ -525,9 +526,14 @@ export function PosScreen({
               const res = await changePause(product, true);
               if ("ok" in res) setStockAsk(null);
               if ("offline" in res) {
-                // no answer in time: say so and let the cashier go on (the menu stays on sale)
+                // not sent (offline): say so and let the cashier go on (the menu stays on sale)
                 setStockAsk(null);
                 toast.add({ title: `ปิดขาย ${product.name} ไม่สำเร็จ · เน็ตไม่ตอบ ลองใหม่อีกครั้ง`, type: "error" });
+              }
+              if ("noAnswer" in res) {
+                // sent, no answer in time: it may still happen, so never "ไม่สำเร็จ"; the heartbeat shows the truth
+                setStockAsk(null);
+                toast.add({ title: pauseNoAnswerText(true, product.name), type: "error" });
               }
               return res;
             },

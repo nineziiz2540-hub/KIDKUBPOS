@@ -5,10 +5,10 @@
 // asks here, a green toast with a 5 s "ย้อนกลับ", and fresh levels (checkNow) after a save or an undo.
 import { useRef, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
-import { undoWaste, recordWaste } from "@/app/actions/stock-pos";
+import { NO_ANSWER_WRITE, postWaste, postWasteUndo } from "@/lib/pos-api";
 import type { StockCatalog } from "@/lib/stock/stock-core";
 import {
-  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, WASTE_MAX_QTY, wasteReasonOf, wasteUndoErrorMessage,
+  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, WASTE_MAX_QTY, wasteReasonOf,
   type WasteInput, type WasteMaterial,
 } from "@/lib/stock/waste-input";
 import type { CartItem, ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
@@ -72,14 +72,16 @@ export function WasteFlow({ online, products, categories, catalog, materials, mo
             ...(otherText !== undefined ? { otherText } : {}),
           }
         : { kind: "material", materialId: picked.material.id, qty: picked.qty, reason, ...(otherText !== undefined ? { otherText } : {}) };
-    let res: Awaited<ReturnType<typeof recordWaste>>;
-    try {
-      res = await recordWaste(input);
-    } catch {
-      res = { error: "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง" };
-    }
+    // A fetch to /api/stock/waste, given up after 10 s (never a server action: final review I3).
+    const res = await postWaste(input);
     savingRef.current = false;
     setSaving(false);
+    if ("noAnswer" in res) {
+      // it may have been saved: say so, never "กำลังบันทึก…" forever; fresh levels show whether it was
+      setError(NO_ANSWER_WRITE);
+      onChanged();
+      return;
+    }
     if ("error" in res) {
       setError(res.error);
       return;
@@ -102,13 +104,13 @@ export function WasteFlow({ online, products, categories, catalog, materials, mo
           }
           done = true;
           toast.close(toastId);
-          let undo: { error?: string };
-          try {
-            undo = await undoWaste(refId);
-          } catch {
-            undo = { error: wasteUndoErrorMessage(undefined) };
+          const undo = await postWasteUndo(refId);
+          if ("noAnswer" in undo) {
+            toast.add({ title: NO_ANSWER_WRITE, type: "error" });
+            onChanged();
+            return;
           }
-          if (undo.error) {
+          if ("error" in undo) {
             toast.add({ title: undo.error, type: "error" });
             return;
           }

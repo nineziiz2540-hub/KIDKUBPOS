@@ -5,7 +5,7 @@
 // server call re-checks the live connection first, so offline nothing is sent.
 import { useRef, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
-import { receiveStock, undoReceive } from "@/app/actions/inventory";
+import { NO_ANSWER_WRITE, postReceive, postReceiveUndo } from "@/lib/pos-api";
 import { undoErrorMessage } from "@/lib/stock/material-view";
 import { RECEIVE_MAX_QTY } from "@/lib/stock/receive-input";
 import type { WasteMaterial } from "@/lib/stock/waste-input";
@@ -43,20 +43,24 @@ export function ReceiveFlow({ materials, canSeePrice, online, onChanged, onDone 
     savingRef.current = true;
     setSaving(true);
     setError(null);
-    const fd = new FormData();
-    fd.set("raw_material_id", material.id);
-    fd.set("quantity", String(qty));
-    if (canSeePrice && price.trim() !== "") fd.set("total_price", price.trim());
-    let res: Awaited<ReturnType<typeof receiveStock>>;
-    try {
-      res = await receiveStock(undefined, fd);
-    } catch {
-      res = { error: "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง" };
-    }
+    // A fetch to /api/stock/receive, given up after 10 s (never a server action: final review I3). The
+    // price (as typed; the server checks it like the inventory form) only goes for an owner or manager,
+    // and the server drops a staff price anyway.
+    const res = await postReceive({
+      materialId: material.id,
+      quantity: qty,
+      ...(canSeePrice && price.trim() !== "" ? { totalPrice: price.trim() } : {}),
+    });
     savingRef.current = false;
     setSaving(false);
-    if (!res?.success) {
-      setError(res?.error ?? "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง");
+    if ("noAnswer" in res) {
+      // it may have been saved: say so, never "กำลังบันทึก…" forever; fresh levels show whether it was
+      setError(NO_ANSWER_WRITE);
+      onChanged();
+      return;
+    }
+    if ("error" in res) {
+      setError(res.error);
       return;
     }
     onChanged();
@@ -79,13 +83,13 @@ export function ReceiveFlow({ materials, canSeePrice, online, onChanged, onDone 
               }
               done = true;
               toast.close(toastId);
-              let undo: Awaited<ReturnType<typeof undoReceive>>;
-              try {
-                undo = await undoReceive(ledgerId);
-              } catch {
-                undo = { error: "ย้อนกลับไม่สำเร็จ" };
+              const undo = await postReceiveUndo(ledgerId);
+              if ("noAnswer" in undo) {
+                toast.add({ title: NO_ANSWER_WRITE, type: "error" });
+                onChanged();
+                return;
               }
-              if (undo?.error) {
+              if ("error" in undo) {
                 toast.add({ title: undoErrorMessage(undo.error), type: "error" });
                 return;
               }

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  asksFirst, lowWord, materialLabel, outMaterials, parseSuppressed, pausedMenus, pruneSuppressed, settlePauseCall,
+  asksFirst, lowWord, materialLabel, outMaterials, parseSuppressed, pauseNoAnswerText, pausedMenus, pruneSuppressed,
+  settlePauseCall,
   suppressedMaterials, suppressionStorageKey, suppressMaterial, suppressMaterials, tileState,
 } from "./pos-states.ts";
 import { levelsAfter, type Levels } from "./availability.ts";
@@ -282,4 +283,15 @@ test("a suppression made offline survives the queued bills syncing, and a receiv
   const received = new Map([...raw, ["milk", 1940]]);
   assert.deepEqual(pruneSuppressed(store, received, TODAY), {});
   assert.equal(suppressedMaterials(store, received, TODAY).has("milk"), false);
+});
+
+test("a pause or reopen the POS sent but got no answer to never says ไม่สำเร็จ", () => {
+  const pause = pauseNoAnswerText(true, "ลาเต้เย็น");
+  const reopen = pauseNoAnswerText(false, "ลาเต้เย็น");
+  assert.ok(pause.startsWith("ปิดขาย ลาเต้เย็น"));
+  assert.ok(reopen.startsWith("เปิดขาย ลาเต้เย็น"));
+  for (const t of [pause, reopen]) {
+    assert.ok(t.includes("ยังไม่ได้คำตอบ"));
+    assert.equal(t.includes("ไม่สำเร็จ"), false);
+  }
 });

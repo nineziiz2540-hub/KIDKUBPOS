@@ -6,7 +6,7 @@
 // is never stuck.
 import { useMemo, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
-import type { PauseResult } from "@/lib/stock/pos-states";
+import { pauseNoAnswerText, type PauseResult } from "@/lib/stock/pos-states";
 import type { PosProduct } from "@/types/app";
 import { isPosOnline } from "@/lib/offline/status-store";
 import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
@@ -71,6 +71,9 @@ export function PauseList({ online, products, pausedIds, onChange }: Props) {
     });
     if ("offline" in res) {
       toast.add({ title: `${paused ? "ปิดขาย" : "เปิดขาย"} ${product.name} ไม่สำเร็จ · เน็ตไม่ตอบ ลองใหม่อีกครั้ง`, type: "error" });
+    } else if ("noAnswer" in res) {
+      // sent but no answer in time: the server may still do it, the switch then follows the heartbeat
+      toast.add({ title: pauseNoAnswerText(paused, product.name), type: "error" });
     } else if ("error" in res) {
       toast.add({ title: res.error, type: "error" });
     }
