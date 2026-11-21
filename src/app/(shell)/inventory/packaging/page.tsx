@@ -4,6 +4,7 @@ import { CupSoda } from "lucide-react";
 import { getArchivedRawMaterials, getPackagingSets, getProfile, getRawMaterials } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
 import { PackagingSetsManager } from "@/components/inventory/packaging-sets-manager";
+import { sortSetItemsByName } from "@/lib/stock/packaging-input";
 
 // "ชุดภาชนะ" (round D2a, Task 8): owner/manager create, edit and archive the shop's packaging sets.
 // Costs are shown here (owner/manager only: materials come through getRawMaterials, behind canViewCosts).
@@ -40,6 +41,8 @@ export default async function PackagingSetsPage() {
     ...active.map(toPickable(false)),
     ...archived.filter((m) => usedIds.has(m.id)).map(toPickable(true)),
   ];
+  // Items by material name, so a set reads the same after every save (the read returns them in id order).
+  const nameById = new Map(materials.map((m) => [m.id, m.name]));
 
   return (
     <div className="space-y-6">
@@ -64,6 +67,7 @@ export default async function PackagingSetsPage() {
       <PackagingSetsManager
         sets={sets.map((s) => ({
           ...s,
+          items: sortSetItemsByName(s.items, (id) => nameById.get(id)),
           menus: (menus.data ?? []).filter((m) => m.packaging_set_id === s.id).map((m) => m.name),
         }))}
         materials={materials}

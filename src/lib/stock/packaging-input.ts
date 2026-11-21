@@ -95,6 +95,19 @@ export function packagingMaterialGroups<T extends { category: string }>(material
   return order.map((category) => ({ category, items: materials.filter((m) => m.category === category) }));
 }
 
+/**
+ * A set's items by material name (Thai order), so the list reads the same after every save (the
+ * database hands them back in id order). An item whose material has no name here goes last.
+ */
+export function sortSetItemsByName<T extends { materialId: string }>(items: T[], nameOf: (materialId: string) => string | undefined): T[] {
+  return [...items].sort((a, b) => {
+    const na = nameOf(a.materialId);
+    const nb = nameOf(b.materialId);
+    if (na === undefined || nb === undefined) return na === nb ? 0 : na === undefined ? 1 : -1;
+    return na.localeCompare(nb, "th");
+  });
+}
+
 // ── error codes of save_packaging_set / archive_packaging_set (migration 20261123130000) ─────────────
 
 const RPC_ERRORS = {
@@ -132,6 +145,23 @@ export function setInUseMessage(menuNames: string[]): string {
 // ── "ถุงหิ้ว" (shop settings, owner only) ─────────────────────────────────────────────────────────────
 
 export type BagSettings = { bagMaterialId: string | null; bagsPerCups: number | null };
+
+export const BAG_LIST_LOAD_ERROR = "โหลดรายการวัตถุดิบไม่สำเร็จ ลองรีเฟรชหน้า";
+
+/**
+ * What the "ถุงหิ้ว" section may show. The form needs both the shop's saved bag setting and the list of
+ * counted materials: with either read failed it would start at "ไม่นับถุง" (or call a valid bag material
+ * "ปิดใช้แล้ว"), and saving would clear a good setting. So a failed read shows only the error, no form.
+ */
+export function bagFormLoad<M extends { id: string }>(
+  tenant: { failed: boolean; bagMaterialId: string | null; bagsPerCups: number | null },
+  list: { failed: boolean; materials: M[] | null }
+): { error: string } | { materials: M[]; defaults: BagSettings & { listed: boolean } } {
+  if (tenant.failed || list.failed) return { error: BAG_LIST_LOAD_ERROR };
+  const materials = list.materials ?? [];
+  const listed = tenant.bagMaterialId !== null && materials.some((m) => m.id === tenant.bagMaterialId);
+  return { materials, defaults: { bagMaterialId: tenant.bagMaterialId, bagsPerCups: tenant.bagsPerCups, listed } };
+}
 
 /**
  * The settings form → tenants.bag_material_id / bags_per_cups. "ไม่ใส่อัตโนมัติ" = null; "1 ถุงต่อทุก N แก้ว"

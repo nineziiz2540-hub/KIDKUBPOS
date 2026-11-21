@@ -16,6 +16,7 @@ import { StoreNameForm } from "@/components/settings/store-name-form";
 import { BusinessSettingsForm } from "@/components/settings/business-settings-form";
 import { PromptPayForm } from "@/components/settings/promptpay-form";
 import { MfaSection } from "@/components/settings/mfa-section";
+import { bagFormLoad } from "@/lib/stock/packaging-input";
 
 export default async function SettingsPage() {
   const profile = await getProfile();
@@ -23,7 +24,7 @@ export default async function SettingsPage() {
   if (profile.role !== "owner") redirect("/");
 
   const supabase = await createClient();
-  const [{ data: tenant }, { data: bagMaterials }] = await Promise.all([
+  const [{ data: tenant, error: tenantError }, { data: bagMaterials, error: bagListError }] = await Promise.all([
     supabase
       .from("tenants")
       .select(
@@ -40,14 +41,25 @@ export default async function SettingsPage() {
       .eq("track_stock", true)
       .order("name"),
   ]);
-  const bagMaterialId = tenant?.bag_material_id ?? null;
+  // A failed read of the bag setting or of the material list shows an error instead of the form, so
+  // saving can never clear a valid bag material (bagFormLoad).
+  const bags = bagFormLoad(
+    {
+      failed: tenantError !== null,
+      bagMaterialId: tenant?.bag_material_id ?? null,
+      bagsPerCups: tenant?.bags_per_cups ?? null,
+    },
+    { failed: bagListError !== null, materials: bagMaterials }
+  );
+  if (tenantError) console.error("[settings] tenant read failed:", tenantError.message);
+  if (bagListError) console.error("[settings] bag material list read failed:", bagListError.message);
   // The saved bag material may have been archived or stopped being counted since: name it so the owner re-picks.
   let staleBagName: string | null = null;
-  if (bagMaterialId !== null && !(bagMaterials ?? []).some((m) => m.id === bagMaterialId)) {
+  if ("defaults" in bags && bags.defaults.bagMaterialId !== null && !bags.defaults.listed) {
     const { data: stale } = await supabase
       .from("raw_materials")
       .select("name")
-      .eq("id", bagMaterialId)
+      .eq("id", bags.defaults.bagMaterialId)
       .eq("tenant_id", profile.tenant_id)
       .maybeSingle();
     staleBagName = stale?.name ?? "วัตถุดิบเดิม";
@@ -103,12 +115,18 @@ export default async function SettingsPage() {
       {/* Carry-out bags (round D2a) */}
       <div className="rounded-lg border bg-white p-5 space-y-4">
         <h2 className="text-base font-semibold text-sidebar">ถุงหิ้ว</h2>
-        <BagSettingsForm
-          action={updateBagSettings}
-          materials={bagMaterials ?? []}
-          defaults={{ materialId: bagMaterialId, bagsPerCups: tenant?.bags_per_cups ?? null }}
-          staleMaterialName={staleBagName}
-        />
+        {"error" in bags ? (
+          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">
+            {bags.error}
+          </p>
+        ) : (
+          <BagSettingsForm
+            action={updateBagSettings}
+            materials={bags.materials}
+            defaults={{ materialId: bags.defaults.bagMaterialId, bagsPerCups: bags.defaults.bagsPerCups }}
+            staleMaterialName={staleBagName}
+          />
+        )}
       </div>
 
       {/* Team */}

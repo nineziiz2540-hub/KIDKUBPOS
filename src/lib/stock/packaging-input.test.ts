@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BAG_LIST_LOAD_ERROR,
+  bagFormLoad,
   PACKAGING_RPC_CODES,
   packagingMaterialGroups,
   packagingRpcError,
@@ -9,6 +11,7 @@ import {
   parseBagSettings,
   parsePackagingSetDraft,
   setInUseMessage,
+  sortSetItemsByName,
 } from "./packaging-input.ts";
 
 const err = (r: { value: unknown } | { error: string }) => ("error" in r ? r.error : null);
@@ -198,4 +201,57 @@ test("parseBagSettings: none, or 1 bag per N cups with N 1–20", () => {
   });
   assert.equal(err(parseBagSettings({ materialId: "bag", mode: "always", perCups: "" })), "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า");
   assert.equal(err(parseBagSettings({ materialId: 7, mode: "none", perCups: "" })), "ข้อมูลไม่ถูกต้อง กรุณารีเฟรชหน้า");
+});
+
+// ── final review: a set's items in a stable order, and the "ถุงหิ้ว" section on a failed read ──────
+
+test("a set's items read by material name, whatever order the database returned", () => {
+  const names = new Map([["u3", "แก้ว 16oz"], ["u1", "ฝาโดม"], ["u2", "หลอด"]]);
+  const items = [{ materialId: "u1", qty: 1 }, { materialId: "u2", qty: 1 }, { materialId: "u3", qty: 1 }];
+  const sorted = sortSetItemsByName(items, (id) => names.get(id));
+  assert.deepEqual(sorted.map((i) => names.get(i.materialId)), ["แก้ว 16oz", "ฝาโดม", "หลอด"]);
+  assert.deepEqual(items.map((i) => i.materialId), ["u1", "u2", "u3"], "the input is not changed");
+  // the same set saved again (another id order) reads the same
+  const again = sortSetItemsByName([items[2]!, items[0]!, items[1]!], (id) => names.get(id));
+  assert.deepEqual(again.map((i) => i.materialId), sorted.map((i) => i.materialId));
+});
+
+test("an item whose material has no name sorts last", () => {
+  const names = new Map([["a", "หลอด"], ["b", "ฝาโดม"]]);
+  const sorted = sortSetItemsByName([{ materialId: "x" }, { materialId: "a" }, { materialId: "b" }], (id) => names.get(id));
+  assert.deepEqual(sorted.map((i) => i.materialId), ["b", "a", "x"]);
+});
+
+test("a failed bag-material list read shows the error, never the form", () => {
+  const r = bagFormLoad(
+    { failed: false, bagMaterialId: "bag", bagsPerCups: 3 },
+    { failed: true, materials: null }
+  );
+  assert.deepEqual(r, { error: BAG_LIST_LOAD_ERROR });
+  assert.equal(BAG_LIST_LOAD_ERROR, "โหลดรายการวัตถุดิบไม่สำเร็จ ลองรีเฟรชหน้า");
+});
+
+test("a failed read of the shop's bag setting shows the error too", () => {
+  const r = bagFormLoad(
+    { failed: true, bagMaterialId: null, bagsPerCups: null },
+    { failed: false, materials: [{ id: "bag" }] }
+  );
+  assert.deepEqual(r, { error: BAG_LIST_LOAD_ERROR });
+});
+
+test("both reads fine: the form gets the list and the saved setting", () => {
+  const list = [{ id: "bag" }, { id: "cup" }];
+  assert.deepEqual(
+    bagFormLoad({ failed: false, bagMaterialId: "bag", bagsPerCups: 3 }, { failed: false, materials: list }),
+    { materials: list, defaults: { bagMaterialId: "bag", bagsPerCups: 3, listed: true } }
+  );
+  // a saved material no longer in the (successfully read) list is the real "ต้องเลือกใหม่" case
+  assert.deepEqual(
+    bagFormLoad({ failed: false, bagMaterialId: "old", bagsPerCups: null }, { failed: false, materials: list }),
+    { materials: list, defaults: { bagMaterialId: "old", bagsPerCups: null, listed: false } }
+  );
+  assert.deepEqual(
+    bagFormLoad({ failed: false, bagMaterialId: null, bagsPerCups: null }, { failed: false, materials: null }),
+    { materials: [], defaults: { bagMaterialId: null, bagsPerCups: null, listed: false } }
+  );
 });
