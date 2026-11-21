@@ -73,7 +73,12 @@ export function materialLabel(materialId: string, names: Record<string, string>,
 
 // ── "ยังมีของ ขายต่อ": stop asking on this iPad (R-D2a-21) ──────────────────────
 
-/** materialId → the effective level when the cashier said there is still some, and that business day. */
+/**
+ * materialId → the RAW level (the server's last known number, before this iPad's queued bills are taken
+ * off) when the cashier said there is still some, and that business day. Raw, not the shown level: a
+ * queued bill leaving the outbox raises the shown level back up, and that must never look like a
+ * receive (final review I2). Raw levels rise only from a receive, a count or an adjust up (or a void).
+ */
 export type SuppressedStore = Record<string, { level: number; date: string }>;
 
 /** One map per shop on this device. */
@@ -108,10 +113,25 @@ export function suppressMaterial(store: SuppressedStore, materialId: string, lev
 }
 
 /**
+ * One "ยังมีของ ขายต่อ" tap for every material it covers (a packaging set at 0 can be cup, lid and straw
+ * at once; final review I1, R-D2a-23), each at its RAW level. A material missing from `rawLevels` is
+ * untracked (never "หมด?"): nothing is stored for it. Nothing stored → the same map back.
+ */
+export function suppressMaterials(store: SuppressedStore, materialIds: string[], rawLevels: Levels, today: string): SuppressedStore {
+  let out = store;
+  for (const id of materialIds) {
+    const level = rawLevels.get(id);
+    if (level !== undefined) out = suppressMaterial(out, id, level, today);
+  }
+  return out;
+}
+
+/**
  * The map without the suppressions that have ended, so an ended one stays ended: a material whose
- * level is above its stored level (a receive, a count up, an adjust up), and entries of an earlier
- * day. A material missing from `levels` is kept (nothing known). An entry dated after `today` is kept
- * too (`today` may come from a page rendered yesterday). Nothing ended → the same map back.
+ * raw level is above its stored level (a receive, a count up, an adjust up), and entries of an earlier
+ * day. `levels` are the raw levels (SuppressedStore), never the shown ones. A material missing from
+ * `levels` is kept (nothing known). An entry dated after `today` is kept too (`today` may come from a
+ * page rendered yesterday). Nothing ended → the same map back.
  */
 export function pruneSuppressed(store: SuppressedStore, levels: Levels, today: string): SuppressedStore {
   const out: SuppressedStore = {};
@@ -125,7 +145,7 @@ export function pruneSuppressed(store: SuppressedStore, levels: Levels, today: s
 }
 
 /**
- * The materials this iPad does not ask about: stored today, and the level has not risen above the
+ * The materials this iPad does not ask about: stored today, and the raw level has not risen above the
  * stored one. Sales only lower it, so they never end it; a receive, a count up or an adjust up does,
  * and so does a new business day.
  */

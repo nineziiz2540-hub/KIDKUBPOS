@@ -7,11 +7,12 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { bangkokToday } from "@/lib/bangkok-time";
 import { HEARTBEAT_INTERVAL_MS } from "@/lib/connectivity";
+import type { Levels } from "@/lib/stock/availability";
 import type { LiveStock } from "@/lib/stock/live-stock";
 import type { StockCatalog } from "@/lib/stock/stock-core";
 import {
   outMaterials, parseSuppressed, pausedMenus, pruneSuppressed, suppressedMaterials, suppressionStorageKey,
-  suppressMaterial, tileState,
+  suppressMaterials, tileState,
   type PauseOverride, type StockView, type TileState,
 } from "@/lib/stock/pos-states";
 
@@ -56,14 +57,21 @@ export function useStockStates({
   tenantId,
   renderedAt,
   liveStock,
+  shownLevels,
   catalog,
   productIds,
 }: {
   tenantId: string;
   /** Server Date.now() when the page was rendered: today's date before the first clock tick. */
   renderedAt: number;
-  /** The effective live stock (levels minus this iPad's queued bills); null = never read. */
+  /**
+   * The live stock as the server sent it (page or heartbeat, the device snapshot); null = never read.
+   * Its RAW levels are what suppressions are stored and ended against (final review I2): a queued bill
+   * syncing never moves them, only a receive, count or adjust does.
+   */
   liveStock: LiveStock | null;
+  /** The levels the tiles and chips show: liveStock's minus this iPad's queued bills; null = no stock data. */
+  shownLevels: Levels | null;
   catalog: StockCatalog;
   productIds: string[];
 }): {
@@ -91,14 +99,14 @@ export function useStockStates({
 
   const [overrides, setOverrides] = useState<Record<string, PauseOverride>>({});
 
-  const levels = liveStock?.levels;
+  const rawLevels = liveStock?.levels;
   const suppressed = useMemo(
-    () => (levels ? suppressedMaterials(store, levels, today) : new Set<string>()),
-    [store, levels, today]
+    () => (rawLevels ? suppressedMaterials(store, rawLevels, today) : new Set<string>()),
+    [store, rawLevels, today]
   );
   const shown: LiveStock = useMemo(
-    () => ({ levels: levels ?? new Map(), paused: pausedMenus(liveStock, overrides), at: liveStock?.at ?? 0 }),
-    [levels, liveStock, overrides]
+    () => ({ levels: shownLevels ?? new Map(), paused: pausedMenus(liveStock, overrides), at: liveStock?.at ?? 0 }),
+    [shownLevels, liveStock, overrides]
   );
   const tileStates = useMemo(
     () => new Map(productIds.map((id) => [id, tileState(id, catalog, shown, suppressed)])),
@@ -108,32 +116,29 @@ export function useStockStates({
     (productId: string) => outMaterials(productId, catalog, shown.levels, suppressed),
     [catalog, shown, suppressed]
   );
-  const view = useMemo(() => (levels ? { levels, suppressed } : null), [levels, suppressed]);
+  const view = useMemo(() => (shownLevels ? { levels: shownLevels, suppressed } : null), [shownLevels, suppressed]);
 
   // An ended suppression stays ended (R-D2a-21): once a level rises above its stored level, or the day
   // has passed, the entry is dropped from the device, so selling back down never silences it again.
   // Dropping is for good, so only on levels read moments ago: a /pos page the service worker serves
-  // from its cache offline carries the old (higher) levels of when it was cached.
+  // from its cache offline carries the old (higher) levels of when it was cached. Raw levels only: the
+  // outbox sending this iPad's queued bills raises the shown levels, never the raw ones (I2).
   const liveAt = liveStock?.at;
   useEffect(() => {
-    if (!levels || liveAt === undefined || Date.now() - liveAt > FRESH_LEVELS_MS) return;
-    const pruned = pruneSuppressed(store, levels, today);
+    if (!rawLevels || liveAt === undefined || Date.now() - liveAt > FRESH_LEVELS_MS) return;
+    const pruned = pruneSuppressed(store, rawLevels, today);
     if (pruned !== store) writeRaw(key, JSON.stringify(pruned));
-  }, [key, store, levels, liveAt, today]);
+  }, [key, store, rawLevels, liveAt, today]);
 
   const suppress = useCallback(
     (materialIds: string[]) => {
-      let next = parseSuppressed(readRaw(key));
-      let changed = false;
-      for (const id of materialIds) {
-        const level = levels?.get(id);
-        if (level === undefined) continue; // untracked: never "หมด?" in the first place
-        next = suppressMaterial(next, id, level, today);
-        changed = true;
-      }
-      if (changed) writeRaw(key, JSON.stringify(next));
+      if (!rawLevels) return;
+      const before = parseSuppressed(readRaw(key));
+      // each at its raw level; an untracked material (no level) is never "หมด?" and is not stored
+      const next = suppressMaterials(before, materialIds, rawLevels, today);
+      if (next !== before) writeRaw(key, JSON.stringify(next));
     },
-    [key, levels, today]
+    [key, rawLevels, today]
   );
 
   const markPaused = useCallback((productId: string, paused: boolean) => {

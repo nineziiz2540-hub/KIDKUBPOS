@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asksFirst, lowWord, materialLabel, outMaterials, parseSuppressed, pausedMenus, pruneSuppressed, settlePauseCall,
-  suppressedMaterials, suppressionStorageKey, suppressMaterial, tileState,
+  suppressedMaterials, suppressionStorageKey, suppressMaterial, suppressMaterials, tileState,
 } from "./pos-states.ts";
-import type { Levels } from "./availability.ts";
+import { levelsAfter, type Levels } from "./availability.ts";
 import type { LiveStock } from "./live-stock.ts";
 import type { ChoiceGroup, GroupMember, StockCatalog } from "./stock-core.ts";
 import { HEARTBEAT_TIMEOUT_MS } from "../connectivity.ts";
@@ -218,4 +218,68 @@ test("a pause or reopen with no answer in time counts as offline", async () => {
   const started = Date.now();
   assert.deepEqual(await settlePauseCall(never, 20), { offline: true });
   assert.ok(Date.now() - started < 1000);
+});
+
+// ── final review fixes ───────────────────────────────────────────────────
+
+test("one ยังมีของ ขายต่อ on a tile whose packaging set is all out covers cup, lid and straw", () => {
+  const cat = build();
+  cat.packagingSets.set("set16", {
+    name: "แก้วเย็น 16oz",
+    items: [{ materialId: "cup16", qty: 1 }, { materialId: "lid", qty: 1 }, { materialId: "straw", qty: 1 }],
+  });
+  const levels = plenty();
+  levels.set("cup16", 0);
+  levels.set("lid", 0);
+  levels.set("straw", 0);
+  // the tile names one material, but all three make the menu out
+  const tile = tileState("latte", cat, live(levels), new Set());
+  assert.equal(tile.kind, "out");
+  const named = (tile as { materialId: string }).materialId;
+  const ids = [...new Set([named, ...outMaterials("latte", cat, levels, new Set())])];
+  assert.deepEqual([...ids].sort(), ["cup16", "lid", "straw"]);
+  // suppressing those (one tap, one flag call) leaves the tile ok: the next latte does not ask again
+  const store = suppressMaterials({}, ids, levels, TODAY);
+  assert.deepEqual(Object.keys(store).sort(), ["cup16", "lid", "straw"]);
+  assert.deepEqual(tileState("latte", cat, live(levels), suppressedMaterials(store, levels, TODAY)), { kind: "ok" });
+  // suppressing only the named one (the old behaviour) would have asked again for the next item
+  const onlyNamed = suppressMaterials({}, [named], levels, TODAY);
+  assert.equal(tileState("latte", cat, live(levels), suppressedMaterials(onlyNamed, levels, TODAY)).kind, "out");
+});
+
+test("suppressMaterials skips untracked materials and returns the same map when nothing is stored", () => {
+  const store = suppressMaterial({}, "milk", 150, TODAY);
+  assert.equal(suppressMaterials(store, ["untracked"], new Map([["milk", 150]]), TODAY), store);
+  assert.equal(suppressMaterials(store, [], new Map([["milk", 150]]), TODAY), store);
+  assert.deepEqual(suppressMaterials({}, ["milk", "ice"], new Map([["milk", 150]]), TODAY), { milk: { level: 150, date: TODAY } });
+});
+
+test("a suppression made offline survives the queued bills syncing, and a receive still ends it", () => {
+  const cat = build();
+  // offline: the last heartbeat said milk 300; this iPad's two queued lattes take 360 off the shown level
+  const raw = new Map([...plenty(), ["milk", 300]]);
+  const queued = [[{ materialId: "milk", qty: 180 }], [{ materialId: "milk", qty: 180 }]];
+  const shown = levelsAfter(raw, queued);
+  assert.equal(shown.get("milk"), -60);
+  assert.deepEqual(tileState("latte", cat, live(shown), new Set()), { kind: "out", materialId: "milk" });
+  // "ยังมีของ ขายต่อ": stored at the RAW level, the tile goes quiet
+  const store = suppressMaterials({}, ["milk"], raw, TODAY);
+  assert.deepEqual(store, { milk: { level: 300, date: TODAY } });
+  assert.deepEqual(tileState("latte", cat, live(shown), suppressedMaterials(store, raw, TODAY)), { kind: "ok" });
+  // reconnect: the heartbeat answers before the outbox sends (raw still 300), then the bills leave the
+  // outbox and the shown level climbs back to 300. The raw level never rose: nothing is pruned.
+  const afterSync = levelsAfter(raw, []);
+  assert.equal(afterSync.get("milk"), 300);
+  assert.equal(pruneSuppressed(store, raw, TODAY), store);
+  // (stored at the shown level, the climb back to 300 would have looked like a receive and ended it)
+  assert.deepEqual(pruneSuppressed(suppressMaterials({}, ["milk"], shown, TODAY), afterSync, TODAY), {});
+  assert.ok(suppressedMaterials(store, raw, TODAY).has("milk"));
+  // the next heartbeat carries the synced bills (raw -60): still quiet, nothing asks again
+  const synced = new Map([...raw, ["milk", -60]]);
+  assert.equal(pruneSuppressed(store, synced, TODAY), store);
+  assert.deepEqual(tileState("latte", cat, live(synced), suppressedMaterials(store, synced, TODAY)), { kind: "ok" });
+  // a receive raises the raw level above the stored 300: the suppression ends for good
+  const received = new Map([...raw, ["milk", 1940]]);
+  assert.deepEqual(pruneSuppressed(store, received, TODAY), {});
+  assert.equal(suppressedMaterials(store, received, TODAY).has("milk"), false);
 });

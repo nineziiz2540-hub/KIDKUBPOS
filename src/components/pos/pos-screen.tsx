@@ -57,7 +57,8 @@ import { NoShiftDialog } from "./no-shift-dialog";
 import { NO_OPEN_SHIFT_MESSAGE } from "@/lib/shift-errors";
 import { CashPaymentModal } from "./cash-payment-modal";
 import { StatusBanners } from "./status-banners";
-import { effectiveLevels, type LiveStock, type StockAnswer } from "@/lib/stock/live-stock";
+import type { Levels } from "@/lib/stock/availability";
+import { effectiveLevels, type StockAnswer } from "@/lib/stock/live-stock";
 import { asksFirst, materialLabel, settlePauseCall, type PauseResult, type TileState } from "@/lib/stock/pos-states";
 import { flagSoldWhileOut, setMenuPaused } from "@/app/actions/stock-pos";
 import { StockStateDialog } from "./stock-state-dialog";
@@ -350,19 +351,25 @@ export function PosScreen({
   const stockCatalog = stock.catalog;
   const refreshCatalog = refreshCatalogOf(stock);
 
-  // Live stock (round D2a): the heartbeat's levels and paused menus, minus what this device's queued
-  // bills will take once they are sent. Online the server's levels already include every synced bill;
-  // offline it is the last known levels. Hints only — nothing here ever blocks a sale.
-  const liveStock: LiveStock | null = useMemo(
-    () =>
-      snapshot.stock
-        ? { ...snapshot.stock, levels: effectiveLevels(snapshot.stock.levels, outbox.entries, tenantId, stockCatalog) }
-        : null,
+  // Live stock (round D2a): the heartbeat's levels and paused menus (snapshot.stock, raw), and the levels
+  // shown: those minus what this device's queued bills will take once they are sent. Online the server's
+  // levels already include every synced bill; offline it is the last known levels. Suppressions use the
+  // raw levels, so a queued bill syncing never ends one (final review I2). Hints only — nothing here
+  // ever blocks a sale.
+  const shownLevels: Levels | null = useMemo(
+    () => (snapshot.stock ? effectiveLevels(snapshot.stock.levels, outbox.entries, tenantId, stockCatalog) : null),
     [snapshot.stock, outbox.entries, tenantId, stockCatalog]
   );
   const productIds = useMemo(() => products.map((p) => p.id), [products]);
   // Each tile's "ปิดขาย / หมด? / เหลือ ~N แก้ว", and what this iPad stopped asking about (R-D2a-21).
-  const stockStates = useStockStates({ tenantId, renderedAt, liveStock, catalog: stockCatalog, productIds });
+  const stockStates = useStockStates({
+    tenantId,
+    renderedAt,
+    liveStock: snapshot.stock,
+    shownLevels,
+    catalog: stockCatalog,
+    productIds,
+  });
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
@@ -498,15 +505,18 @@ export function PosScreen({
       openProduct(product);
     };
     if (state.kind === "out") {
-      const materialId = state.materialId;
+      // Every material that makes this menu "หมด?" now (a packaging set at 0 is often cup, lid and straw):
+      // one "ยังมีของ ขายต่อ" covers them all with one flag call, so the next tap does not ask again for
+      // the next one (final review I1, as R-D2a-23 does for a reopen). The dialog names them all.
+      const outIds = [...new Set([state.materialId, ...stockStates.outMaterialsOf(product.id)])];
       return (
         <StockStateDialog
           key={`out-${product.id}`}
           kind="out"
           menuName={product.name}
-          materialName={materialLabel(materialId, materialNames, stockCatalog)}
+          materialName={outIds.map((id) => materialLabel(id, materialNames, stockCatalog)).join(", ")}
           onSell={() => {
-            confirmOut([materialId], product.id);
+            confirmOut(outIds, product.id);
             setStockAsk(null);
             openProduct(product);
           }}
