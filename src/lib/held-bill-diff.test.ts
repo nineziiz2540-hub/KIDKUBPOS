@@ -125,3 +125,29 @@ test("a sweetness with no sweetener lists only the level name", () => {
   const r = diffReductions([{ ...latte, choices: plain }], []);
   assert.deepEqual(r[0]!.options, ["เพิ่มช็อต", "Kenya", "ไม่หวาน"]);
 });
+
+// ── R-D2a-13: "แก้วร้าน" is packaging, not what the cup is, so the audit never sees it ──
+
+test("houseGlass is not part of a line's identity, with or without choices", () => {
+  const glass: CartItem = { ...latte, houseGlass: true };
+  const paper: CartItem = { ...latte, houseGlass: false };
+  assert.equal(lineIdentity(glass), lineIdentity(latte));
+  assert.equal(lineIdentity(paper), lineIdentity(latte));
+  const withChoices: CartItem = { ...latte, choices: kenya };
+  const withChoicesGlass: CartItem = { ...withChoices, houseGlass: true };
+  assert.equal(lineIdentity(withChoicesGlass), lineIdentity(withChoices));
+});
+
+test("switching a parked cup to แก้วร้าน (or back) records no reduction", () => {
+  const paper = { ...latte, choices: kenya };
+  const glass = { ...paper, houseGlass: true };
+  assert.deepEqual(diffReductions([paper], [glass]), []);
+  assert.deepEqual(diffReductions([glass], [paper]), []);
+  // one of two cups moved to the shop's glass: still 2 of the same cup, nothing reduced
+  assert.deepEqual(diffReductions([paper], [{ ...paper, quantity: 1 }, { ...glass, cartItemKey: "k2", quantity: 1 }]), []);
+  // a real removal next to the glass switch is still caught
+  const r = diffReductions([paper], [{ ...glass, quantity: 1 }]);
+  assert.equal(r.length, 1);
+  assert.equal(r[0]!.fromQty, 2);
+  assert.equal(r[0]!.toQty, 1);
+});
