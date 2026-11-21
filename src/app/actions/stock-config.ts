@@ -14,6 +14,7 @@ import {
   type GroupKind,
 } from "@/lib/stock/config-validate";
 import { missingSeedGroups, missingSeedLevels, planDefaultSwitch, moveId } from "@/lib/stock/config-plan";
+import { removalCheck, nextDefaultAfterRemoval, type RemovalCtx } from "@/lib/stock/member-removal";
 
 export type StockConfigState = { error?: string; success?: boolean };
 
@@ -21,6 +22,7 @@ const NO_RIGHT = "ไม่มีสิทธิ์ดำเนินการ�
 const BAD_INPUT = "ข้อมูลไม่ถูกต้อง";
 const SAVE_FAIL = "บันทึกไม่สำเร็จ — ลองอีกครั้ง";
 const DEFAULT_FAIL = "ตั้งค่าเริ่มต้นไม่สำเร็จ — ลองอีกครั้ง";
+const REMOVE_FAIL = "นำออกไม่สำเร็จ — ลองอีกครั้ง";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -298,6 +300,132 @@ export async function moveGroupMember(memberId: string, dir: number): Promise<St
       revalidateConfig();
       return { error: SAVE_FAIL };
     }
+  }
+  revalidateConfig();
+  return { success: true };
+}
+
+// ── remove a member (R38) ──────────────────────────────────────────────────
+
+export type RemovalCheckState = { error?: string; blocked?: string; warn?: string | null };
+
+/**
+ * Loads everything the removal rules need. Reads of menus go through the admin client AFTER the role check
+ * (so a policy can never hide a reference and let a removal through), always filtered by the caller's tenant;
+ * the member, its group and every menu read are tenant-checked as in R37.
+ */
+async function loadRemovalContext(tenantId: string, memberId: string) {
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("choice_group_members")
+    .select("id, group_id")
+    .eq("id", memberId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (!row) return null;
+  const group = await loadGroup(supabase, tenantId, row.group_id);
+  if (!group) return null;
+  const members = await loadMembers(supabase, tenantId, group.id);
+  if (!members.some((m) => m.id === memberId)) return null;
+
+  const admin = createAdminClient();
+  const [{ data: sw, error: swErr }, { data: slots, error: slotErr }] = await Promise.all([
+    admin
+      .from("product_sweetness")
+      .select("default_member_id, allowed_member_ids, products(name)")
+      .eq("tenant_id", tenantId)
+      .eq("group_id", group.id),
+    admin
+      .from("product_recipes")
+      .select("default_member_id, products!inner(name, archived_at)")
+      .eq("tenant_id", tenantId)
+      .eq("line_kind", "slot")
+      .eq("group_id", group.id)
+      .is("products.archived_at", null),
+  ]);
+  if (swErr || slotErr) return null;
+
+  const menuName = (p: unknown) => {
+    const prod = Array.isArray(p) ? p[0] : p;
+    return String((prod as { name?: string } | null)?.name ?? "").trim() || "เมนู";
+  };
+  const ctx: RemovalCtx = {
+    members: members.map((m) => ({
+      id: m.id,
+      tier: m.tier === "special" ? "special" : "house",
+      sortOrder: m.sort_order,
+      isDefault: m.is_default,
+    })),
+    // Archived menus count here: the sweetness row still points at the member, and the database would refuse.
+    sweetnessUses: (sw ?? []).map((r) => ({
+      menuName: menuName(r.products),
+      defaultMemberId: r.default_member_id,
+      allowedMemberIds: (r.allowed_member_ids ?? []) as string[],
+    })),
+    slotDefaults: (slots ?? []).map((r) => ({
+      menuName: menuName(r.products),
+      defaultMemberId: r.default_member_id,
+    })),
+  };
+  return { ctx, supabase };
+}
+
+/** First tap on "นำออกจากกลุ่ม": says whether the member can go, and what to warn about. Writes nothing. */
+export async function checkGroupMemberRemoval(memberId: string): Promise<RemovalCheckState> {
+  const profile = await requireManager();
+  if (!profile) return { error: NO_RIGHT };
+  if (!isId(memberId)) return { error: BAD_INPUT };
+  const loaded = await loadRemovalContext(profile.tenant_id, memberId);
+  if (!loaded) return { error: BAD_INPUT };
+  const check = removalCheck(memberId, loaded.ctx);
+  return check.ok ? { warn: check.warn } : { blocked: check.reason };
+}
+
+export async function removeGroupMember(memberId: string): Promise<StockConfigState> {
+  const profile = await requireManager();
+  if (!profile) return { error: NO_RIGHT };
+  if (!isId(memberId)) return { error: BAD_INPUT };
+  const tenantId = profile.tenant_id;
+
+  const loaded = await loadRemovalContext(tenantId, memberId);
+  if (!loaded) return { error: BAD_INPUT };
+  const { ctx, supabase } = loaded;
+  // Never trust the client's check: the rules run again here. A warning is the client's second tap.
+  const check = removalCheck(memberId, ctx);
+  if (!check.ok) return { error: check.reason };
+
+  // 1) the flagged default moves first, so the group is never left without one (the unique index allows one).
+  const nextDefault = nextDefaultAfterRemoval(ctx.members, memberId);
+  if (nextDefault) {
+    const { error: clearErr } = await supabase
+      .from("choice_group_members")
+      .update({ is_default: false })
+      .eq("id", memberId)
+      .eq("tenant_id", tenantId);
+    if (clearErr) return { error: REMOVE_FAIL };
+    const { error: setErr } = await supabase
+      .from("choice_group_members")
+      .update({ is_default: true })
+      .eq("id", nextDefault)
+      .eq("tenant_id", tenantId);
+    if (setErr) {
+      revalidateConfig();
+      return { error: REMOVE_FAIL };
+    }
+  }
+
+  // 2) delete. Menu recipe defaults pointing here are cleared by the FK (product_recipes.default_member_id is
+  // ON DELETE SET NULL), and the menu then falls back to the group default; this member's own sweetness
+  // amounts go with it (sweetness_amounts.member_id is ON DELETE CASCADE). product_sweetness.default_member_id
+  // has no ON DELETE, so the database itself refuses a member a menu's sweetness still uses (23503).
+  const { error } = await supabase
+    .from("choice_group_members")
+    .delete()
+    .eq("id", memberId)
+    .eq("tenant_id", tenantId);
+  if (error) {
+    revalidateConfig();
+    return { error: error.code === "23503" ? "ใช้อยู่ในความหวานของเมนู — นำออกไม่ได้" : REMOVE_FAIL };
   }
   revalidateConfig();
   return { success: true };

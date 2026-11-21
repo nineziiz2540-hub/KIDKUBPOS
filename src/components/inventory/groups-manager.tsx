@@ -7,6 +7,8 @@ import {
   updateGroupMember,
   setDefaultMember,
   moveGroupMember,
+  checkGroupMemberRemoval,
+  removeGroupMember,
 } from "@/app/actions/stock-config";
 import { tierWord } from "@/lib/stock/config-plan";
 import { useConfigAction } from "./use-config-action";
@@ -40,6 +42,90 @@ const KIND_WORD: Record<GroupProps["kind"], string> = {
 const CHIP = "inline-flex h-14 items-center justify-center rounded-lg border px-4 text-base font-semibold";
 const CHIP_ON = "border-accent bg-accent text-white";
 const CHIP_OFF = "border-border bg-white text-sidebar hover:bg-muted";
+
+/**
+ * "นำออกจากกลุ่ม": one tap checks; a blocked member says why, a plain one goes at once, and one that is a
+ * menu's default shows the warning with a confirm button (second tap) and a cancel.
+ */
+function RemoveControl({ memberId }: { memberId: string }) {
+  const { run, busy } = useConfigAction();
+  const [warn, setWarn] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<string | null>(null);
+
+  async function firstTap() {
+    setBlocked(null);
+    let state: Awaited<ReturnType<typeof checkGroupMemberRemoval>> = {};
+    const ok = await run("check", async () => {
+      try {
+        state = await checkGroupMemberRemoval(memberId);
+      } catch {
+        return { error: "ตรวจสอบไม่สำเร็จ — ลองอีกครั้ง" };
+      }
+      return state.error ? { error: state.error } : { success: true };
+    });
+    if (!ok) return;
+    if (state.blocked) {
+      setBlocked(state.blocked);
+      return;
+    }
+    if (state.warn) {
+      setWarn(state.warn);
+      return;
+    }
+    await run("remove", () => removeGroupMember(memberId), "นำออกจากกลุ่มแล้ว");
+  }
+
+  async function confirm() {
+    const ok = await run("remove", () => removeGroupMember(memberId), "นำออกจากกลุ่มแล้ว");
+    if (!ok) setWarn(null);
+  }
+
+  if (warn) {
+    return (
+      <div className="space-y-3 rounded-lg border border-warning bg-warning/10 p-4">
+        <p className="text-base font-semibold text-sidebar">{warn}</p>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            type="button"
+            disabled={busy !== null}
+            onClick={confirm}
+            className="h-14 bg-destructive px-6 text-base font-semibold text-white hover:bg-destructive/90"
+          >
+            {busy === "remove" ? "กำลังนำออก…" : "ยืนยันนำออก"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => setWarn(null)}
+            className="h-14 px-6 text-base font-semibold"
+          >
+            ไม่นำออก
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={busy !== null}
+        onClick={firstTap}
+        className="h-14 border-destructive px-6 text-base font-semibold text-destructive hover:bg-muted"
+      >
+        {busy === "check" || busy === "remove" ? "กำลังตรวจสอบ…" : "นำออกจากกลุ่ม"}
+      </Button>
+      {blocked && (
+        <p role="alert" className="text-sm font-semibold text-destructive">
+          นำออกไม่ได้ — {blocked}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function MemberRow({
   member,
@@ -157,6 +243,8 @@ function MemberRow({
           )}
         </div>
       )}
+
+      <RemoveControl memberId={member.id} />
 
       {dirty && (
         <Button
