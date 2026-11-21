@@ -112,6 +112,8 @@ type Props = {
   materialNames: Record<string, string>;
   /** Tracked materials for the waste list (round D2a): names, units and purchase sizes. No cost. */
   wasteMaterials: WasteMaterial[];
+  /** Owner or manager: "รับของเข้า" shows the optional price field. Staff never do. */
+  canSeeReceivePrice: boolean;
   /** The shop counts carry-out bags (tenants.bag_material_id is set): the counter shows (round D2a). */
   bagsEnabled: boolean;
   /** One bag per this many cups for the automatic count; null = no rule (starts at 0). */
@@ -144,6 +146,7 @@ export function PosScreen({
   liveStockRows,
   materialNames,
   wasteMaterials,
+  canSeeReceivePrice,
   bagsEnabled,
   bagsPerCups,
   userName,
@@ -1793,6 +1796,7 @@ export function PosScreen({
           categories={categories}
           catalog={stockCatalog}
           materials={wasteMaterials}
+          receive={{ canSeePrice: canSeeReceivePrice }}
           modifiersFor={(productId) =>
             (productModifierMap.get(productId) ?? [])
               .map((modId) => allModifiers.find((m) => m.id === modId))

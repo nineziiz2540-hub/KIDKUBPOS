@@ -1,7 +1,7 @@
 "use client";
 // The POS "สต๊อก" panel (round D2a, Task 11): three 64 px buttons — "บันทึกของเสีย", "รับของเข้า" and
 // "ปิด/เปิดขายเมนู". Offline the buttons are faded and untappable with "ใช้ไม่ได้ตอนเน็ตหลุด" (they all need
-// the server). "รับของเข้า" is Task 12's: it shows only when the POS hands in `onReceive`.
+// the server). "รับของเข้า" (Task 12) shows when the POS says whether the price field is allowed (`receive`).
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import type { StockCatalog } from "@/lib/stock/stock-core";
@@ -10,6 +10,7 @@ import type { WasteMaterial } from "@/lib/stock/waste-input";
 import type { ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
 import { PauseList } from "./pause-list";
+import { ReceiveFlow } from "./receive-flow";
 import { WasteFlow } from "./waste-flow";
 
 type Props = {
@@ -25,17 +26,18 @@ type Props = {
   onChangePause: (product: PosProduct, paused: boolean) => Promise<PauseResult>;
   /** Fresh levels (the heartbeat's checkNow) after a waste or an undo. */
   onChanged: () => void;
-  /** Task 12 fills this; absent = no "รับของเข้า" button. */
-  onReceive?: () => void;
+  /** "รับของเข้า": absent = no button. canSeePrice = owner or manager (the optional price field). */
+  receive?: { canSeePrice: boolean };
   onClose: () => void;
 };
 
 const BIG = "h-16 w-full rounded-xl px-4 text-xl font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40";
 
 export function StockPanel(props: Props) {
-  const { online, onClose, onReceive } = props;
-  const [view, setView] = useState<"home" | "waste" | "pause">("home");
-  const title = view === "waste" ? "บันทึกของเสีย" : view === "pause" ? "ปิด/เปิดขายเมนู" : "สต๊อก";
+  const { online, onClose, receive } = props;
+  const [view, setView] = useState<"home" | "waste" | "receive" | "pause">("home");
+  const title =
+    view === "waste" ? "บันทึกของเสีย" : view === "receive" ? "รับของเข้า" : view === "pause" ? "ปิด/เปิดขายเมนู" : "สต๊อก";
 
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -69,8 +71,8 @@ export function StockPanel(props: Props) {
                   <button type="button" disabled={!online} onClick={() => setView("waste")} className={`${BIG} bg-accent text-white hover:bg-accent/90`}>
                     บันทึกของเสีย
                   </button>
-                  {onReceive && (
-                    <button type="button" disabled={!online} onClick={onReceive} className={`${BIG} border-2 border-input bg-white text-sidebar hover:bg-muted`}>
+                  {receive && (
+                    <button type="button" disabled={!online} onClick={() => setView("receive")} className={`${BIG} border-2 border-input bg-white text-sidebar hover:bg-muted`}>
                       รับของเข้า
                     </button>
                   )}
@@ -79,7 +81,7 @@ export function StockPanel(props: Props) {
                   </button>
                   {!online && (
                     <DisabledReason
-                      what={["บันทึกของเสีย", ...(onReceive ? ["รับของเข้า"] : []), "ปิด/เปิดขายเมนู"]}
+                      what={["บันทึกของเสีย", ...(receive ? ["รับของเข้า"] : []), "ปิด/เปิดขายเมนู"]}
                       reason={OFFLINE_REASON}
                     />
                   )}
@@ -93,6 +95,15 @@ export function StockPanel(props: Props) {
                   materials={props.materials}
                   modifiersFor={props.modifiersFor}
                   productsWithOptions={props.productsWithOptions}
+                  online={online}
+                  onChanged={props.onChanged}
+                  onDone={onClose}
+                />
+              )}
+              {view === "receive" && receive && (
+                <ReceiveFlow
+                  materials={props.materials}
+                  canSeePrice={receive.canSeePrice}
                   online={online}
                   onChanged={props.onChanged}
                   onDone={onClose}

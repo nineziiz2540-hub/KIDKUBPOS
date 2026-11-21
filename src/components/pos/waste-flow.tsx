@@ -6,16 +6,15 @@
 import { useRef, useState } from "react";
 import { useToastManager } from "@/components/ui/toast";
 import { undoWaste, recordWaste } from "@/app/actions/stock-pos";
-import { padPress } from "@/lib/stock/material-view";
 import type { StockCatalog } from "@/lib/stock/stock-core";
 import {
-  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, wasteMaterialQty, wasteReasonOf, wasteUndoErrorMessage,
+  groupMaterials, OTHER_REASON, WASTE_REASONS, wasteLabel, wasteReasonOf, wasteUndoErrorMessage,
   type WasteInput, type WasteMaterial,
 } from "@/lib/stock/waste-input";
 import type { CartItem, ModifierWithOptions, PosCategory, PosProduct } from "@/types/app";
 import { isPosOnline } from "@/lib/offline/status-store";
 import { DisabledReason, OFFLINE_REASON } from "./disabled-reason";
-import { NumericKeypad } from "./numeric-keypad";
+import { MaterialAmountStep, STEP_BACK, STEP_TAB } from "./material-amount-step";
 import { OptionWindow } from "./modifier-modal";
 import { ProductGrid } from "./product-grid";
 
@@ -38,14 +37,8 @@ type Picked =
   | { kind: "menu"; product: PosProduct; line: CartItem }
   | { kind: "material"; material: WasteMaterial; qty: number };
 
-const FRACTIONS = [
-  { value: 0.25, label: "¼" },
-  { value: 0.5, label: "½" },
-  { value: 0.75, label: "¾" },
-] as const;
-
-const TAB = "h-14 flex-1 rounded-lg border-2 text-lg font-semibold transition-colors";
-const BACK = "h-14 shrink-0 rounded-lg border border-input bg-white px-5 text-base font-semibold text-sidebar hover:bg-muted";
+const TAB = STEP_TAB;
+const BACK = STEP_BACK;
 
 export function WasteFlow({ online, products, categories, catalog, materials, modifiersFor, productsWithOptions, onChanged, onDone }: Props) {
   const toast = useToastManager();
@@ -145,10 +138,11 @@ export function WasteFlow({ online, products, categories, catalog, materials, mo
 
   if (material) {
     return (
-      <MaterialQty
+      <MaterialAmountStep
         material={material}
+        primaryLabel="ต่อไป"
         onBack={() => setMaterial(null)}
-        onNext={(qty) => setPicked({ kind: "material", material, qty })}
+        onSubmit={({ qty }) => setPicked({ kind: "material", material, qty })}
       />
     );
   }
@@ -204,7 +198,7 @@ export function WasteFlow({ online, products, categories, catalog, materials, mo
   );
 }
 
-function MaterialList({ materials, onPick }: { materials: WasteMaterial[]; onPick: (m: WasteMaterial) => void }) {
+export function MaterialList({ materials, onPick }: { materials: WasteMaterial[]; onPick: (m: WasteMaterial) => void }) {
   const groups = groupMaterials(materials);
   if (groups.length === 0) {
     return <p className="rounded-lg bg-muted px-3 py-4 text-center text-base text-muted-foreground">ยังไม่มีวัตถุดิบที่นับสต๊อก</p>;
@@ -229,85 +223,6 @@ function MaterialList({ materials, onPick }: { materials: WasteMaterial[]; onPic
           </div>
         </section>
       ))}
-    </div>
-  );
-}
-
-function MaterialQty({ material, onBack, onNext }: { material: WasteMaterial; onBack: () => void; onNext: (qty: number) => void }) {
-  const hasPurchase = material.purchaseSize !== null && !!material.purchaseUnit;
-  const [unit, setUnit] = useState<"purchase" | "use">(hasPurchase ? "purchase" : "use");
-  const [pad, setPad] = useState("");
-  const [fraction, setFraction] = useState<0 | 0.25 | 0.5 | 0.75>(0);
-  const qty = wasteMaterialQty(pad, unit === "purchase" ? fraction : 0, unit, material.purchaseSize);
-  const valid = qty !== null && qty <= 100_000 && Math.round(qty * 1000) / 1000 === qty;
-  const entryUnit = unit === "purchase" ? material.purchaseUnit : material.unit;
-  const shown = `${pad === "" ? "0" : pad}${unit === "purchase" && fraction ? ` + ${FRACTIONS.find((f) => f.value === fraction)?.label}` : ""}`;
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* The body scrolls on a very short screen; "ต่อไป" below it never does (always in view). On a wide
-          screen the keypad sits beside the controls, so the whole step is about 300 px tall. */}
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={onBack} className={BACK}>กลับ</button>
-        <p className="min-w-0 text-xl font-bold text-sidebar">{material.name}</p>
-      </div>
-      <div className="space-y-3 sm:grid sm:grid-cols-2 sm:items-start sm:gap-4 sm:space-y-0">
-      <div className="space-y-3">
-      {hasPurchase && (
-        <div className="flex gap-2">
-          {(
-            [
-              ["purchase", material.purchaseUnit],
-              ["use", material.unit],
-            ] as const
-          ).map(([id, text]) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={unit === id}
-              onClick={() => { setUnit(id); setFraction(0); }}
-              className={`${TAB} ${unit === id ? "border-accent bg-accent text-white" : "border-input bg-white text-sidebar hover:border-accent"}`}
-            >
-              {text}
-            </button>
-          ))}
-        </div>
-      )}
-      <p className="text-center text-3xl font-bold text-sidebar tabular-nums">
-        {shown} <span className="text-xl font-semibold text-muted-foreground">{entryUnit}</span>
-      </p>
-      {/* its line is always there, so the pad and the buttons never move when it comes and goes */}
-      <p className="min-h-6 text-center text-base text-muted-foreground tabular-nums">
-        {unit === "purchase" && qty !== null ? `= ${qty.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${material.unit}` : " "}
-      </p>
-      {unit === "purchase" && (
-        <div className="flex gap-2">
-          {FRACTIONS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              aria-pressed={fraction === f.value}
-              onClick={() => setFraction((cur) => (cur === f.value ? 0 : f.value))}
-              className={`${TAB} ${fraction === f.value ? "border-accent bg-accent text-white" : "border-input bg-white text-sidebar hover:border-accent"}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      )}
-      </div>
-      <NumericKeypad allowDecimal onKey={(k) => setPad((p) => padPress(p, k))} />
-      </div>
-      </div>
-      <button
-        type="button"
-        disabled={!valid}
-        onClick={() => qty !== null && onNext(qty)}
-        className="h-14 shrink-0 rounded-lg bg-accent text-lg font-bold text-white disabled:bg-accent/40 disabled:cursor-not-allowed"
-      >
-        ต่อไป
-      </button>
     </div>
   );
 }

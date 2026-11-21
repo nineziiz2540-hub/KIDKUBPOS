@@ -174,6 +174,7 @@ export default async function PosPage() {
       liveStockRows={liveStockRows}
       materialNames={materialNames}
       wasteMaterials={wasteMaterials}
+      canSeeReceivePrice={profile.role === "owner" || profile.role === "manager"}
       bagsEnabled={bagRule.data?.bag_material_id != null}
       bagsPerCups={bagRule.data?.bags_per_cups ?? null}
       userName={profile.full_name ?? "ผู้ใช้"}
