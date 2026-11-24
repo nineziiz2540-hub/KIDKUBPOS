@@ -17,6 +17,7 @@ import { ChangeMethodButton } from "@/components/orders/change-method-button";
 import { MarkUnpaidButton } from "@/components/orders/mark-unpaid-button";
 import { RestorePaidButton } from "@/components/orders/restore-paid-button";
 import { TransferCheckToggle } from "@/components/orders/transfer-check-toggle";
+import { ReceiptQrButton } from "@/components/orders/receipt-qr-button";
 import { formatDateTime, formatTime } from "@/lib/bangkok-time";
 import { formatBaht } from "@/lib/order-history";
 import { billLineDetail } from "@/lib/stock/option-window";
@@ -74,6 +75,7 @@ type OrderDetail = {
   sold_offline: boolean;
   /** carry-out bags on the bill (round D2a); 0 = none */
   bags: number;
+  client_ref: string | null;
   order_items: OrderItem[];
 };
 
@@ -84,7 +86,7 @@ const ORDER_SELECT = [
   "cancelled_at, cancel_reason, cancelled_by, cancelled_approved_by",
   "refunded_at, refund_reason, refund_method, refunded_by, refunded_approved_by",
   "unpaid_at, unpaid_reason, unpaid_by, unpaid_approved_by",
-  "transfer_verified_at, transfer_verified_by, sold_offline, bags",
+  "transfer_verified_at, transfer_verified_by, sold_offline, bags, client_ref",
   "order_items(id, product_name, unit_price, quantity, subtotal, modifiers_snapshot, choices, note)",
 ].join(", ");
 
@@ -251,6 +253,10 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           </p>
         </div>
       </div>
+
+      {order.client_ref !== null && (
+        <ReceiptQrButton clientRef={order.client_ref} orderLabel={order.order_number ?? ""} />
+      )}
 
       {/* Line items */}
       <div className="divide-y divide-border rounded-xl border bg-white">
