@@ -13,6 +13,7 @@ import {
 import { CashFloatForm } from "@/components/settings/cash-float-form";
 import { BagSettingsForm } from "@/components/settings/bag-settings-form";
 import { StoreNameForm } from "@/components/settings/store-name-form";
+import { ShopLogoForm } from "@/components/settings/shop-logo-form";
 import { BusinessSettingsForm } from "@/components/settings/business-settings-form";
 import { PromptPayForm } from "@/components/settings/promptpay-form";
 import { MfaSection } from "@/components/settings/mfa-section";
@@ -28,7 +29,7 @@ export default async function SettingsPage() {
     supabase
       .from("tenants")
       .select(
-        "name, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id, cash_float_default, bag_material_id, bags_per_cups"
+        "name, logo_url, fixed_cost_monthly, delivery_gp_percent, order_prefix, promptpay_id, cash_float_default, bag_material_id, bags_per_cups"
       )
       .eq("id", profile.tenant_id)
       .single(),
@@ -79,6 +80,10 @@ export default async function SettingsPage() {
       <div className="rounded-lg border bg-white p-5 space-y-4">
         <h2 className="text-base font-semibold text-sidebar">ข้อมูลร้านค้า</h2>
         <StoreNameForm action={updateStoreName} defaultName={tenant?.name ?? profile.tenants.name} />
+        <div className="space-y-2 border-t pt-4">
+          <p className="text-sm font-medium text-sidebar">โลโก้ร้าน (แสดงบนใบเสร็จ)</p>
+          <ShopLogoForm logoUrl={tenant?.logo_url ?? null} shopName={tenant?.name ?? profile.tenants.name} />
+        </div>
       </div>
 
       {/* Business settings */}
