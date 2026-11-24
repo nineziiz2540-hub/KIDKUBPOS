@@ -570,8 +570,25 @@ export function PosScreen({
     );
   }
 
+  // Owner's decision (2026-11-24, spec 6): once the next bill has its first item, the last bill's
+  // result (queue number, change box, receipt QR, offline card, hold notice) is gone for good, so
+  // emptying the cart again shows the plain empty cart and never an old customer's QR. Called by
+  // every function that puts a line into the cart; a sale sets its result together with an EMPTY
+  // cart and never calls this. (resultShownAt is left alone: auto-reload only reads it for an
+  // empty cart.)
+  function clearLastResult() {
+    setLastOrderNumber(null);
+    setLastReceiptRef(null);
+    setLastQueueNumber(null);
+    setLastCashTender(null);
+    setLastHeld(null);
+    setLastOffline(null);
+    lastOfflineRefKey.current = null;
+  }
+
   // A plain tap adds to the identical plain line if there is one (same rule as the option window).
   function addDirectToCart(product: PosProduct) {
+    clearLastResult();
     setCartItems((prev) =>
       addLine(prev, {
         cartItemKey: prev.some((i) => i.cartItemKey === product.id)
@@ -610,6 +627,7 @@ export function PosScreen({
   function handleSaveFromWindow(item: CartItem) {
     const editing = optionWindow?.editing ?? null;
     const key = `${item.productId}-${eventTime()}`;
+    clearLastResult();
     setCartItems((prev) =>
       editing ? replaceLine(prev, editing.cartItemKey, item) : addLine(prev, { ...item, cartItemKey: key })
     );
@@ -674,6 +692,7 @@ export function PosScreen({
           done = true;
           toast.close(toastId);
           if (cartEpochRef.current !== epoch) return;
+          clearLastResult();
           setCartItems((prev) => restoreLine(prev, item, index));
         },
       } : undefined,
@@ -697,6 +716,7 @@ export function PosScreen({
   function restoreDraft(d: CartDraft) {
     const items = repriceFromMenu(d.items);
     cartEpochRef.current++;
+    clearLastResult();
     setCartItems(items);
     setOrderType(d.orderType);
     setPaymentMethod(d.paymentMethod);
