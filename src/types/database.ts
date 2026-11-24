@@ -1811,6 +1811,7 @@ export type Database = {
           delivery_gp_percent: number
           fixed_cost_monthly: number
           id: string
+          logo_url: string | null
           name: string
           order_prefix: string
           order_sequence: number
@@ -1826,6 +1827,7 @@ export type Database = {
           delivery_gp_percent?: number
           fixed_cost_monthly?: number
           id?: string
+          logo_url?: string | null
           name: string
           order_prefix?: string
           order_sequence?: number
@@ -1841,6 +1843,7 @@ export type Database = {
           delivery_gp_percent?: number
           fixed_cost_monthly?: number
           id?: string
+          logo_url?: string | null
           name?: string
           order_prefix?: string
           order_sequence?: number
@@ -1958,6 +1961,10 @@ export type Database = {
         Returns: undefined
       }
       reorder_categories: { Args: { p_ids: string[] }; Returns: undefined }
+      receipt_get: {
+        Args: { p_token: string }
+        Returns: Json
+      }
       set_menu_paused: {
         Args: {
           p_actor_id: string
