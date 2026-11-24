@@ -14,13 +14,20 @@ export async function prepareLogo(
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
-    return { error: UNREADABLE };
+    try {
+      // Older iPad WebKit may not know the options argument.
+      bitmap = await createImageBitmap(file);
+    } catch {
+      return { error: UNREADABLE };
+    }
   }
+  let workCanvas: HTMLCanvasElement | null = null;
+  let outCanvas: HTMLCanvasElement | null = null;
 
   try {
     // Scratch canvas at reduced size: a full-size canvas fails on iPad for big images.
     const work = logoWorkSize(bitmap.width, bitmap.height);
-    const workCanvas = document.createElement("canvas");
+    workCanvas = document.createElement("canvas");
     workCanvas.width = work.width;
     workCanvas.height = work.height;
     const workCtx = workCanvas.getContext("2d", { willReadFrequently: true });
@@ -29,15 +36,25 @@ export async function prepareLogo(
     const box = logoTrimBox(workCtx.getImageData(0, 0, work.width, work.height).data, work.width, work.height);
     if (!box) return { error: "ไม่พบโลโก้ในรูปนี้" };
 
-    const out = logoOutputSize(box.width, box.height);
-    const outCanvas = document.createElement("canvas");
-    outCanvas.width = out.width;
-    outCanvas.height = out.height;
-    const outCtx = outCanvas.getContext("2d");
+    // Trim box is in work-canvas pixels; map it back to the decoded bitmap so the output keeps full detail.
+    const sx = bitmap.width / work.width;
+    const sy = bitmap.height / work.height;
+    const src = {
+      x: Math.round(box.x * sx),
+      y: Math.round(box.y * sy),
+      width: Math.min(bitmap.width, Math.round(box.width * sx)),
+      height: Math.min(bitmap.height, Math.round(box.height * sy)),
+    };
+    const out = logoOutputSize(src.width, src.height);
+    const outCv = document.createElement("canvas");
+    outCanvas = outCv;
+    outCv.width = out.width;
+    outCv.height = out.height;
+    const outCtx = outCv.getContext("2d");
     if (!outCtx) return { error: UNREADABLE };
-    outCtx.drawImage(workCanvas, box.x, box.y, box.width, box.height, 0, 0, out.width, out.height);
+    outCtx.drawImage(bitmap, src.x, src.y, src.width, src.height, 0, 0, out.width, out.height);
 
-    const blob = await new Promise<Blob | null>((resolve) => outCanvas.toBlob(resolve, "image/png"));
+    const blob = await new Promise<Blob | null>((resolve) => outCv.toBlob(resolve, "image/png"));
     if (!blob) return { error: UNREADABLE };
     if (blob.size > LOGO_MAX_BYTES) return { error: "ไฟล์โลโก้ใหญ่เกินไป" };
 
@@ -46,6 +63,8 @@ export async function prepareLogo(
   } catch {
     return { error: UNREADABLE };
   } finally {
+    if (workCanvas) workCanvas.width = workCanvas.height = 0;
+    if (outCanvas) outCanvas.width = outCanvas.height = 0;
     bitmap.close();
   }
 }

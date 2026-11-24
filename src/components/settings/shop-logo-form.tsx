@@ -16,8 +16,8 @@ function MiniHeader({ logoUrl, shopName, sample }: { logoUrl: string | null; sho
       <ReceiptBrand logoUrl={logoUrl} shopName={shopName} size="full" />
       {sample && (
         <>
-          <p className="text-sm text-muted-foreground">{RECEIPT_HEADING}</p>
-          <p className="text-sm text-muted-foreground">บิล 0001 · คิว 1</p>
+          <p className="mt-2 text-center text-xs text-muted-foreground">{RECEIPT_HEADING}</p>
+          <p className="mt-3 text-center font-mono tabular-nums">บิล 0001 · คิว 1</p>
         </>
       )}
     </div>
@@ -71,7 +71,13 @@ export function ShopLogoForm({ logoUrl, shopName }: { logoUrl: string | null; sh
     fd.set("logo", preview.file);
     setError(null);
     startTransition(async () => {
-      const result = await uploadShopLogo(fd);
+      let result: Awaited<ReturnType<typeof uploadShopLogo>>;
+      try {
+        result = await uploadShopLogo(fd);
+      } catch {
+        setError("อัปโหลดโลโก้ไม่สำเร็จ");
+        return;
+      }
       if ("error" in result) {
         setError(result.error);
         return;
@@ -85,7 +91,13 @@ export function ShopLogoForm({ logoUrl, shopName }: { logoUrl: string | null; sh
     setConfirmRemove(false);
     setError(null);
     startTransition(async () => {
-      const result = await removeShopLogo();
+      let result: Awaited<ReturnType<typeof removeShopLogo>>;
+      try {
+        result = await removeShopLogo();
+      } catch {
+        setError("ลบโลโก้ไม่สำเร็จ");
+        return;
+      }
       if ("error" in result) {
         setError(result.error);
         return;
