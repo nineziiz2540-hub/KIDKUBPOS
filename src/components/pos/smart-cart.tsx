@@ -152,6 +152,9 @@ export function SmartCart({
   onToggleHouseGlass,
   bags = null,
 }: Props) {
+  // The receipt QR shows only with a paid bill's result (never with a held bill or an empty first screen).
+  const showReceiptQr = (Boolean(lastOrderNumber) || lastOffline !== null) && receiptUrl !== null;
+  const showOnlineQr = Boolean(lastOrderNumber) && receiptUrl !== null;
   const reasonId = useId();
   const pinReason = reasonOf(gates.pinDiscount);
   const holdReason = reasonOf(gates.hold);
@@ -236,7 +239,7 @@ export function SmartCart({
       {/* Cart items */}
       <div className="flex-1 overflow-y-auto divide-y divide-border">
         {cartItems.length === 0 ? (
-          <div className="py-10 text-center">
+          <div className={`${showReceiptQr ? "py-1" : "py-10"} text-center`}>
             {lastHeld && (
               <div className="mx-auto mb-3 w-fit rounded-lg bg-accent/10 px-5 py-3">
                 <p className="text-sm font-medium text-accent">
@@ -257,6 +260,10 @@ export function SmartCart({
                 receiptUrl={receiptUrl}
               />
             )}
+            {/* With the receipt QR the result sits beside it (the cart's list is short on an iPad, and
+                the QR must never push the hint or need a scroll); without it the blocks stack as before. */}
+            <div className={showOnlineQr ? "flex items-center justify-center gap-3 px-3" : undefined}>
+              <div>
             {lastOrderNumber && lastQueueNumber !== null && (
               <div className="mb-2">
                 <p className="text-sm font-medium text-muted-foreground">คิว</p>
@@ -280,11 +287,9 @@ export function SmartCart({
                 </p>
               </div>
             )}
-            {lastOrderNumber && receiptUrl && (
-              <div className="mb-2">
-                <ReceiptQr url={receiptUrl} size={148} />
               </div>
-            )}
+              {showOnlineQr && <ReceiptQr url={receiptUrl} size={148} />}
+            </div>
             <p className="text-muted-foreground text-base">แตะเมนูเพื่อเพิ่มลงตะกร้า</p>
           </div>
         ) : (

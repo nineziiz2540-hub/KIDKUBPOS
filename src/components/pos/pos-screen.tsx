@@ -783,7 +783,9 @@ export function PosScreen({
     setResultShownAt(eventTime());
     cartEpochRef.current++;
     setLastOrderNumber(sale.orderNumber);
-    setLastReceiptRef(settledClientRef);
+    // The same sale can be applied twice (the late-answer handler, then the main path); the second
+    // call finds attemptRef already cleared, and must keep the ref the first one set.
+    setLastReceiptRef((prev) => settledClientRef ?? prev);
     setLastQueueNumber(sale.queueNumber);
     snapshot.observe(sale.queueNumber);
     setLastCashTender(
