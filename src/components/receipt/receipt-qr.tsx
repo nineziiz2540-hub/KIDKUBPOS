@@ -48,8 +48,8 @@ export function ReceiptQr({ url, size, note = null }: Props) {
       </div>
       {current?.state === "ready" && (
         <>
-          <p className="text-sm font-medium text-sidebar">{RECEIPT_QR_CAPTION}</p>
-          {note && <p className="text-sm text-muted-foreground">{note}</p>}
+          <p className="text-xs leading-4 font-medium text-sidebar">{RECEIPT_QR_CAPTION}</p>
+          {note && <p className="text-xs leading-4 text-muted-foreground">{note}</p>}
         </>
       )}
     </div>

@@ -239,7 +239,7 @@ export function SmartCart({
       {/* Cart items */}
       <div className="flex-1 overflow-y-auto divide-y divide-border">
         {cartItems.length === 0 ? (
-          <div className={`${showReceiptQr ? "py-1" : "py-10"} text-center`}>
+          <div className={`${showOnlineQr ? "py-1" : showReceiptQr ? "py-0.5" : "py-10"} text-center`}>
             {lastHeld && (
               <div className="mx-auto mb-3 w-fit rounded-lg bg-accent/10 px-5 py-3">
                 <p className="text-sm font-medium text-accent">
@@ -290,7 +290,10 @@ export function SmartCart({
               </div>
               {showOnlineQr && <ReceiptQr url={receiptUrl} size={148} />}
             </div>
-            <p className="text-muted-foreground text-base">แตะเมนูเพื่อเพิ่มลงตะกร้า</p>
+            {/* Offline with the QR the card takes the whole (short) list: the hint has no room. */}
+            {!(lastOffline && showReceiptQr) && (
+              <p className="text-muted-foreground text-base">แตะเมนูเพื่อเพิ่มลงตะกร้า</p>
+            )}
           </div>
         ) : (
           cartItems.map((item) => {

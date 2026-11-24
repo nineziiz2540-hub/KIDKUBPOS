@@ -24,33 +24,37 @@ export function OfflineSaleResult({ queueNumber, cashReceived, changeAmount, ord
   const withQr = Boolean(receiptUrl);
   return (
     <div
-      className={`mx-auto mb-3 max-w-full rounded-lg border ${
-        withQr ? "flex w-full items-center justify-center gap-3 px-3 py-2" : "w-fit px-5 py-3"
+      className={`mx-auto max-w-full rounded-lg border ${
+        withQr ? "flex w-full items-center justify-center gap-3 px-3 py-1" : "mb-3 w-fit px-5 py-3"
       } ${sent ? "border-success bg-success/10" : "border-warning bg-warning/10"}`}
       role="status"
     >
       <div>
-        <p className="text-5xl font-bold text-accent tabular-nums leading-none">คิว {queueNumber}</p>
+        <p
+          className={`${withQr ? "text-4xl" : "text-5xl"} font-bold text-accent tabular-nums leading-none`}
+        >
+          คิว {queueNumber}
+        </p>
         {sent ? (
           <>
-            <p className="mt-2 text-base font-semibold text-sidebar">ส่งขึ้นระบบแล้ว ✓</p>
-            <p className="text-sm text-muted-foreground tabular-nums">บิล {orderNumber}</p>
+            <p className={`${withQr ? "mt-0.5 leading-tight" : "mt-2"} text-base font-semibold text-sidebar`}>ส่งขึ้นระบบแล้ว ✓</p>
+            <p className={`${withQr ? "text-xs leading-4" : "text-sm"} text-muted-foreground tabular-nums`}>บิล {orderNumber}</p>
           </>
         ) : (
           <>
-            <p className="mt-2 text-base font-semibold text-sidebar">บันทึกไว้ในเครื่องแล้ว ✓</p>
-            <p className="text-sm text-muted-foreground">รอส่งขึ้นระบบเมื่อเน็ตกลับมา</p>
-            <p className="text-sm text-muted-foreground">เลขบิลจะได้หลังส่งขึ้นระบบ</p>
+            <p className={`${withQr ? "mt-0.5 leading-tight" : "mt-2"} text-base font-semibold text-sidebar`}>บันทึกไว้ในเครื่องแล้ว ✓</p>
+            <p className={`${withQr ? "text-xs leading-4" : "text-sm"} text-muted-foreground`}>รอส่งขึ้นระบบเมื่อเน็ตกลับมา</p>
+            <p className={`${withQr ? "text-xs leading-4" : "text-sm"} text-muted-foreground`}>เลขบิลจะได้หลังส่งขึ้นระบบ</p>
           </>
         )}
         {cashReceived !== null && changeAmount !== null && (
           <div
             className={`mx-auto w-fit rounded-lg bg-success/10 text-success ${
-              withQr ? "mt-2 px-3 py-1" : "mt-3 px-5 py-2.5"
+              withQr ? "mt-1 px-3 py-0.5" : "mt-3 px-5 py-2.5"
             }`}
           >
-            <p className="text-sm tabular-nums">รับเงิน ฿{cashReceived.toFixed(2)}</p>
-            <p className="text-2xl font-bold tabular-nums">ทอน ฿{changeAmount.toFixed(2)}</p>
+            <p className={`${withQr ? "text-xs leading-4" : "text-sm"} tabular-nums`}>รับเงิน ฿{cashReceived.toFixed(2)}</p>
+            <p className={`${withQr ? "text-xl leading-7" : "text-2xl"} font-bold tabular-nums`}>ทอน ฿{changeAmount.toFixed(2)}</p>
           </div>
         )}
       </div>
