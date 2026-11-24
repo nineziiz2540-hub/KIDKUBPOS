@@ -9,7 +9,11 @@
 --   * receipt_get(p_token)   — the ONLY way a customer-facing page reads a bill. Service role only.
 -- Additive; the deployed app neither reads logo_url nor calls receipt_get.
 -- The whitelist of fields that may reach a customer lives in receipt_get: nothing else (notes,
--- reasons, customers, staff, costs, ids, client_ref) is ever selected into its result.
+-- reasons, customers, staff, costs, order/tenant/shift/user ids, client_ref) is ever selected into
+-- its result. Two disclosed exceptions: shop_logo_url is a public storage path that contains the
+-- tenant id (it grants no access); and the raw choices/options JSON can carry internal ids
+-- (groupId, memberId, materialId, optionId ...) because the server page needs them to build the
+-- line detail. Ids inside choices/options are passed to the server page only and are never rendered.
 
 set local lock_timeout = '5s';
 
@@ -24,7 +28,8 @@ alter table public.tenants
   check (
     logo_url is null
     or (char_length(logo_url) <= 500
-        and logo_url like '%/storage/v1/object/public/product-images/' || id::text || '/logo-%')
+        and logo_url ~ ('^https://[a-z0-9]+\.supabase\.co/storage/v1/object/public/product-images/'
+                        || id::text || '/logo-[0-9]+\.png$'))
   );
 
 -- Returns null for a null token, an unknown token, or a token shared by more than one order

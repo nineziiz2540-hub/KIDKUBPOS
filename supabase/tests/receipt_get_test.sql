@@ -9,7 +9,7 @@ declare
   um uuid := gen_random_uuid();  -- manager, tenant A
   us uuid := gen_random_uuid();  -- staff, tenant A
   ub uuid := gen_random_uuid();  -- owner, tenant B
-  ta uuid; tb uuid; pa uuid; sh uuid;
+  ta uuid; tb uuid; pa uuid; sh uuid; cust uuid; res_logo jsonb;
   base_keys text[] := array['shop_name','shop_logo_url','order_number','queue_number','created_at','status'];
   full_keys text[] := array['shop_name','shop_logo_url','order_number','queue_number','created_at','status',
     'items','subtotal','discount_amount','total','payment_method','cash_received','change_amount'];
@@ -40,26 +40,27 @@ begin
   insert into public.products (tenant_id, name, price, is_active) values (ta, 'ลาเต้', 55, true) returning id into pa;
 
   sh := public.shift_open(ta, ua, array[0]::numeric[], null);  -- cash bills need an open shift
+  insert into public.customers (tenant_id, name) values (ta, 'CUSTOMER-MARKER') returning id into cust;
 
   -- completed(cash, discounted) / completed(transfer, unverified) / cancelled / unpaid / completed(no lines) / refunded
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total,
       discount_amount, cash_received, change_amount, status, note, cancel_reason, refund_reason, unpaid_reason,
-      discount_reason, queue_number, order_number, created_at)
+      discount_reason, queue_number, order_number, created_at, customer_id, discount_approved_by)
   values (sh, ta, ua, ref_c, 'cash', 'dine_in', 155, 140, 15, 200, 60, 'completed', 'NOTE-MARKER', 'REASON-MARKER',
-      'REASON-MARKER', 'REASON-MARKER', 'REASON-MARKER', 7, 'RG-0001', ts)
+      'REASON-MARKER', 'REASON-MARKER', 'REASON-MARKER', 7, 'RG-0001', ts, cust, um)
   returning id into oc;
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total,
       cash_received, change_amount, status, note, queue_number, order_number, transfer_verified_at)
   values (sh, ta, ua, ref_x, 'transfer', 'dine_in', 110, 110, null, null, 'completed', 'NOTE-MARKER', 8, 'RG-0002', null)
   returning id into ox;
-  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number)
-  values (sh, ta, ua, ref_f, 'cash', 'dine_in', 110, 110, 'cancelled', 'NOTE-MARKER', 'RG-0003') returning id into of_;
-  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number)
-  values (sh, ta, ua, ref_u, 'transfer', 'dine_in', 110, 110, 'unpaid', 'NOTE-MARKER', 'RG-0004') returning id into ou;
+  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number, cancelled_by, cancelled_approved_by, cancelled_at)
+  values (sh, ta, ua, ref_f, 'cash', 'dine_in', 110, 110, 'cancelled', 'NOTE-MARKER', 'RG-0003', um, um, now()) returning id into of_;
+  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number, unpaid_by, unpaid_approved_by, unpaid_at)
+  values (sh, ta, ua, ref_u, 'transfer', 'dine_in', 110, 110, 'unpaid', 'NOTE-MARKER', 'RG-0004', um, um, now()) returning id into ou;
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number)
   values (sh, ta, ua, ref_e, 'cash', 'dine_in', 0, 0, 'completed', 'NOTE-MARKER', 'RG-0005') returning id into oe;
-  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number)
-  values (sh, ta, ua, ref_t, 'cash', 'dine_in', 110, 110, 'refunded', 'NOTE-MARKER', 'RG-0006') returning id into ot;
+  insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number, refunded_by, refunded_approved_by, refunded_at, refund_method)
+  values (sh, ta, ua, ref_t, 'cash', 'dine_in', 110, 110, 'refunded', 'NOTE-MARKER', 'RG-0006', um, um, now(), 'transfer') returning id into ot;
   -- the same client_ref on one order in each of two tenants
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, order_number)
   values (sh, ta, ua, ref_dup, 'cash', 'dine_in', 1, 1, 'completed', 'RG-0007');
@@ -138,20 +139,28 @@ begin
 
   -- ── Logo ─────────────────────────────────────────────────────────────────
   r := r || jsonb_build_object('logo_null_when_unset', public.receipt_get(ref_c) -> 'shop_logo_url' = 'null'::jsonb);
-  logo_ok := 'https://x.supabase.co/storage/v1/object/public/product-images/' || ta || '/logo-1.png';
+  logo_ok := 'https://khgahdjfkzpgsvbhfrqx.supabase.co/storage/v1/object/public/product-images/' || ta || '/logo-1732400000000.png';
   update public.tenants set logo_url = logo_ok where id = ta;
   r := r || jsonb_build_object('logo_url_returned', public.receipt_get(ref_c) ->> 'shop_logo_url' = logo_ok);
+  res_logo := public.receipt_get(ref_c);
+  -- the tenant id may appear ONLY inside the public storage path of the logo URL
+  r := r || jsonb_build_object('tenant_id_only_inside_logo_url',
+    res_logo ->> 'shop_logo_url' like '%' || ta::text || '%'
+    and (res_logo - 'shop_logo_url')::text not like '%' || ta::text || '%');
+  res_all := res_all || (res_logo - 'shop_logo_url')::text;
   update public.tenants set logo_url = null where id = ta;
 
-  -- ── No leaks ─────────────────────────────────────────────────────────────
+  -- no marker, no id (orders, client_refs, shift, users, customer, tenants) in ANY seeded result
   r := r || jsonb_build_object('no_forbidden_text',
     res_all <> ''
     and res_all not like '%NOTE-MARKER%' and res_all not like '%REASON-MARKER%'
     and res_all not like '%CUSTOMER-MARKER%' and res_all not like '%STAFF-MARKER%'
-    and res_all not like '%987.65%' and res_all not like '%' || oc::text || '%'
-    and res_all not like '%' || ta::text || '%' and res_all not like '%' || ref_c::text || '%');
+    and res_all not like '%987.65%'
+    and not exists (
+      select 1 from unnest(array[oc, ox, of_, ou, oe, ot, ref_c, ref_x, ref_f, ref_u, ref_e, ref_t, ref_dup,
+                                 sh, ua, um, us, ub, cust, ta, tb, pa]) u
+       where res_all like '%' || u::text || '%'));
 
-  -- ── Misses ───────────────────────────────────────────────────────────────
   r := r || jsonb_build_object('not_found_null', public.receipt_get(gen_random_uuid()) is null);
   r := r || jsonb_build_object('null_token_null', public.receipt_get(null) is null);
   r := r || jsonb_build_object('same_ref_two_tenants_null', public.receipt_get(ref_dup) is null);
@@ -180,7 +189,7 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
   set local role authenticated;
   begin
-    update public.tenants set logo_url = 'https://x.supabase.co/storage/v1/object/public/product-images/' || tb || '/logo-1.png' where id = ta;
+    update public.tenants set logo_url = 'https://khgahdjfkzpgsvbhfrqx.supabase.co/storage/v1/object/public/product-images/' || tb || '/logo-1.png' where id = ta;
     ok := false;
   exception when check_violation then ok := true;
   end;
@@ -188,6 +197,16 @@ begin
     update public.tenants set logo_url = 'https://evil.example/logo.png' where id = ta;
     r := r || jsonb_build_object('logo_external_url_refused', false);
   exception when check_violation then r := r || jsonb_build_object('logo_external_url_refused', true);
+  end;
+  begin
+    update public.tenants set logo_url = 'https://khgahdjfkzpgsvbhfrqx.supabase.co/storage/v1/object/public/product-images/' || ta || '/logo-1/../../' || tb || '/logo-1.png' where id = ta;
+    r := r || jsonb_build_object('logo_traversal_refused', false);
+  exception when check_violation then r := r || jsonb_build_object('logo_traversal_refused', true);
+  end;
+  begin
+    update public.tenants set logo_url = 'https://khgahdjfkzpgsvbhfrqx.supabase.co/storage/v1/object/public/product-images/' || tb || '/logo-1.png?/storage/v1/object/public/product-images/' || ta || '/logo-1.png' where id = ta;
+    r := r || jsonb_build_object('logo_query_trick_refused', false);
+  exception when check_violation then r := r || jsonb_build_object('logo_query_trick_refused', true);
   end;
   reset role;
   r := r || jsonb_build_object('logo_other_folder_refused', ok);
