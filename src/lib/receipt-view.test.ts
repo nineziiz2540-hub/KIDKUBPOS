@@ -107,3 +107,14 @@ test("receiptTitle", () => {
   assert.equal(receiptTitle(toReceiptView(base)), "ใบเสร็จ · The Connect");
   assert.equal(receiptTitle(toReceiptView(null)), "ใบเสร็จ");
 });
+
+test("malformed data gives not_found, never a crash or a partial receipt", () => {
+  const bad = (patch: unknown) => toReceiptView({ ...base, ...(patch as object) } as ReceiptData).kind;
+  assert.equal(bad({ items: { a: 1 } }), "not_found");
+  assert.equal(bad({ items: "x" }), "not_found");
+  assert.equal(bad({ items: [null] }), "not_found");
+  assert.equal(bad({ items: [{ name: "a", quantity: 1, choices: null, options: null }] }), "not_found");
+  assert.equal(bad({ items: [{ name: "a", quantity: NaN, subtotal: 1, choices: null, options: null }] }), "not_found");
+  assert.equal(bad({ created_at: "not-a-date" }), "not_found");
+  assert.equal(bad({ created_at: "not-a-date", status: "cancelled" }), "not_found");
+});

@@ -53,6 +53,7 @@ const NOT_FOUND: ReceiptView = { kind: "not_found", message: RECEIPT_NOT_FOUND }
 
 export function toReceiptView(data: ReceiptData | null): ReceiptView {
   if (!data) return NOT_FOUND;
+  if (typeof data.created_at !== "string" || Number.isNaN(Date.parse(data.created_at))) return NOT_FOUND;
 
   const head = {
     shopName: data.shop_name,
@@ -73,7 +74,17 @@ export function toReceiptView(data: ReceiptData | null): ReceiptView {
   if (data.status !== "completed") return NOT_FOUND;
   if (typeof data.total !== "number" || !Number.isFinite(data.total)) return NOT_FOUND;
 
-  const lines = (data.items ?? []).map((it) => {
+  // malformed items must never give a partial paid receipt
+  if (data.items !== undefined && !Array.isArray(data.items)) return NOT_FOUND;
+  const rawItems: unknown[] = data.items ?? [];
+  const wellFormed = rawItems.every((x) => {
+    if (typeof x !== "object" || x === null) return false;
+    const it = x as Partial<ReceiptItemData>;
+    return typeof it.name === "string" && Number.isFinite(it.quantity) && Number.isFinite(it.subtotal);
+  });
+  if (!wellFormed) return NOT_FOUND;
+
+  const lines = (rawItems as ReceiptItemData[]).map((it) => {
     // the house-glass word is for the kitchen, not the customer
     const choices = it.choices ? (({ packaging: _p, ...rest }) => (void _p, rest))(it.choices) : null;
     return {
