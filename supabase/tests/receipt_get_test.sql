@@ -41,12 +41,6 @@ begin
 
   sh := public.shift_open(ta, ua, array[0]::numeric[], null);  -- cash bills need an open shift
 
-  -- orders_cash_tendered_check forbids cash fields on a transfer bill, so the table can never hold the
-  -- row the "cash fields only for cash" test needs. Drop it for this rolled-back run only: receipt_get
-  -- must still hide the fields (defence in depth). Short lock, rolled back with everything else.
-  set local lock_timeout = '5s';
-  alter table public.orders drop constraint orders_cash_tendered_check;
-
   -- completed(cash, discounted) / completed(transfer, unverified) / cancelled / unpaid / completed(no lines) / refunded
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total,
       discount_amount, cash_received, change_amount, status, note, cancel_reason, refund_reason, unpaid_reason,
@@ -56,7 +50,7 @@ begin
   returning id into oc;
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total,
       cash_received, change_amount, status, note, queue_number, order_number, transfer_verified_at)
-  values (sh, ta, ua, ref_x, 'transfer', 'dine_in', 110, 110, 200, 60, 'completed', 'NOTE-MARKER', 8, 'RG-0002', null)
+  values (sh, ta, ua, ref_x, 'transfer', 'dine_in', 110, 110, null, null, 'completed', 'NOTE-MARKER', 8, 'RG-0002', null)
   returning id into ox;
   insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total, status, note, order_number)
   values (sh, ta, ua, ref_f, 'cash', 'dine_in', 110, 110, 'cancelled', 'NOTE-MARKER', 'RG-0003') returning id into of_;
@@ -129,6 +123,15 @@ begin
     res -> 'cash_received' = 'null'::jsonb and res -> 'change_amount' = 'null'::jsonb
     and (public.receipt_get(ref_c) ->> 'cash_received')::numeric = 200
     and (public.receipt_get(ref_c) ->> 'change_amount')::numeric = 60);
+  -- a transfer bill can never store cash fields: the table constraint refuses it
+  begin
+    insert into public.orders (shift_id, tenant_id, created_by, client_ref, payment_method, order_type, subtotal, total,
+        cash_received, change_amount, status, order_number)
+    values (sh, ta, ua, gen_random_uuid(), 'transfer', 'dine_in', 110, 110, 200, 60, 'completed', 'RG-0009');
+    r := r || jsonb_build_object('transfer_with_cash_refused_by_constraint', false);
+  exception when check_violation then
+    r := r || jsonb_build_object('transfer_with_cash_refused_by_constraint', true);
+  end;
   r := r || jsonb_build_object('discount_amount_present',
     (public.receipt_get(ref_c) ->> 'discount_amount')::numeric = 15
     and (public.receipt_get(ref_c) ->> 'total')::numeric = 140);
