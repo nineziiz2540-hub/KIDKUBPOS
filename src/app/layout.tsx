@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Prompt, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider, Toaster } from "@/components/ui/toast";
+import { RegisterServiceWorker } from "@/components/pwa/register-service-worker";
 
 const prompt = Prompt({
   variable: "--font-prompt",
@@ -43,6 +44,7 @@ export default function RootLayout({
         <ToastProvider>
           {children}
           <Toaster />
+          <RegisterServiceWorker />
         </ToastProvider>
       </body>
     </html>

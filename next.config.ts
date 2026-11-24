@@ -9,6 +9,9 @@ const withSerwist = withSerwistInit({
   // on the iPad wiped the POS cart in progress. Pages handle reconnecting themselves (the POS
   // heartbeat in src/components/pos/use-heartbeat.ts).
   reloadOnOnline: false,
+  // Customer receipt pages (/r/) must not install the POS service worker. RegisterServiceWorker in the
+  // root layout registers it on every other page, the same as before.
+  register: false,
 });
 
 const nextConfig: NextConfig = {
