@@ -1797,7 +1797,7 @@ export function PosScreen({
                 holdPending={holdPending}
                 lastHeld={lastHeld}
                 lastOffline={lastOffline}
-            receiptUrl={receiptUrlForCart}
+                receiptUrl={receiptUrlForCart}
                 gates={cartGates}
                 paymentReady={outbox.loaded && unsettledSaves === 0}
                 payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}

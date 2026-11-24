@@ -23,7 +23,7 @@ export function ReceiptQr({ url, size, note = null }: Props) {
   useEffect(() => {
     // A superseded run (new url or size, or React's dev-only double effect) must not write.
     let cancelled = false;
-    QRCode.toDataURL(url, { width: size, margin: 2, errorCorrectionLevel: "L" })
+    QRCode.toDataURL(url, { width: size * 2, margin: 2, errorCorrectionLevel: "L" })
       .then((imageUrl) => {
         if (!cancelled) setDrawn({ url, size, state: "ready", imageUrl });
       })
@@ -43,7 +43,13 @@ export function ReceiptQr({ url, size, note = null }: Props) {
       <div style={{ width: size, height: size }}>
         {current?.state === "ready" && current.imageUrl && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.imageUrl} alt="QR ใบเสร็จ" width={size} height={size} />
+          <img
+            src={current.imageUrl}
+            alt="QR ใบเสร็จ"
+            width={size}
+            height={size}
+            className="[image-rendering:pixelated]"
+          />
         )}
       </div>
       {current?.state === "ready" && (

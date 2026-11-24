@@ -13,6 +13,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const view = toReceiptView(await getReceipt(token));
   return {
     title: receiptTitle(view),
+    description: RECEIPT_HEADING,
     robots: { index: false, follow: false },
     referrer: "no-referrer",
     // The customer's page is not the POS app: no install manifest, no home-screen app title.

@@ -25,7 +25,7 @@ export function OfflineSaleResult({ queueNumber, cashReceived, changeAmount, ord
   return (
     <div
       className={`mx-auto max-w-full rounded-lg border ${
-        withQr ? "flex w-full items-center justify-center gap-3 px-3 py-1" : "mb-3 w-fit px-5 py-3"
+        withQr ? "flex w-full items-center justify-center gap-2 px-2 py-0.5" : "mb-3 w-fit px-5 py-3"
       } ${sent ? "border-success bg-success/10" : "border-warning bg-warning/10"}`}
       role="status"
     >

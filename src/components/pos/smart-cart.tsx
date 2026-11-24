@@ -262,31 +262,35 @@ export function SmartCart({
             )}
             {/* With the receipt QR the result sits beside it (the cart's list is short on an iPad, and
                 the QR must never push the hint or need a scroll); without it the blocks stack as before. */}
-            <div className={showOnlineQr ? "flex items-center justify-center gap-3 px-3" : undefined}>
+            <div className={showOnlineQr ? "flex items-center justify-center gap-2 px-2" : undefined}>
               <div>
-            {lastOrderNumber && lastQueueNumber !== null && (
-              <div className="mb-2">
-                <p className="text-sm font-medium text-muted-foreground">คิว</p>
-                <p className="text-5xl font-bold text-accent tabular-nums leading-none">
-                  {lastQueueNumber}
-                </p>
-              </div>
-            )}
-            {lastOrderNumber && (
-              <p className="text-base font-semibold text-sidebar mb-2">
-                ออเดอร์ {lastOrderNumber} สำเร็จ ✓
-              </p>
-            )}
-            {lastOrderNumber && lastCashTender && (
-              <div className="mx-auto mb-3 w-fit rounded-lg bg-success/10 px-5 py-2.5 text-success">
-                <p className="text-sm tabular-nums">
-                  รับเงิน ฿{lastCashTender.received.toFixed(2)}
-                </p>
-                <p className="text-2xl font-bold tabular-nums">
-                  ทอน ฿{lastCashTender.change.toFixed(2)}
-                </p>
-              </div>
-            )}
+                {lastOrderNumber && lastQueueNumber !== null && (
+                  <div className="mb-2">
+                    <p className="text-sm font-medium text-muted-foreground">คิว</p>
+                    <p className="text-5xl font-bold text-accent tabular-nums leading-none">
+                      {lastQueueNumber}
+                    </p>
+                  </div>
+                )}
+                {lastOrderNumber && (
+                  <p className={`text-base font-semibold text-sidebar ${showOnlineQr ? "mb-1" : "mb-2"}`}>
+                    ออเดอร์ {lastOrderNumber} สำเร็จ ✓
+                  </p>
+                )}
+                {lastOrderNumber && lastCashTender && (
+                  <div
+                    className={`mx-auto w-fit rounded-lg bg-success/10 px-5 py-2.5 text-success ${
+                      showOnlineQr ? "" : "mb-3"
+                    }`}
+                  >
+                    <p className="text-sm tabular-nums">
+                      รับเงิน ฿{lastCashTender.received.toFixed(2)}
+                    </p>
+                    <p className="text-2xl font-bold tabular-nums">
+                      ทอน ฿{lastCashTender.change.toFixed(2)}
+                    </p>
+                  </div>
+                )}
               </div>
               {showOnlineQr && <ReceiptQr url={receiptUrl} size={148} />}
             </div>
