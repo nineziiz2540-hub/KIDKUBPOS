@@ -68,6 +68,7 @@ import { useStockStates } from "./use-stock-states";
 import { useHeartbeat } from "./use-heartbeat";
 import { useDeviceSnapshot } from "./use-device-snapshot";
 import { canAutoReload, RESULT_HOLD_MS } from "@/lib/connectivity";
+import { receiptUrl } from "@/lib/receipt-link";
 import { HoldBillModal } from "./hold-bill-modal";
 import { HeldBillsPanel } from "./held-bills-panel";
 import { ReviewPanel } from "./review-panel";
@@ -187,6 +188,8 @@ export function PosScreen({
   const [pinAttempts, setPinAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastOrderNumber, setLastOrderNumber] = useState<string | null>(null);
+  /** The bill behind the after-sale result: its client_ref is the receipt QR's token. */
+  const [lastReceiptRef, setLastReceiptRef] = useState<string | null>(null);
   const [lastQueueNumber, setLastQueueNumber] = useState<number | null>(null);
   const [lastCashTender, setLastCashTender] = useState<{ received: number; change: number } | null>(
     null
@@ -744,6 +747,7 @@ export function PosScreen({
     setError(null);
     setSaveError(null);
     setLastOrderNumber(null);
+    setLastReceiptRef(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
@@ -766,7 +770,8 @@ export function PosScreen({
   function applySuccess(sale: SavedSale) {
     discardDraft();
     // Every caller has checked that attemptRef is the sale being finished.
-    settledRef.current = attemptRef.current?.clientRef ?? null;
+    const settledClientRef = attemptRef.current?.clientRef ?? null;
+    settledRef.current = settledClientRef;
     attemptRef.current = null;
     restoredRef.current = null;
     setDraftAttemptRef(null);
@@ -778,6 +783,7 @@ export function PosScreen({
     setResultShownAt(eventTime());
     cartEpochRef.current++;
     setLastOrderNumber(sale.orderNumber);
+    setLastReceiptRef(settledClientRef);
     setLastQueueNumber(sale.queueNumber);
     snapshot.observe(sale.queueNumber);
     setLastCashTender(
@@ -980,6 +986,7 @@ export function PosScreen({
     setError(null);
     setSaveError(null);
     setLastOrderNumber(null);
+    setLastReceiptRef(clientRef);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
@@ -1227,6 +1234,7 @@ export function PosScreen({
     setError(null);
     setSaveError(null);
     setLastOrderNumber(null);
+    setLastReceiptRef(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
@@ -1412,6 +1420,7 @@ export function PosScreen({
     setLoadedSnapshot(null);
     setError(null);
     setLastOrderNumber(null);
+    setLastReceiptRef(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastOffline(null);
@@ -1511,6 +1520,7 @@ export function PosScreen({
     setLoadedSnapshot(JSON.stringify(items));
     setError(null);
     setLastOrderNumber(null);
+    setLastReceiptRef(null);
     setLastQueueNumber(null);
     setLastCashTender(null);
     setLastHeld(null);
@@ -1606,6 +1616,14 @@ export function PosScreen({
   // 8rem = the phone layout's top bar + bottom nav. From md up neither exists (sidebar instead), so
   // only main's p-6 (3rem) is subtracted — the old 8rem left ~80px unused under the cart on iPad.
   // dvh tracks Safari's toolbar showing/hiding.
+  // The receipt QR shows exactly while the after-sale result shows (never after holding a bill).
+  const receiptUrlForCart =
+    lastReceiptRef !== null &&
+    (lastOrderNumber !== null || lastOffline !== null) &&
+    typeof window !== "undefined"
+      ? receiptUrl(window.location.origin, lastReceiptRef)
+      : null;
+
   return (
     <div className="flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-3rem)]">
       <StatusBanners
@@ -1697,6 +1715,7 @@ export function PosScreen({
             holdPending={holdPending}
             lastHeld={lastHeld}
             lastOffline={lastOffline}
+            receiptUrl={receiptUrlForCart}
             gates={cartGates}
             paymentReady={outbox.loaded && unsettledSaves === 0}
             payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}
@@ -1776,6 +1795,7 @@ export function PosScreen({
                 holdPending={holdPending}
                 lastHeld={lastHeld}
                 lastOffline={lastOffline}
+            receiptUrl={receiptUrlForCart}
                 gates={cartGates}
                 paymentReady={outbox.loaded && unsettledSaves === 0}
                 payBlockedReason={unsettledSaves > 0 ? UNSETTLED_SAVE_MESSAGE : null}

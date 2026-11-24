@@ -1,4 +1,6 @@
 "use client";
+import { ReceiptQr } from "@/components/receipt/receipt-qr";
+import { RECEIPT_QR_PENDING_NOTE } from "@/lib/receipt-link";
 
 type Props = {
   queueNumber: number;
@@ -7,13 +9,15 @@ type Props = {
   changeAmount: number | null;
   /** Set once the bill has reached the system while this result is still on screen. */
   orderNumber?: string;
+  /** The receipt link for this bill; the QR shows under the card text. */
+  receiptUrl?: string | null;
 };
 
 /**
  * The cart's result after a sale stored on the device (round C2): the customer's queue number
  * right away; the bill number comes when the bill reaches the system.
  */
-export function OfflineSaleResult({ queueNumber, cashReceived, changeAmount, orderNumber }: Props) {
+export function OfflineSaleResult({ queueNumber, cashReceived, changeAmount, orderNumber, receiptUrl }: Props) {
   const sent = orderNumber !== undefined;
   return (
     <div
@@ -39,6 +43,11 @@ export function OfflineSaleResult({ queueNumber, cashReceived, changeAmount, ord
         <div className="mx-auto mt-3 w-fit rounded-lg bg-success/10 px-5 py-2.5 text-success">
           <p className="text-sm tabular-nums">รับเงิน ฿{cashReceived.toFixed(2)}</p>
           <p className="text-2xl font-bold tabular-nums">ทอน ฿{changeAmount.toFixed(2)}</p>
+        </div>
+      )}
+      {receiptUrl && (
+        <div className="mt-2">
+          <ReceiptQr url={receiptUrl} size={148} note={sent ? null : RECEIPT_QR_PENDING_NOTE} />
         </div>
       )}
     </div>

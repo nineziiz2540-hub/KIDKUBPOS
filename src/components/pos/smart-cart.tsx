@@ -12,6 +12,7 @@ import { DiscountModal } from "./discount-modal";
 import { NoteModal } from "./note-modal";
 import { DisabledReason } from "./disabled-reason";
 import { OfflineSaleResult } from "./offline-sale-result";
+import { ReceiptQr } from "@/components/receipt/receipt-qr";
 import type { OfflineResult } from "./outbox-sale";
 import type { Gate } from "@/lib/offline/feature-gates";
 import { cartLineParts, HOUSE_GLASS_WORD, type LinePart } from "@/lib/stock/option-window";
@@ -77,6 +78,8 @@ type Props = {
   lastHeld: { queueNumber: number; customerLabel: string | null; saved: boolean } | null;
   /** The last sale stored on the device (round C2), shown in place of a bill number. */
   lastOffline: OfflineResult | null;
+  /** The receipt link for the bill just paid (null when no result is showing). */
+  receiptUrl: string | null;
   /** What needs the server right now (feature-gates.ts): disabled ones show why. */
   gates: { pinDiscount: Gate; hold: Gate; member: Gate };
   /** False until the device's outbox has been read once: paying waits for it. */
@@ -138,6 +141,7 @@ export function SmartCart({
   holdPending,
   lastHeld,
   lastOffline,
+  receiptUrl,
   gates,
   paymentReady,
   payBlockedReason = null,
@@ -250,6 +254,7 @@ export function SmartCart({
                 cashReceived={lastOffline.cashReceived}
                 changeAmount={lastOffline.changeAmount}
                 orderNumber={lastOffline.orderNumber}
+                receiptUrl={receiptUrl}
               />
             )}
             {lastOrderNumber && lastQueueNumber !== null && (
@@ -273,6 +278,11 @@ export function SmartCart({
                 <p className="text-2xl font-bold tabular-nums">
                   ทอน ฿{lastCashTender.change.toFixed(2)}
                 </p>
+              </div>
+            )}
+            {lastOrderNumber && receiptUrl && (
+              <div className="mb-2">
+                <ReceiptQr url={receiptUrl} size={148} />
               </div>
             )}
             <p className="text-muted-foreground text-base">แตะเมนูเพื่อเพิ่มลงตะกร้า</p>
