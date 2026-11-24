@@ -24,6 +24,19 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "6mb",
     },
   },
+  async headers() {
+    return [
+      {
+        // The public customer receipt (no login): never indexed, never leaks its URL as a referrer.
+        source: "/r/:token*",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
+        ],
+      },
+    ];
+  },
 };
 
 export default withSerwist(nextConfig);
