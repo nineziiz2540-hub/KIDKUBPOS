@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { ClipboardList, Package } from "lucide-react";
+import { ChevronRight, ClipboardList, Package } from "lucide-react";
 import { formatDate } from "@/lib/bangkok-time";
 
 type Props = {
@@ -13,6 +13,8 @@ type Props = {
   onOpenStock: () => void;
   /** Why the shift link can't be used now (offline or bills still waiting); null = usable. */
   shiftDisabledReason: string | null;
+  /** Why the order-history link can't be used now (offline); null = usable. */
+  ordersDisabledReason: string | null;
 };
 
 export function PosHeader({
@@ -23,6 +25,7 @@ export function PosHeader({
   onOpenHeld,
   onOpenStock,
   shiftDisabledReason,
+  ordersDisabledReason,
 }: Props) {
   const dateStr = formatDate(new Date().toISOString(), "full");
 
@@ -80,14 +83,33 @@ export function PosHeader({
             <span className="text-xs text-muted-foreground">{shiftDisabledReason}</span>
           </div>
         )}
-        <div className="text-right text-sm">
-          <p className="font-medium text-sidebar">{userName}</p>
-          <p className="text-xs text-muted-foreground">
-            ออเดอร์วันนี้{" "}
-            <span className="font-semibold text-sidebar">{todayOrderCount}</span>{" "}
-            รายการ
-          </p>
-        </div>
+        {ordersDisabledReason === null ? (
+          // Opens ประวัติบิล: the way back to a past bill (and its "QR ใบเสร็จ") once the cart has
+          // moved on to the next customer. The whole block is the target, as tall as the buttons.
+          <Link
+            href="/orders"
+            aria-label={`ออเดอร์วันนี้ ${todayOrderCount} รายการ ดูประวัติบิล`}
+            className="flex min-h-11 items-center gap-1 rounded-lg px-2 text-right text-sm transition-colors hover:bg-muted"
+          >
+            <span>
+              <span className="block font-medium text-sidebar">{userName}</span>
+              <span className="block text-xs font-semibold text-accent">
+                ออเดอร์วันนี้ <span className="tabular-nums">{todayOrderCount}</span> รายการ
+              </span>
+            </span>
+            <ChevronRight size={16} className="shrink-0 text-accent" aria-hidden="true" />
+          </Link>
+        ) : (
+          // Order history needs the server: offline it stays a plain label, as before.
+          <div className="text-right text-sm">
+            <p className="font-medium text-sidebar">{userName}</p>
+            <p className="text-xs text-muted-foreground">
+              ออเดอร์วันนี้{" "}
+              <span className="font-semibold text-sidebar">{todayOrderCount}</span>{" "}
+              รายการ
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

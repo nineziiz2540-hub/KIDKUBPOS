@@ -328,6 +328,7 @@ export function PosScreen({
   const resumeHeldGate = gate("resume_held", gateState);
   const memberGate = gate("member", gateState);
   const shiftGate = gate("shift", gateState);
+  const navigateGate = gate("navigate", gateState);
   const checkOnlyRef = outbox.entries.find((e) => e.state === "check-only")?.clientRef ?? null;
   const unresolvedRef = localUnresolved ?? checkOnlyRef;
 
@@ -1677,6 +1678,7 @@ export function PosScreen({
           setShowStockPanel(true);
         }}
         shiftDisabledReason={reasonOf(shiftGate)}
+        ordersDisabledReason={reasonOf(navigateGate)}
       />
       {!stock.loaded && (
         <p
